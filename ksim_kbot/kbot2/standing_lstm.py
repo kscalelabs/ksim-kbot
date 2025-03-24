@@ -35,13 +35,6 @@ class AuxOutputs:
     values: Array
 
 
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class AuxOutputs:
-    log_probs: Array
-    values: Array
-
-
 @attrs.define(frozen=True, kw_only=True)
 class JointDeviationPenalty(ksim.Reward):
     """Penalty for joint deviations."""
