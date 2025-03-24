@@ -364,8 +364,9 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, JointMetadataOutput]:
         metadata = asyncio.run(get_mujoco_model_metadata(self.config.robot_urdf_path, cache=False))
-
-        return metadata
+        if metadata.joint_name_to_metadata is None:
+            raise ValueError("Joint metadata is not available")
+        return metadata.joint_name_to_metadata
 
     def get_actuators(
         self, physics_model: PhysicsModel, metadata: dict[str, JointMetadataOutput] | None = None
