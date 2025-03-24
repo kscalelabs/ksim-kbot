@@ -27,9 +27,9 @@ version: str = version_re.group(1)
 setup(
     name="ksim-kbot",
     version=version,
-    description="The ksim-kbot project",
+    description="Policies for K-Bot",
     author="K-Scale Labs",
-    url="https://github.com/kscalelabs/ksim",
+    url="https://github.com/kscalelabs/ksim-kbot",
     long_description=long_description,
     long_description_content_type="text/markdown",
     python_requires=">=3.11",
