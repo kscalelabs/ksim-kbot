@@ -579,7 +579,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
 
         xax.export(
             model_fn,
-            input_shapes,  # type: ignore [arg-type]
+            input_shapes,
             ckpt_path.parent / "tf_model",
         )
 

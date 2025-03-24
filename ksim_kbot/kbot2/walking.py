@@ -17,7 +17,7 @@ from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from ksim.actuators import Actuators, MITPositionActuators, TorqueActuators
 from ksim.commands import Command, LinearVelocityCommand
-from ksim.env.data import PhysicsData, PhysicsModel, Trajectory
+from ksim.env.data import AuxOutputs, PhysicsData, PhysicsModel, Trajectory
 from ksim.observation import (
     ActuatorForceObservation,
     CenterOfMassInertiaObservation,
@@ -57,17 +57,6 @@ class JointDeviationPenalty(Reward):
         # y = jnp.abs(diff)
         # y2 = jnp.exp(-2 * jnp.abs(diff)) - 0.2 * jnp.abs(diff).clip(0, 0.5)
         return x
-
-
-@attrs.define(frozen=True, kw_only=True)
-class TorquePenalty(Reward):
-    """Penalty for high torques."""
-
-    height_target: float = attrs.field(default=1.4)
-
-    def __call__(self, trajectory: Trajectory) -> Array:
-        torque = jnp.abs(trajectory.actuator_force)
-        return torque
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -355,7 +344,10 @@ class KbotWalkingTask(PPOTask[KbotWalkingTaskConfig]):
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, JointMetadataOutput]:
         metadata = asyncio.run(get_mujoco_model_metadata(self.config.robot_urdf_path, cache=False))
 
-        return metadata
+        if metadata.joint_name_to_metadata is None:
+            raise ValueError("Joint metadata is not available")
+
+        return metadata.joint_name_to_metadata
 
     def get_actuators(
         self, physics_model: PhysicsModel, metadata: dict[str, JointMetadataOutput] | None = None
@@ -424,7 +416,7 @@ class KbotWalkingTask(PPOTask[KbotWalkingTaskConfig]):
     def get_model(self, key: PRNGKeyArray) -> KbotModel:
         return KbotModel(key)
 
-    def get_initial_carry(self) -> None:
+    def get_initial_carry(self, rng: PRNGKeyArray) -> None:
         return None
 
     def _run_actor(
@@ -463,8 +455,7 @@ class KbotWalkingTask(PPOTask[KbotWalkingTaskConfig]):
     ) -> Array:
         if trajectories.aux_outputs is None:
             raise ValueError("No aux outputs found in trajectories")
-        log_probs, _ = trajectories.aux_outputs
-        return log_probs
+        return trajectories.aux_outputs.log_probs
 
     def get_on_policy_values(
         self,
@@ -474,8 +465,7 @@ class KbotWalkingTask(PPOTask[KbotWalkingTaskConfig]):
     ) -> Array:
         if trajectories.aux_outputs is None:
             raise ValueError("No aux outputs found in trajectories")
-        _, values = trajectories.aux_outputs
-        return values
+        return trajectories.aux_outputs.values
 
     def get_log_probs(
         self,
@@ -516,7 +506,7 @@ class KbotWalkingTask(PPOTask[KbotWalkingTaskConfig]):
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, None, tuple[Array, Array]]:
+    ) -> tuple[Array, None, AuxOutputs]:
         action_dist_n = self._run_actor(model, observations, commands)
         action_n = action_dist_n.sample(seed=rng) * self.config.action_scale
         action_log_prob_n = action_dist_n.log_prob(action_n)
@@ -524,7 +514,7 @@ class KbotWalkingTask(PPOTask[KbotWalkingTaskConfig]):
         critic_n = self._run_critic(model, observations, commands)
         value_n = critic_n.squeeze(-1)
 
-        return action_n, None, (action_log_prob_n, value_n)
+        return action_n, None, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
 
     def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
         state = super().on_after_checkpoint_save(ckpt_path, state)
@@ -545,7 +535,7 @@ class KbotWalkingTask(PPOTask[KbotWalkingTaskConfig]):
 
 
 if __name__ == "__main__":
-    # python -m examples.kbot2.walking run_environment=True
+    # python -m ksim_kbot.kbot2.walking run_environment=True
     KbotWalkingTask.launch(
         KbotWalkingTaskConfig(
             num_envs=4096,
