@@ -27,6 +27,7 @@ NUM_OUTPUTS = 20 * 2  # position + velocity
 HIDDEN_SIZE = 256  # LSTM hidden state size
 DEPTH = 2  # Number of LSTM layers
 
+
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class AuxOutputs:
@@ -349,7 +350,9 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig]):
         return metadata.joint_name_to_metadata
 
     def get_actuators(
-        self, physics_model: ksim.PhysicsModel, metadata: dict[str, JointMetadataOutput] | None = None
+        self,
+        physics_model: ksim.PhysicsModel,
+        metadata: dict[str, JointMetadataOutput] | None = None,
     ) -> ksim.Actuators:
         if self.config.use_mit_actuators:
             if metadata is None:
