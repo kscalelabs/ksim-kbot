@@ -356,7 +356,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
     def get_model(self, key: PRNGKeyArray) -> KbotModel:
         return KbotModel(key)
 
-    def get_initial_carry(self) -> None:
+    def get_initial_carry(self, rng: PRNGKeyArray) -> None:
         return None
 
     def _run_actor(
@@ -501,7 +501,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
 
 
 if __name__ == "__main__":
-    # python -m examples.kbot2.standing run_environment=True
+    # python -m ksim_kbot.kbot2.standing run_environment=True
     KbotStandingTask.launch(
         KbotStandingTaskConfig(
             num_envs=2048,

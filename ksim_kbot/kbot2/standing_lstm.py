@@ -437,7 +437,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
     def get_model(self, key: PRNGKeyArray) -> KbotModel:
         return KbotModel(key)
 
-    def get_initial_carry(self) -> Array:
+    def get_initial_carry(self, rng: PRNGKeyArray) -> Array:
         # Initialize the hidden state for LSTM
         return jnp.zeros((DEPTH, 2, HIDDEN_SIZE))
 
@@ -503,7 +503,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
             entropy_n = action_dist_n.entropy()
             return carry, (log_probs_n, entropy_n)
 
-        initial_hidden_states = self.get_initial_carry()
+        initial_hidden_states = self.get_initial_carry(rng)
         _, (log_probs_tn, entropy_tn) = jax.lax.scan(scan_fn, initial_hidden_states, trajectories)
 
         return log_probs_tn, entropy_tn
