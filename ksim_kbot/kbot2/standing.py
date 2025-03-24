@@ -10,35 +10,13 @@ import distrax
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import ksim
 import mujoco
 import optax
 import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
-from ksim.actuators import Actuators, MITPositionVelocityActuators, TorqueActuators
-from ksim.commands import Command, LinearVelocityCommand
-from ksim.env.data import AuxOutputs, PhysicsModel, Trajectory
-from ksim.events import Event
-from ksim.observation import (
-    JointPositionObservation,
-    JointVelocityObservation,
-    Observation,
-    SensorObservation,
-)
-from ksim.randomization import Randomization, StaticFrictionRandomization, WeightRandomization
-from ksim.resets import RandomBaseVelocityXYReset, RandomJointPositionReset, RandomJointVelocityReset, Reset
-from ksim.rewards import (
-    BaseHeightReward,
-    Reward,
-)
-from ksim.task.ppo import PPOConfig, PPOTask
-from ksim.terminations import (
-    PitchTooGreatTermination,
-    RollTooGreatTermination,
-    Termination,
-)
-from ksim.utils.api import get_mujoco_model_metadata
 from mujoco import mjx
 
 OBS_SIZE = 20 * 2 + 3 + 3  # = 46 position + velocity + imu_acc + imu_gyro
@@ -46,32 +24,37 @@ CMD_SIZE = 2
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_OUTPUTS = 20 * 2  # position + velocity
 
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class AuxOutputs:
+    log_probs: Array
+    values: Array
 
 @attrs.define(frozen=True, kw_only=True)
-class JointDeviationPenalty(Reward):
+class JointDeviationPenalty(ksim.Reward):
     """Penalty for joint deviations."""
 
-    def __call__(self, trajectory: Trajectory) -> Array:
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
         diff = trajectory.qpos[:, 7:] - jnp.zeros_like(trajectory.qpos[:, 7:])
         return jnp.sum(jnp.square(diff), axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
-class DHControlPenalty(Reward):
+class DHControlPenalty(ksim.Reward):
     """Legacy default humanoid control cost that penalizes squared action magnitude."""
 
-    def __call__(self, trajectory: Trajectory) -> Array:
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
         return jnp.sum(jnp.square(trajectory.action), axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
-class DHHealthyReward(Reward):
+class DHHealthyReward(ksim.Reward):
     """Legacy default humanoid healthy reward that gives binary reward based on height."""
 
     healthy_z_lower: float = attrs.field(default=0.5)
     healthy_z_upper: float = attrs.field(default=1.5)
 
-    def __call__(self, trajectory: Trajectory) -> Array:
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
         height = trajectory.qpos[:, 2]
         is_healthy = jnp.where(height < self.healthy_z_lower, 0.0, 1.0)
         is_healthy = jnp.where(height > self.healthy_z_upper, 0.0, is_healthy)
@@ -211,7 +194,7 @@ class KbotModel(eqx.Module):
 
 
 @dataclass
-class KbotStandingTaskConfig(PPOConfig):
+class KbotStandingTaskConfig(ksim.PPOConfig):
     """Config for the KBot walking task."""
 
     robot_urdf_path: str = xax.field(
@@ -257,7 +240,7 @@ class KbotStandingTaskConfig(PPOConfig):
     )
 
 
-class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
+class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig]):
     def get_optimizer(self) -> optax.GradientTransformation:
         """Builds the optimizer.
 
@@ -288,18 +271,18 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
         return mj_model
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, JointMetadataOutput]:
-        metadata = asyncio.run(get_mujoco_model_metadata(self.config.robot_urdf_path, cache=False))
+        metadata = asyncio.run(ksim.get_mujoco_model_metadata(self.config.robot_urdf_path, cache=False))
         if metadata.joint_name_to_metadata is None:
             raise ValueError("Joint metadata is not available")
         return metadata.joint_name_to_metadata
 
     def get_actuators(
-        self, physics_model: PhysicsModel, metadata: dict[str, JointMetadataOutput] | None = None
-    ) -> Actuators:
+        self, physics_model: ksim.PhysicsModel, metadata: dict[str, JointMetadataOutput] | None = None
+    ) -> ksim.Actuators:
         if self.config.use_mit_actuators:
             if metadata is None:
                 raise ValueError("Metadata is required for MIT actuators")
-            return MITPositionVelocityActuators(
+            return ksim.MITPositionVelocityActuators(
                 physics_model,
                 metadata,
                 pos_action_noise=0.1,
@@ -308,49 +291,49 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
                 vel_action_noise_type="gaussian",
             )
         else:
-            return TorqueActuators()
+            return ksim.TorqueActuators()
 
-    def get_randomization(self, physics_model: PhysicsModel) -> list[Randomization]:
+    def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
         return [
             WeightRandomization(scale=0.03),
             StaticFrictionRandomization(scale_lower=0.1, scale_upper=1.5),
         ]
 
-    def get_resets(self, physics_model: PhysicsModel) -> list[Reset]:
+    def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
         return [
-            RandomBaseVelocityXYReset(scale=0.01),
-            RandomJointPositionReset(scale=0.02),
-            RandomJointVelocityReset(scale=0.02),
+            ksim.RandomBaseVelocityXYReset(scale=0.01),
+            ksim.RandomJointPositionReset(scale=0.02),
+            ksim.RandomJointVelocityReset(scale=0.02),
         ]
 
-    def get_events(self, physics_model: PhysicsModel) -> list[Event]:
+    def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return []
 
-    def get_observations(self, physics_model: PhysicsModel) -> list[Observation]:
+    def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
-            JointPositionObservation(noise=0.02),
-            JointVelocityObservation(noise=0.2),
-            SensorObservation.create(physics_model, "imu_acc", noise=0.05),
-            SensorObservation.create(physics_model, "imu_gyro", noise=0.05),
+            ksim.JointPositionObservation(noise=0.02),
+            ksim.JointVelocityObservation(noise=0.2),
+            ksim.SensorObservation.create(physics_model, "imu_acc", noise=0.05),
+            ksim.SensorObservation.create(physics_model, "imu_gyro", noise=0.05),
         ]
 
-    def get_commands(self, physics_model: PhysicsModel) -> list[Command]:
+    def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.0, zero_prob=0.0),
+            ksim.LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.0, zero_prob=0.0),
         ]
 
-    def get_rewards(self, physics_model: PhysicsModel) -> list[Reward]:
+    def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             JointDeviationPenalty(scale=-1.0),
             DHControlPenalty(scale=-0.05),
             DHHealthyReward(scale=0.5),
-            BaseHeightReward(scale=1.0, height_target=1.1),
+            ksim.BaseHeightReward(scale=1.0, height_target=1.1),
         ]
 
-    def get_terminations(self, physics_model: PhysicsModel) -> list[Termination]:
+    def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
-            RollTooGreatTermination(max_roll=1.04),
-            PitchTooGreatTermination(max_pitch=1.04),
+            ksim.RollTooGreatTermination(max_roll=1.04),
+            ksim.PitchTooGreatTermination(max_pitch=1.04),
         ]
 
     def get_model(self, key: PRNGKeyArray) -> KbotModel:
@@ -388,7 +371,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
     def get_on_policy_log_probs(
         self,
         model: KbotModel,
-        trajectories: Trajectory,
+        trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
         if trajectories.aux_outputs is None:
@@ -398,7 +381,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
     def get_on_policy_values(
         self,
         model: KbotModel,
-        trajectories: Trajectory,
+        trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
         if trajectories.aux_outputs is None:
@@ -408,7 +391,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
     def get_log_probs(
         self,
         model: KbotModel,
-        trajectories: Trajectory,
+        trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> tuple[Array, Array]:
         # Vectorize over both batch and time dimensions.
@@ -426,7 +409,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
     def get_values(
         self,
         model: KbotModel,
-        trajectories: Trajectory,
+        trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
         # Vectorize over both batch and time dimensions.
@@ -440,7 +423,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
         self,
         model: KbotModel,
         carry: None,
-        physics_model: PhysicsModel,
+        physics_model: ksim.PhysicsModel,
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
         rng: PRNGKeyArray,
