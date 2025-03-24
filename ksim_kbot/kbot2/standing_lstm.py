@@ -18,7 +18,7 @@ from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from ksim.actuators import Actuators, MITPositionVelocityActuators, TorqueActuators
 from ksim.commands import Command, LinearVelocityCommand
-from ksim.env.data import PhysicsModel, Trajectory
+from ksim.env.data import AuxOutputs, PhysicsModel, Trajectory
 from ksim.events import Event, PushEvent
 from ksim.observation import (
     JointPositionObservation,
@@ -290,7 +290,7 @@ class KbotStandingTaskConfig(PPOConfig):
     """Config for the KBot walking task."""
 
     robot_urdf_path: str = xax.field(
-        value="examples/kscale-assets/kbot-v2-feet/",
+        value="ksim_kbot/kscale-assets/kbot-v2-feet/",
         help="The path to the assets directory for the robot.",
     )
 
@@ -317,16 +317,6 @@ class KbotStandingTaskConfig(PPOConfig):
     use_mit_actuators: bool = xax.field(
         value=False,
         help="Whether to use the MIT actuator model, where the actions are position + velocity commands",
-    )
-
-    position_scale: float = xax.field(
-        value=1.0,
-        help="The scale to apply to the position actions.",
-    )
-
-    velocity_scale: float = xax.field(
-        value=1.0,
-        help="The scale to apply to the velocity actions.",
     )
 
     # Rendering parameters.
@@ -386,8 +376,10 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
             return MITPositionVelocityActuators(
                 physics_model,
                 metadata,
-                position_scale=self.config.position_scale,
-                velocity_scale=self.config.velocity_scale,
+                pos_action_noise=0.1,
+                pos_action_noise_type="gaussian",
+                vel_action_noise=0.1,
+                vel_action_noise_type="gaussian",
             )
         else:
             return TorqueActuators()
@@ -409,8 +401,8 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
         return [
             JointPositionObservation(noise=0.02),
             JointVelocityObservation(noise=0.2),
-            SensorObservation.create(physics_model, "imu_acc", noise=0.05),
-            SensorObservation.create(physics_model, "imu_gyro", noise=0.05),
+            SensorObservation.create(physics_model, "imu_acc", noise=0.02),
+            SensorObservation.create(physics_model, "imu_gyro", noise=0.02),
         ]
 
     def get_commands(self, physics_model: PhysicsModel) -> list[Command]:
@@ -421,7 +413,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
     def get_events(self, physics_model: PhysicsModel) -> list[Event]:
         return [
             PushEvent(
-                event_probability=0.002,
+                probability=0.002,
                 interval_range=(5, 500),
                 linear_force_scale=0.1,
             ),
@@ -432,7 +424,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
             JointDeviationPenalty(scale=-1.0),
             DHControlPenalty(scale=-0.05),
             DHHealthyReward(scale=0.5),
-            BaseHeightReward(scale=1.0, height_target=1.1),
+            BaseHeightReward(scale=1.0, height_target=1.0),
         ]
 
     def get_terminations(self, physics_model: PhysicsModel) -> list[Termination]:
@@ -483,8 +475,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
     ) -> Array:
         if trajectories.aux_outputs is None:
             raise ValueError("No aux outputs found in trajectories")
-        log_probs, _ = trajectories.aux_outputs
-        return log_probs
+        return trajectories.aux_outputs.log_probs
 
     def get_on_policy_values(
         self,
@@ -494,8 +485,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
     ) -> Array:
         if trajectories.aux_outputs is None:
             raise ValueError("No aux outputs found in trajectories")
-        _, values = trajectories.aux_outputs
-        return values
+        return trajectories.aux_outputs.values
 
     def get_log_probs(
         self,
@@ -538,7 +528,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, Array, tuple[Array, Array]]:
+    ) -> tuple[Array, Array, AuxOutputs]:
         action_dist_n, next_carry = self._run_actor(model, observations, commands, carry)
         action_n = action_dist_n.sample(seed=rng)
         action_log_prob_n = action_dist_n.log_prob(action_n)
@@ -546,7 +536,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
         critic_n = self._run_critic(model, observations, commands)
         value_n = critic_n.squeeze(-1)
 
-        return action_n, next_carry, (action_log_prob_n, value_n)
+        return action_n, next_carry, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
 
     def make_export_model(self, model: KbotModel, stochastic: bool = False, batched: bool = False) -> Callable:
         """Makes a callable inference function that directly takes a flattened input vector and returns an action.
@@ -596,7 +586,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
 
 
 if __name__ == "__main__":
-    # python -m examples.kbot2.standing run_environment=True
+    # python -m ksim_kbot.kbot2.standing_lstm run_environment=True
     KbotStandingTask.launch(
         KbotStandingTaskConfig(
             num_envs=4096,
@@ -607,8 +597,6 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
-            action_randomization_type="uniform",
-            action_randomization_scale=0.1,
             valid_every_n_steps=25,
             valid_first_n_steps=0,
             rollout_length_seconds=5.0,
@@ -621,8 +609,6 @@ if __name__ == "__main__":
             clip_param=0.3,
             max_grad_norm=1.0,
             use_mit_actuators=True,
-            position_scale=1.0,
-            velocity_scale=1.0,
             export_for_inference=True,
             save_every_n_steps=25,
         ),
