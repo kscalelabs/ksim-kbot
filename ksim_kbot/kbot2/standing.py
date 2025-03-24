@@ -24,11 +24,20 @@ CMD_SIZE = 2
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_OUTPUTS = 20 * 2  # position + velocity
 
+
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class AuxOutputs:
     log_probs: Array
     values: Array
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class AuxOutputs:
+    log_probs: Array
+    values: Array
+
 
 @attrs.define(frozen=True, kw_only=True)
 class JointDeviationPenalty(ksim.Reward):
@@ -277,7 +286,9 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig]):
         return metadata.joint_name_to_metadata
 
     def get_actuators(
-        self, physics_model: ksim.PhysicsModel, metadata: dict[str, JointMetadataOutput] | None = None
+        self,
+        physics_model: ksim.PhysicsModel,
+        metadata: dict[str, JointMetadataOutput] | None = None,
     ) -> ksim.Actuators:
         if self.config.use_mit_actuators:
             if metadata is None:
@@ -295,8 +306,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig]):
 
     def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
         return [
-            WeightRandomization(scale=0.03),
-            StaticFrictionRandomization(scale_lower=0.1, scale_upper=1.5),
+            ksim.WeightRandomization(scale=0.03),
+            ksim.StaticFrictionRandomization(scale_lower=0.1, scale_upper=1.5),
         ]
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
