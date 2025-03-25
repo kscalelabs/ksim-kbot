@@ -271,7 +271,7 @@ class KbotStandingTaskConfig(ksim.PPOConfig):
     """Config for the KBot walking task."""
 
     robot_urdf_path: str = xax.field(
-        value="ksim_kbot/kscale-assets/kbot-v2-feet/",
+        value="ksim_kbot/kscale-assets/kbot-v2-lw-feet/",
         help="The path to the assets directory for the robot.",
     )
 
@@ -571,6 +571,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig]):
 
 if __name__ == "__main__":
     # python -m ksim_kbot.kbot2.standing_lstm run_environment=True
+    # To resume training:
+    # python -m ksim_kbot.kbot2.standing_lstm load_from_ckpt_path=*.run_*.ckpt.*.bin
     KbotStandingTask.launch(
         KbotStandingTaskConfig(
             num_envs=2048,
