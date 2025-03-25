@@ -3,7 +3,7 @@
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Generic, TypeVar
 
 import attrs
 import distrax
@@ -249,7 +249,10 @@ class KbotStandingTaskConfig(ksim.PPOConfig):
     )
 
 
-class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig]):
+Config = TypeVar("Config", bound=KbotStandingTaskConfig)
+
+
+class KbotStandingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_optimizer(self) -> optax.GradientTransformation:
         """Builds the optimizer.
 
@@ -537,7 +540,7 @@ if __name__ == "__main__":
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,
-            max_action_latency=0.0,
+            max_action_latency=0.005,
             min_action_latency=0.0,
             valid_every_n_steps=25,
             valid_first_n_steps=0,

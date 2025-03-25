@@ -1,23 +1,20 @@
+# mypy: disable-error-code="override"
 """Defines simple task for training a walking policy for K-Bot."""
 
-import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-import attrs
 import distrax
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import ksim
-import mujoco
-import optax
 import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
-from kscale.web.gen.api import JointMetadataOutput
-from mujoco import mjx
+
+from .standing import AuxOutputs, KbotStandingTask, KbotStandingTaskConfig
 
 OBS_SIZE = 20 * 2 + 3 + 3  # = 46 position + velocity + imu_acc + imu_gyro
 CMD_SIZE = 2
@@ -26,44 +23,6 @@ NUM_OUTPUTS = 20 * 2  # position + velocity
 
 HIDDEN_SIZE = 256  # LSTM hidden state size
 DEPTH = 2  # Number of LSTM layers
-
-
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class AuxOutputs:
-    log_probs: Array
-    values: Array
-
-
-@attrs.define(frozen=True, kw_only=True)
-class JointDeviationPenalty(ksim.Reward):
-    """Penalty for joint deviations."""
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        diff = trajectory.qpos[:, 7:] - jnp.zeros_like(trajectory.qpos[:, 7:])
-        return jnp.sum(jnp.square(diff), axis=-1)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class DHControlPenalty(ksim.Reward):
-    """Legacy default humanoid control cost that penalizes squared action magnitude."""
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        return jnp.sum(jnp.square(trajectory.action), axis=-1)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class DHHealthyReward(ksim.Reward):
-    """Legacy default humanoid healthy reward that gives binary reward based on height."""
-
-    healthy_z_lower: float = attrs.field(default=0.5)
-    healthy_z_upper: float = attrs.field(default=1.5)
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        height = trajectory.qpos[:, 2]
-        is_healthy = jnp.where(height < self.healthy_z_lower, 0.0, 1.0)
-        is_healthy = jnp.where(height > self.healthy_z_upper, 0.0, is_healthy)
-        return is_healthy
 
 
 class MultiLayerLSTM(eqx.Module):
@@ -147,7 +106,7 @@ class KbotActor(eqx.Module):
             in_size=hidden_size,
             out_size=NUM_OUTPUTS * 2,
             width_size=64,
-            depth=1,
+            depth=2,
             key=key,
             activation=jax.nn.relu,
         )
@@ -267,154 +226,23 @@ class KbotModel(eqx.Module):
 
 
 @dataclass
-class KbotStandingTaskConfig(ksim.PPOConfig):
-    """Config for the KBot walking task."""
-
-    robot_urdf_path: str = xax.field(
-        value="ksim_kbot/kscale-assets/kbot-v2-lw-feet/",
-        help="The path to the assets directory for the robot.",
-    )
-
-    action_scale: float = xax.field(
-        value=1.0,
-        help="The scale to apply to the actions.",
-    )
-
-    # Optimizer parameters.
-    learning_rate: float = xax.field(
-        value=1e-4,
-        help="Learning rate for PPO.",
-    )
-    max_grad_norm: float = xax.field(
-        value=0.5,
-        help="Maximum gradient norm for clipping.",
-    )
-    adam_weight_decay: float = xax.field(
-        value=0.0,
-        help="Weight decay for the Adam optimizer.",
-    )
-
-    # Mujoco parameters.
-    use_mit_actuators: bool = xax.field(
-        value=False,
-        help="Whether to use the MIT actuator model, where the actions are position + velocity commands",
-    )
-
-    # Rendering parameters.
-    render_track_body_id: int | None = xax.field(
-        value=None,
-        help="The body id to track with the render camera.",
-    )
-
-    # Checkpointing parameters.
-    export_for_inference: bool = xax.field(
-        value=False,
-        help="Whether to export the model for inference.",
-    )
+class KbotStandingLSTMTaskConfig(KbotStandingTaskConfig):
+    pass
 
 
-class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig]):
-    def get_optimizer(self) -> optax.GradientTransformation:
-        """Builds the optimizer.
-
-        This provides a reasonable default optimizer for training PPO models,
-        but can be overridden by subclasses who want to do something different.
-        """
-        optimizer = optax.chain(
-            optax.clip_by_global_norm(self.config.max_grad_norm),
-            (
-                optax.adam(self.config.learning_rate)
-                if self.config.adam_weight_decay == 0.0
-                else optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay)
-            ),
-        )
-
-        return optimizer
-
-    def get_mujoco_model(self) -> mujoco.MjModel:
-        mjcf_path = (Path(self.config.robot_urdf_path) / "scene.mjcf").resolve().as_posix()
-        mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
-
-        mj_model.opt.timestep = jnp.array(self.config.dt)
-        mj_model.opt.iterations = 6
-        mj_model.opt.ls_iterations = 6
-        mj_model.opt.disableflags = mjx.DisableBit.EULERDAMP
-        mj_model.opt.solver = mjx.SolverType.CG
-
-        return mj_model
-
-    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, JointMetadataOutput]:
-        metadata = asyncio.run(ksim.get_mujoco_model_metadata(self.config.robot_urdf_path, cache=False))
-        if metadata.joint_name_to_metadata is None:
-            raise ValueError("Joint metadata is not available")
-        return metadata.joint_name_to_metadata
-
-    def get_actuators(
-        self,
-        physics_model: ksim.PhysicsModel,
-        metadata: dict[str, JointMetadataOutput] | None = None,
-    ) -> ksim.Actuators:
-        if self.config.use_mit_actuators:
-            if metadata is None:
-                raise ValueError("Metadata is required for MIT actuators")
-            return ksim.MITPositionVelocityActuators(
-                physics_model,
-                metadata,
-                pos_action_noise=0.1,
-                pos_action_noise_type="gaussian",
-                vel_action_noise=0.1,
-                vel_action_noise_type="gaussian",
-            )
-        else:
-            return ksim.TorqueActuators()
-
-    def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
-        return [
-            ksim.WeightRandomization(scale=0.01),
-            ksim.StaticFrictionRandomization(scale_lower=0.1, scale_upper=1.5),
-        ]
-
-    def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
-        return [
-            ksim.RandomJointPositionReset(scale=0.01),
-            ksim.RandomJointVelocityReset(scale=0.01),
-            ksim.RandomBaseVelocityXYReset(scale=0.01),
-        ]
-
+class KbotStandingLSTMTask(KbotStandingTask[KbotStandingLSTMTaskConfig]):
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
             ksim.JointPositionObservation(noise=0.02),
             ksim.JointVelocityObservation(noise=0.2),
-            ksim.SensorObservation.create(physics_model, "imu_acc", noise=0.02),
-            ksim.SensorObservation.create(physics_model, "imu_gyro", noise=0.02),
-        ]
-
-    def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
-        return [
-            ksim.LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.0, zero_prob=0.0),
-        ]
-
-    def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
-        return [
-            ksim.PushEvent(
-                probability=0.002,
-                interval_range=(5, 500),
-                linear_force_scale=0.1,
-            ),
-        ]
-
-    def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
-        return [
-            JointDeviationPenalty(scale=-1.0),
-            DHControlPenalty(scale=-0.05),
-            DHHealthyReward(scale=0.5),
-            ksim.BaseHeightReward(scale=1.0, height_target=0.7),
+            ksim.SensorObservation.create(physics_model, "imu_acc", noise=0.8),
+            ksim.SensorObservation.create(physics_model, "imu_gyro", noise=0.1),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
-            ksim.RollTooGreatTermination(max_roll=1.04),
-            ksim.PitchTooGreatTermination(max_pitch=1.04),
+            ksim.RollTooGreatTermination(max_roll=2.04),
+            ksim.PitchTooGreatTermination(max_pitch=2.04),
         ]
 
     def get_model(self, key: PRNGKeyArray) -> KbotModel:
@@ -451,26 +279,6 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig]):
         lin_vel_cmd_n = commands["linear_velocity_command"]
         return model.critic(joint_pos_n, joint_vel_n, imu_acc_n, imu_gyro_n, lin_vel_cmd_n)
 
-    def get_on_policy_log_probs(
-        self,
-        model: KbotModel,
-        trajectories: ksim.Trajectory,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        if trajectories.aux_outputs is None:
-            raise ValueError("No aux outputs found in trajectories")
-        return trajectories.aux_outputs.log_probs
-
-    def get_on_policy_values(
-        self,
-        model: KbotModel,
-        trajectories: ksim.Trajectory,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        if trajectories.aux_outputs is None:
-            raise ValueError("No aux outputs found in trajectories")
-        return trajectories.aux_outputs.values
-
     def get_log_probs(
         self,
         model: KbotModel,
@@ -490,19 +298,6 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig]):
         _, (log_probs_tn, entropy_tn) = jax.lax.scan(scan_fn, initial_hidden_states, trajectories)
 
         return log_probs_tn, entropy_tn
-
-    def get_values(
-        self,
-        model: KbotModel,
-        trajectories: ksim.Trajectory,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        # Vectorize over both batch and time dimensions.
-        par_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
-        values_bt1 = par_fn(model, trajectories.obs, trajectories.command)
-
-        # Remove the last dimension.
-        return values_bt1.squeeze(-1)
 
     def sample_action(
         self,
@@ -573,15 +368,15 @@ if __name__ == "__main__":
     # python -m ksim_kbot.kbot2.standing_lstm run_environment=True
     # To resume training:
     # python -m ksim_kbot.kbot2.standing_lstm load_from_ckpt_path=*.run_*.ckpt.*.bin
-    KbotStandingTask.launch(
-        KbotStandingTaskConfig(
+    KbotStandingLSTMTask.launch(
+        KbotStandingLSTMTaskConfig(
             num_envs=2048,
-            num_batches=32,
+            num_batches=64,
             num_passes=10,
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,
-            max_action_latency=0.0,
+            max_action_latency=0.005,
             min_action_latency=0.0,
             valid_every_n_steps=25,
             valid_first_n_steps=0,
