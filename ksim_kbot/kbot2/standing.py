@@ -331,7 +331,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig]):
             JointDeviationPenalty(scale=-1.0),
             DHControlPenalty(scale=-0.05),
             DHHealthyReward(scale=0.5),
-            ksim.BaseHeightReward(scale=1.0, height_target=1.1),
+            ksim.BaseHeightReward(scale=1.0, height_target=0.7),
+            ksim.ActionSmoothnessPenalty(scale=-0.01),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
