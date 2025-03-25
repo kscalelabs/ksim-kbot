@@ -379,6 +379,8 @@ if __name__ == "__main__":
             max_action_latency=0.005,
             min_action_latency=0.0,
             valid_every_n_steps=25,
+            valid_every_n_seconds=300,
+            log_single_traj_every_n_valid_steps=5,
             valid_first_n_steps=0,
             rollout_length_seconds=10.0,
             eval_rollout_length_seconds=10.0,
