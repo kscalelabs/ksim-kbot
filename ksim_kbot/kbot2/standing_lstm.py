@@ -230,7 +230,7 @@ class KbotStandingLSTMTaskConfig(KbotStandingTaskConfig):
     pass
 
 
-class KbotStandingLSTMTask(KbotStandingTask[KbotStandingLSTMTaskConfig]):
+class KbotStandingLSTMTask(KbotStandingTask):
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
             ksim.JointPositionObservation(noise=0.02),
