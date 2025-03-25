@@ -24,6 +24,12 @@ CMD_SIZE = 2
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_OUTPUTS = 20 * 2  # position + velocity
 
+MAX_TORQUE = {
+    "00": 17.0,
+    "02": 17.0,
+    "03": 40.0,
+    "04": 60.0,
+}
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
@@ -200,7 +206,7 @@ class KbotStandingTaskConfig(ksim.PPOConfig):
     """Config for the KBot walking task."""
 
     robot_urdf_path: str = xax.field(
-        value="ksim_kbot/kscale-assets/kbot-v2-feet/",
+        value="ksim_kbot/kscale-assets/kbot-v2-lw-feet/",
         help="The path to the assets directory for the robot.",
     )
 
@@ -293,13 +299,39 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig]):
                 vel_action_noise=0.1,
                 pos_action_noise_type="gaussian",
                 vel_action_noise_type="gaussian",
+                ctrl_clip=[
+                    # right arm
+                    MAX_TORQUE["03"],
+                    MAX_TORQUE["03"],
+                    MAX_TORQUE["02"],
+                    MAX_TORQUE["02"],
+                    MAX_TORQUE["00"],
+                    # left arm
+                    MAX_TORQUE["03"],
+                    MAX_TORQUE["03"],
+                    MAX_TORQUE["02"],
+                    MAX_TORQUE["02"],
+                    MAX_TORQUE["00"],
+                    # right leg
+                    MAX_TORQUE["04"],
+                    MAX_TORQUE["03"],
+                    MAX_TORQUE["03"],
+                    MAX_TORQUE["04"],
+                    MAX_TORQUE["02"],
+                    # left leg
+                    MAX_TORQUE["04"],
+                    MAX_TORQUE["03"],
+                    MAX_TORQUE["03"],
+                    MAX_TORQUE["04"],
+                    MAX_TORQUE["02"],
+                ],
             )
         else:
             return ksim.TorqueActuators()
 
     def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
         return [
-            ksim.WeightRandomization(scale=0.03),
+            ksim.WeightRandomization(scale=0.05),
             ksim.StaticFrictionRandomization(scale_lower=0.1, scale_upper=1.5),
         ]
 
@@ -311,14 +343,20 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig]):
         ]
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
-        return []
+        return [
+            ksim.PushEvent(
+                probability=0.001,
+                interval_range=(5, 300),
+                linear_force_scale=0.1,
+            ),
+        ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
             ksim.JointPositionObservation(noise=0.02),
             ksim.JointVelocityObservation(noise=0.2),
-            ksim.SensorObservation.create(physics_model, "imu_acc", noise=0.05),
-            ksim.SensorObservation.create(physics_model, "imu_gyro", noise=0.05),
+            ksim.SensorObservation.create(physics_model, "imu_acc", noise=0.8),
+            ksim.SensorObservation.create(physics_model, "imu_gyro", noise=0.1),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
@@ -328,7 +366,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            JointDeviationPenalty(scale=-1.0),
+            JointDeviationPenalty(scale=-0.5),
             DHControlPenalty(scale=-0.05),
             DHHealthyReward(scale=0.5),
             ksim.BaseHeightReward(scale=1.0, height_target=0.7),
@@ -337,8 +375,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig]):
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
-            ksim.RollTooGreatTermination(max_roll=1.04),
-            ksim.PitchTooGreatTermination(max_pitch=1.04),
+            ksim.RollTooGreatTermination(max_roll=2.04),
+            ksim.PitchTooGreatTermination(max_pitch=2.04),
         ]
 
     def get_model(self, key: PRNGKeyArray) -> KbotModel:
@@ -502,8 +540,8 @@ if __name__ == "__main__":
             min_action_latency=0.0,
             valid_every_n_steps=25,
             valid_first_n_steps=0,
-            rollout_length_seconds=5.0,
-            eval_rollout_length_seconds=5.0,
+            rollout_length_seconds=10.0,
+            eval_rollout_length_seconds=10.0,
             # PPO parameters
             gamma=0.97,
             lam=0.95,
