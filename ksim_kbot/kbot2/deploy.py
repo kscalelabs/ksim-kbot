@@ -31,26 +31,26 @@ class Actuator:
 
 
 ACTUATOR_LIST: list[Actuator] = [
-    Actuator(actuator_id=11, nn_id=0, kp=1.0, kd=5.0, max_torque=10.0, joint_name="right_shoulder_pitch_03"),
-    Actuator(actuator_id=12, nn_id=1, kp=1.0, kd=5.0, max_torque=10.0, joint_name="right_shoulder_roll_03"),
-    Actuator(actuator_id=13, nn_id=2, kp=1.0, kd=5.0, max_torque=10.0, joint_name="right_shoulder_yaw_02"),
-    Actuator(actuator_id=14, nn_id=3, kp=1.0, kd=5.0, max_torque=10.0, joint_name="right_elbow_02"),
-    Actuator(actuator_id=15, nn_id=4, kp=1.0, kd=5.0, max_torque=10.0, joint_name="right_wrist_02"),
-    Actuator(actuator_id=21, nn_id=5, kp=1.0, kd=5.0, max_torque=10.0, joint_name="left_shoulder_pitch_03"),
-    Actuator(actuator_id=22, nn_id=6, kp=1.0, kd=5.0, max_torque=10.0, joint_name="left_shoulder_roll_03"),
-    Actuator(actuator_id=23, nn_id=7, kp=1.0, kd=5.0, max_torque=10.0, joint_name="left_shoulder_yaw_02"),
-    Actuator(actuator_id=24, nn_id=8, kp=1.0, kd=5.0, max_torque=10.0, joint_name="left_elbow_02"),
-    Actuator(actuator_id=25, nn_id=9, kp=1.0, kd=5.0, max_torque=10.0, joint_name="left_wrist_02"),
-    Actuator(actuator_id=31, nn_id=10, kp=80.0, kd=5.0, max_torque=80.0, joint_name="right_hip_pitch_04"),
-    Actuator(actuator_id=32, nn_id=11, kp=40.0, kd=5.0, max_torque=40.0, joint_name="right_hip_roll_03"),
-    Actuator(actuator_id=33, nn_id=12, kp=40.0, kd=5.0, max_torque=40.0, joint_name="right_hip_yaw_03"),
-    Actuator(actuator_id=34, nn_id=13, kp=80.0, kd=5.0, max_torque=80.0, joint_name="right_knee_04"),
-    Actuator(actuator_id=35, nn_id=14, kp=17.0, kd=5.0, max_torque=17.0, joint_name="right_ankle_02"),
-    Actuator(actuator_id=41, nn_id=15, kp=80.0, kd=5.0, max_torque=80.0, joint_name="left_hip_pitch_04"),
-    Actuator(actuator_id=42, nn_id=16, kp=40.0, kd=5.0, max_torque=40.0, joint_name="left_hip_roll_03"),
-    Actuator(actuator_id=43, nn_id=17, kp=40.0, kd=5.0, max_torque=40.0, joint_name="left_hip_yaw_03"),
-    Actuator(actuator_id=44, nn_id=18, kp=80.0, kd=5.0, max_torque=80.0, joint_name="left_knee_04"),
-    Actuator(actuator_id=45, nn_id=19, kp=17.0, kd=5.0, max_torque=17.0, joint_name="left_ankle_02"),
+    Actuator(actuator_id=11, nn_id=0, kp=120.0, kd=5.0, max_torque=300.0, joint_name="right_shoulder_pitch_03"),
+    Actuator(actuator_id=12, nn_id=1, kp=120.0, kd=5.0, max_torque=300.0, joint_name="right_shoulder_roll_03"),
+    Actuator(actuator_id=13, nn_id=2, kp=50.0, kd=1.0, max_torque=300.0, joint_name="right_shoulder_yaw_02"),
+    Actuator(actuator_id=14, nn_id=3, kp=50.0, kd=1.0, max_torque=300.0, joint_name="right_elbow_02"),
+    Actuator(actuator_id=15, nn_id=4, kp=50.0, kd=1.0, max_torque=300.0, joint_name="right_wrist_02"),
+    Actuator(actuator_id=21, nn_id=5, kp=120.0, kd=5.0, max_torque=300.0, joint_name="left_shoulder_pitch_03"),
+    Actuator(actuator_id=22, nn_id=6, kp=120.0, kd=5.0, max_torque=300.0, joint_name="left_shoulder_roll_03"),
+    Actuator(actuator_id=23, nn_id=7, kp=50.0, kd=1.0, max_torque=300.0, joint_name="left_shoulder_yaw_02"),
+    Actuator(actuator_id=24, nn_id=8, kp=50.0, kd=1.0, max_torque=300.0, joint_name="left_elbow_02"),
+    Actuator(actuator_id=25, nn_id=9, kp=50.0, kd=1.0, max_torque=300.0, joint_name="left_wrist_02"),
+    Actuator(actuator_id=31, nn_id=10, kp=150.0, kd=10.0, max_torque=300.0, joint_name="right_hip_pitch_04"),
+    Actuator(actuator_id=32, nn_id=11, kp=120.0, kd=5.0, max_torque=300.0, joint_name="right_hip_roll_03"),
+    Actuator(actuator_id=33, nn_id=12, kp=120.0, kd=5.0, max_torque=300.0, joint_name="right_hip_yaw_03"),
+    Actuator(actuator_id=34, nn_id=13, kp=150.0, kd=10.0, max_torque=300.0, joint_name="right_knee_04"),
+    Actuator(actuator_id=35, nn_id=14, kp=50.0, kd=1.0, max_torque=300.0, joint_name="right_ankle_02"),
+    Actuator(actuator_id=41, nn_id=15, kp=150.0, kd=10.0, max_torque=300.0, joint_name="left_hip_pitch_04"),
+    Actuator(actuator_id=42, nn_id=16, kp=120.0, kd=5.0, max_torque=300.0, joint_name="left_hip_roll_03"),
+    Actuator(actuator_id=43, nn_id=17, kp=120.0, kd=5.0, max_torque=300.0, joint_name="left_hip_yaw_03"),
+    Actuator(actuator_id=44, nn_id=18, kp=150.0, kd=10.0, max_torque=300.0, joint_name="left_knee_04"),
+    Actuator(actuator_id=45, nn_id=19, kp=50.0, kd=1.0, max_torque=300.0, joint_name="left_ankle_02"),
 ]
 
 
@@ -96,7 +96,7 @@ async def configure_actuators(kos: pykos.KOS) -> None:
             kp=ac.kp,
             kd=ac.kd,
             torque_enabled=True,
-            max_torque=300,
+            max_torque=ac.max_torque,
         )
 
 
