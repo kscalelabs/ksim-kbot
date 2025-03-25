@@ -24,6 +24,7 @@ NUM_OUTPUTS = 20 * 2  # position + velocity
 HIDDEN_SIZE = 256  # LSTM hidden state size
 DEPTH = 2  # Number of LSTM layers
 
+
 class MultiLayerLSTM(eqx.Module):
     layers: tuple[eqx.nn.LSTMCell, ...]
     depth: int = eqx.field(static=True)
