@@ -1,15 +1,10 @@
-"""Example script to deploy a SavedModel on K-Bot"""
+"""Example script to deploy a SavedModel on K-Bot."""
 
 import argparse
 import asyncio
 import logging
-import signal
-import subprocess
-import sys
 import time
-import types
 from dataclasses import dataclass
-from typing import Callable
 
 import numpy as np
 import pykos
@@ -18,8 +13,9 @@ import tensorflow as tf
 logger = logging.getLogger(__name__)
 
 DT = 0.02  # Policy time step (50Hz)
-GRAVITY = 9.81 # m/s
+GRAVITY = 9.81  # m/s
 ACTION_SCALE = 1.0
+
 
 @dataclass
 class Actuator:
@@ -112,7 +108,7 @@ async def configure_actuators(kos: pykos.KOS) -> None:
 
 
 async def reset(kos: pykos.KOS) -> None:
-    zero_commands = [
+    zero_commands: list[pykos.services.actuator.ActuatorCommand] = [
         {
             "actuator_id": ac.actuator_id,
             "position": 0.0,
@@ -122,6 +118,7 @@ async def reset(kos: pykos.KOS) -> None:
     ]
 
     await kos.actuator.command_actuators(zero_commands)
+
 
 async def disable(kos: pykos.KOS) -> None:
     for ac in ACTUATOR_LIST:

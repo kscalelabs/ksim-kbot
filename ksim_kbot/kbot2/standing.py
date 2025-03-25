@@ -31,6 +31,7 @@ MAX_TORQUE = {
     "04": 60.0,
 }
 
+
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class AuxOutputs:

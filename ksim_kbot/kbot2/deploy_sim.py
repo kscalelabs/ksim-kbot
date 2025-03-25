@@ -243,15 +243,17 @@ if __name__ == "__main__":
     parser.add_argument("--log-file", type=str, help="Path to write log output")
     args = parser.parse_args()
 
-    log_level = logging.DEBUG if args.debug else logging.INFO
-    log_config = {
-        "level": log_level,
-        "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    }
+    log_level: logging._Level = logging.DEBUG if args.debug else logging.INFO
+    log_format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
     if args.log_file:
-        log_config["filename"] = args.log_file
-        log_config["filemode"] = "w"
+        logging.basicConfig(
+            level=log_level,
+            format=log_format,
+            filename=args.log_file,
+            filemode="w",
+        )
+    else:
+        logging.basicConfig(level=log_level, format=log_format)
 
-    logging.basicConfig(**log_config)
     asyncio.run(main(args.model_path, args.ip, args.no_render, args.episode_length))
