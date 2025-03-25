@@ -14,11 +14,7 @@ import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 
-from .standing import (
-    AuxOutputs,
-    KbotStandingTask,
-    KbotStandingTaskConfig,
-)
+from .standing import AuxOutputs, KbotStandingTask, KbotStandingTaskConfig
 
 OBS_SIZE = 20 * 2 + 3 + 3  # = 46 position + velocity + imu_acc + imu_gyro
 CMD_SIZE = 2
@@ -27,14 +23,6 @@ NUM_OUTPUTS = 20 * 2  # position + velocity
 
 HIDDEN_SIZE = 256  # LSTM hidden state size
 DEPTH = 2  # Number of LSTM layers
-
-MAX_TORQUE = {
-    "00": 17.0,
-    "02": 17.0,
-    "03": 40.0,
-    "04": 60.0,
-}
-
 
 class MultiLayerLSTM(eqx.Module):
     layers: tuple[eqx.nn.LSTMCell, ...]
