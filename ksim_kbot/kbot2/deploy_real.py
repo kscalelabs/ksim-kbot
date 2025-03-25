@@ -18,7 +18,8 @@ import tensorflow as tf
 logger = logging.getLogger(__name__)
 
 DT = 0.02  # Policy time step (50Hz)
-
+GRAVITY = 9.81 # m/s
+ACTION_SCALE = 1.0
 
 @dataclass
 class Actuator:
@@ -71,7 +72,13 @@ async def get_observation(kos: pykos.KOS) -> np.ndarray:
     vel_obs = np.deg2rad(
         np.array([state_dict_vel[ac.actuator_id] for ac in sorted(ACTUATOR_LIST, key=lambda x: x.nn_id)])
     )
-    imu_obs = np.array([imu.accel_x, imu.accel_y, imu.accel_z, imu.gyro_x, imu.gyro_y, imu.gyro_z])
+
+    accel = np.array([-imu.accel_x, -imu.accel_y, imu.accel_z]) * GRAVITY
+
+    gyro = np.deg2rad(np.array([-imu.gyro_x, -imu.gyro_y, imu.gyro_z]))
+
+    imu_obs = np.concatenate([accel, gyro], axis=-1)
+    logger.debug(imu_obs)
     cmd = np.array([0.0, 0.0])
     observation = np.concatenate([pos_obs, vel_obs, imu_obs, cmd], axis=-1)
     return observation
@@ -83,12 +90,12 @@ async def send_actions(kos: pykos.KOS, position: np.ndarray, velocity: np.ndarra
     actuator_commands: list[pykos.services.actuator.ActuatorCommand] = [
         {
             "actuator_id": ac.actuator_id,
-            "position": position[ac.nn_id],
-            "velocity": velocity[ac.nn_id],
+            "position": position[ac.nn_id] * ACTION_SCALE,
+            "velocity": velocity[ac.nn_id] * ACTION_SCALE,
         }
         for ac in ACTUATOR_LIST
     ]
-    logger.debug(actuator_commands)
+    # logger.debug(actuator_commands)
 
     await kos.actuator.command_actuators(actuator_commands)
 
@@ -187,4 +194,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO)
-    asyncio.run(main(args.model_path, args.ip, args.no_render, args.episode_length))
+    asyncio.run(main(args.model_path, args.ip, args.episode_length))
