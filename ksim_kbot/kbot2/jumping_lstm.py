@@ -12,6 +12,7 @@ from jaxtyping import Array
 from kscale.web.gen.api import JointMetadataOutput
 
 from .standing_lstm import KbotStandingLSTMTask, KbotStandingLSTMTaskConfig
+from .standing import DHHealthyReward
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -53,6 +54,7 @@ class KbotJumpingLSTMTask(KbotStandingLSTMTask[KbotJumpingLSTMTaskConfig]):
         return [
             UpwardReward(scale=0.5),
             StationaryPenalty(scale=-0.1),
+            DHHealthyReward(healthy_z_lower=0.7, healthy_z_upper=3.0, scale=0.5),
             ksim.ActuatorForcePenalty(scale=-0.01),
             ksim.LinearVelocityZPenalty(scale=-0.01),
             ksim.AngularVelocityXYPenalty(scale=-0.01),
