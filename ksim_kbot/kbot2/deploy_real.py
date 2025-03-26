@@ -33,7 +33,9 @@ ACTUATOR_LIST: list[Actuator] = [
     Actuator(actuator_id=22, nn_id=1, kp=40.0, kd=4.0, max_torque=40.0, joint_name="dof_right_shoulder_roll_03"),
     Actuator(actuator_id=23, nn_id=2, kp=30.0, kd=1.0, max_torque=20.0, joint_name="dof_right_shoulder_yaw_02"),
     Actuator(actuator_id=24, nn_id=3, kp=30.0, kd=1.0, max_torque=20.0, joint_name="dof_right_elbow_02"),
-    Actuator(actuator_id=25, nn_id=4, kp=20.0, kd=0.45473329537059787, max_torque=20.0, joint_name="dof_right_wrist_00"),
+    Actuator(
+        actuator_id=25, nn_id=4, kp=20.0, kd=0.45473329537059787, max_torque=20.0, joint_name="dof_right_wrist_00"
+    ),
     # Left arm (nn_id 5-9)
     Actuator(actuator_id=11, nn_id=5, kp=40.0, kd=4.0, max_torque=40.0, joint_name="dof_left_shoulder_pitch_03"),
     Actuator(actuator_id=12, nn_id=6, kp=40.0, kd=4.0, max_torque=40.0, joint_name="dof_left_shoulder_roll_03"),
@@ -180,6 +182,7 @@ async def main(model_path: str, ip: str, episode_length: int) -> None:
         raise KeyboardInterrupt
 
     logger.info("Episode finished!")
+
 
 # python -m ksim_kbot.kbot2.deploy_real --model_path /path/to/model
 if __name__ == "__main__":
