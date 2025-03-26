@@ -3,7 +3,7 @@
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Generic, TypeVar
 
 import attrs
 import distrax
@@ -35,6 +35,8 @@ MAX_TORQUE = {
     "03": 40.0,
     "04": 60.0,
 }
+
+Config = TypeVar("Config", bound="KbotStandingTaskConfig")
 
 
 @jax.tree_util.register_dataclass
@@ -254,7 +256,7 @@ class KbotStandingTaskConfig(ksim.PPOConfig):
     )
 
 
-class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig]):
+class KbotStandingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_optimizer(self) -> optax.GradientTransformation:
         """Builds the optimizer.
 

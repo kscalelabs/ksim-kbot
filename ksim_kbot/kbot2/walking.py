@@ -535,7 +535,6 @@ if __name__ == "__main__":
             valid_every_n_steps=25,
             valid_first_n_steps=0,
             rollout_length_seconds=2.5,
-            eval_rollout_length_seconds=2.5,
             # PPO parameters
             gamma=0.97,
             lam=0.95,
