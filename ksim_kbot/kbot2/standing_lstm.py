@@ -229,7 +229,9 @@ class KbotModel(eqx.Module):
 class KbotStandingLSTMTaskConfig(KbotStandingTaskConfig):
     pass
 
+
 Config = TypeVar("Config", bound=KbotStandingLSTMTaskConfig)
+
 
 class KbotStandingLSTMTask(KbotStandingTask[Config], Generic[Config]):
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
