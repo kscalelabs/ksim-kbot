@@ -58,8 +58,15 @@ class HistoryObservation(ksim.Observation):
 class JointDeviationPenalty(ksim.Reward):
     """Penalty for joint deviations."""
 
+    joint_targets: tuple[float, ...] = attrs.field(
+        default=(0.0, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 0.0, 0.0, 0.0)
+    )
+
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        diff = trajectory.qpos[:, 7:] - jnp.zeros_like(trajectory.qpos[:, 7:])
+        diff = trajectory.qpos[:, 7:] - jnp.array(self.joint_targets)
         return jnp.sum(jnp.square(diff), axis=-1)
 
 
@@ -256,7 +263,8 @@ class KbotStandingTaskConfig(ksim.PPOConfig):
     )
 
 
-class KbotStandingTask(ksim.PPOTask[Config], Generic[Config]):
+class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
+
     def get_optimizer(self) -> optax.GradientTransformation:
         """Builds the optimizer.
 
@@ -341,6 +349,7 @@ class KbotStandingTask(ksim.PPOTask[Config], Generic[Config]):
         return [
             ksim.WeightRandomization(scale=0.05),
             ksim.StaticFrictionRandomization(scale_lower=0.1, scale_upper=1.5),
+            ksim.JointZeroPositionRandomization(scale_lower=-0.05, scale_upper=0.05),
         ]
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
@@ -355,7 +364,7 @@ class KbotStandingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.PushEvent(
                 probability=0.0005,
                 interval_range=(1, 3),
-                linear_force_scale=0.5,
+                linear_force_scale=0.2,
             ),
         ]
 
@@ -364,8 +373,8 @@ class KbotStandingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.JointPositionObservation(noise=0.02),
             ksim.JointVelocityObservation(noise=0.2),
             ksim.ActuatorForceObservation(),
-            ksim.SensorObservation.create(physics_model, "imu_acc", noise=0.8),
-            ksim.SensorObservation.create(physics_model, "imu_gyro", noise=0.1),
+            ksim.SensorObservation.create(physics_model, "imu_acc", noise=0.5),
+            ksim.SensorObservation.create(physics_model, "imu_gyro", noise=0.2),
             HistoryObservation(),
         ]
 
@@ -376,10 +385,23 @@ class KbotStandingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            JointDeviationPenalty(scale=-0.5),
+            JointDeviationPenalty(
+                scale=-0.5,
+                joint_targets=(
+                    # right arm
+                    0.0, 0.0, 0.0, 0.0, 0.0,
+                    # left arm
+                    0.0, 0.0, 0.0, 0.0, 0.0,
+                    # right leg
+                    -0.23, 0.0, 0.0, -0.441, 0.195,
+                    # left leg
+                    0.23, 0.0, 0.0, 0.441, -0.195,
+                ),
+            ),
             DHControlPenalty(scale=-0.05),
             DHHealthyReward(scale=0.5),
-            ksim.BaseHeightReward(scale=1.0, height_target=0.7),
+            ksim.ActuatorForcePenalty(scale=-0.01),
+            ksim.BaseHeightReward(scale=1.0, height_target=1.0),
             ksim.ActionSmoothnessPenalty(scale=-0.01),
         ]
 
@@ -575,7 +597,7 @@ if __name__ == "__main__":
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,
-            max_action_latency=0.002,
+            max_action_latency=0.004,
             min_action_latency=0.0,
             valid_every_n_steps=25,
             valid_first_n_steps=0,
