@@ -349,7 +349,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         return [
             ksim.WeightRandomization(scale=0.05),
             ksim.StaticFrictionRandomization(scale_lower=0.1, scale_upper=1.5),
-            ksim.JointZeroPositionRandomization(scale_lower=-0.05, scale_upper=0.05),
+            ksim.JointZeroPositionRandomization(scale_lower=-0.01, scale_upper=0.01),
         ]
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
@@ -386,7 +386,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             JointDeviationPenalty(
-                scale=-0.5,
+                scale=-0.3,
                 joint_targets=(
                     # right arm
                     0.0, 0.0, 0.0, 0.0, 0.0,
@@ -398,7 +398,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                     0.23, 0.0, 0.0, 0.441, -0.195,
                 ),
             ),
-            DHControlPenalty(scale=-0.05),
+            # DHControlPenalty(scale=-0.05),
             DHHealthyReward(scale=0.5),
             ksim.ActuatorForcePenalty(scale=-0.01),
             ksim.BaseHeightReward(scale=1.0, height_target=1.0),
