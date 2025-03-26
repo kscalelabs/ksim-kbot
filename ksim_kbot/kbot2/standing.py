@@ -25,7 +25,7 @@ NUM_OUTPUTS = 20 * 2  # position + velocity
 
 SINGLE_STEP_HISTORY_SIZE = NUM_OUTPUTS + OBS_SIZE + CMD_SIZE
 
-HISTORY_LENGTH = 1
+HISTORY_LENGTH = 0
 
 NUM_INPUTS = (OBS_SIZE + CMD_SIZE) + SINGLE_STEP_HISTORY_SIZE * HISTORY_LENGTH
 
@@ -130,7 +130,7 @@ class KbotActor(eqx.Module):
                 imu_acc_n,
                 imu_gyro_n,
                 lin_vel_cmd_n,
-                history_n,
+                # history_n,
             ],
             axis=-1,
         )  # (NUM_INPUTS)
@@ -185,7 +185,7 @@ class KbotCritic(eqx.Module):
                 imu_acc_n,
                 imu_gyro_n,
                 lin_vel_cmd_n,
-                history_n,
+                # history_n,
             ],
             axis=-1,
         )  # (NUM_INPUTS)
@@ -351,9 +351,9 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig]):
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
             ksim.PushEvent(
-                probability=0.001,
-                interval_range=(5, 300),
-                linear_force_scale=0.1,
+                probability=0.0005,
+                interval_range=(1, 3),
+                linear_force_scale=0.5,
             ),
         ]
 
@@ -505,11 +505,14 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig]):
             axis=-1,
         )
 
-        # Roll the history by shifting the existing history and adding the new data
-        carry_reshaped = carry.reshape(HISTORY_LENGTH, SINGLE_STEP_HISTORY_SIZE)
-        shifted_history = jnp.roll(carry_reshaped, shift=-1, axis=0)
-        new_history = shifted_history.at[HISTORY_LENGTH - 1].set(history_n)
-        history_n = new_history.reshape(-1)
+        if HISTORY_LENGTH > 0:
+            # Roll the history by shifting the existing history and adding the new data
+            carry_reshaped = carry.reshape(HISTORY_LENGTH, SINGLE_STEP_HISTORY_SIZE)
+            shifted_history = jnp.roll(carry_reshaped, shift=-1, axis=0)
+            new_history = shifted_history.at[HISTORY_LENGTH - 1].set(history_n)
+            history_n = new_history.reshape(-1)
+        else:
+            history_n = jnp.zeros(0)
 
         return action_n, history_n, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
 
@@ -569,12 +572,11 @@ if __name__ == "__main__":
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,
-            max_action_latency=0.005,
+            max_action_latency=0.002,
             min_action_latency=0.0,
             valid_every_n_steps=25,
             valid_first_n_steps=0,
             rollout_length_seconds=10.0,
-            eval_rollout_length_seconds=10.0,
             # PPO parameters
             gamma=0.97,
             lam=0.95,
