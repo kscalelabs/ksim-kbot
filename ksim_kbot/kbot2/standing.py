@@ -359,13 +359,14 @@ class KbotStandingTask(ksim.PPOTask[Config], Generic[Config]):
         return [
             ksim.JointPositionObservation(noise=0.02),
             ksim.JointVelocityObservation(noise=0.2),
+            ksim.ActuatorForceObservation(),
             ksim.SensorObservation.create(physics_model, "imu_acc", noise=0.8),
             ksim.SensorObservation.create(physics_model, "imu_gyro", noise=0.1),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            ksim.LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.0, zero_prob=0.0),
+            ksim.LinearVelocityCommand(x_range=(0.0, 0.0), y_range=(0.0, 0.0), switch_prob=0.0, zero_prob=0.0),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:

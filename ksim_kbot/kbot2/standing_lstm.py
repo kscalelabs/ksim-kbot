@@ -3,7 +3,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Generic, TypeVar
 
 import distrax
 import equinox as eqx
@@ -21,7 +21,7 @@ CMD_SIZE = 2
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_OUTPUTS = 20 * 2  # position + velocity
 
-HIDDEN_SIZE = 256  # LSTM hidden state size
+HIDDEN_SIZE = 128  # LSTM hidden state size
 DEPTH = 2  # Number of LSTM layers
 
 
@@ -230,13 +230,17 @@ class KbotStandingLSTMTaskConfig(KbotStandingTaskConfig):
     pass
 
 
-class KbotStandingLSTMTask(KbotStandingTask[KbotStandingLSTMTaskConfig]):
+Config = TypeVar("Config", bound=KbotStandingLSTMTaskConfig)
+
+
+class KbotStandingLSTMTask(KbotStandingTask[Config], Generic[Config]):
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
             ksim.JointPositionObservation(noise=0.02),
             ksim.JointVelocityObservation(noise=0.2),
             ksim.SensorObservation.create(physics_model, "imu_acc", noise=0.8),
             ksim.SensorObservation.create(physics_model, "imu_gyro", noise=0.1),
+            ksim.ActuatorForceObservation(),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -347,7 +351,8 @@ class KbotStandingLSTMTask(KbotStandingTask[KbotStandingLSTMTaskConfig]):
         return model_fn
 
     def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
-        state = super().on_after_checkpoint_save(ckpt_path, state)
+        if not self.config.export_for_inference:
+            return state
 
         model: KbotModel = self.load_checkpoint(ckpt_path, part="model")
 
@@ -381,7 +386,6 @@ if __name__ == "__main__":
             valid_every_n_steps=25,
             valid_first_n_steps=0,
             rollout_length_seconds=10.0,
-            eval_rollout_length_seconds=10.0,
             # PPO parameters
             gamma=0.97,
             lam=0.95,
