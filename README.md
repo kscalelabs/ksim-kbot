@@ -17,3 +17,7 @@ git submodule update --init --recursive
 ```
 
 See the [ksim documentation](https://docs.kscale.dev/docs/ksim) for help with training and debugging.
+
+## Deployment
+
+https://gist.github.com/WT-MM/64f5d94d2fee6878cc188ff5691f8b52
