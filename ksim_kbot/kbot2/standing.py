@@ -361,6 +361,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig]):
         return [
             ksim.JointPositionObservation(noise=0.02),
             ksim.JointVelocityObservation(noise=0.2),
+            ksim.ActuatorForceObservation(),
             ksim.SensorObservation.create(physics_model, "imu_acc", noise=0.8),
             ksim.SensorObservation.create(physics_model, "imu_gyro", noise=0.1),
             HistoryObservation(),
