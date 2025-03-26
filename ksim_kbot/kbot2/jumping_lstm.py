@@ -11,7 +11,7 @@ import xax
 from jaxtyping import Array
 from kscale.web.gen.api import JointMetadataOutput
 
-from .standing import KbotStandingTask, KbotStandingTaskConfig
+from .standing_lstm import KbotStandingLSTMTask, KbotStandingLSTMTaskConfig
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -44,11 +44,11 @@ class AuxOutputs:
 
 
 @dataclass
-class KbotJumpingTaskConfig(KbotStandingTaskConfig):
+class KbotJumpingLSTMTaskConfig(KbotStandingLSTMTaskConfig):
     pass
 
 
-class KbotJumpingTask(KbotStandingTask[KbotJumpingTaskConfig]):
+class KbotJumpingLSTMTask(KbotStandingLSTMTask[KbotJumpingLSTMTaskConfig]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             UpwardReward(scale=0.5),
@@ -58,11 +58,20 @@ class KbotJumpingTask(KbotStandingTask[KbotJumpingTaskConfig]):
             ksim.AngularVelocityXYPenalty(scale=-0.01),
         ]
 
+    def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
+        return [
+            ksim.JointPositionObservation(noise=0.0),
+            ksim.JointVelocityObservation(noise=0.0),
+            ksim.SensorObservation.create(physics_model, "imu_acc", noise=0.0),
+            ksim.SensorObservation.create(physics_model, "imu_gyro", noise=0.0),
+            ksim.ActuatorForceObservation(),
+        ]
+
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
             ksim.PushEvent(
-                probability=0.001,
-                interval_range=(1, 5),
+                probability=0.0,
+                interval_range=(2, 4),
                 linear_force_scale=0.1,
             ),
         ]
@@ -93,8 +102,8 @@ if __name__ == "__main__":
     #   python -m ksim_kbot.kbot2.jumping
     # To visualize the environment, use the following command:
     #   python -m ksim_kbot.kbot2.jumping run_environment=True
-    KbotJumpingTask.launch(
-        KbotJumpingTaskConfig(
+    KbotJumpingLSTMTask.launch(
+        KbotJumpingLSTMTaskConfig(
             num_envs=2048,
             num_batches=64,
             num_passes=8,
@@ -115,5 +124,6 @@ if __name__ == "__main__":
             clip_param=0.3,
             max_grad_norm=1.0,
             use_mit_actuators=True,
+            export_for_inference=False,
         ),
     )
