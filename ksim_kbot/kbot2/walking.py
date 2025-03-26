@@ -3,6 +3,7 @@
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import attrs
 import distrax
@@ -18,66 +19,23 @@ from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
-OBS_SIZE = 445
+OBS_SIZE = 20 * 2 + 3 + 3  # = 46 position + velocity + imu_acc + imu_gyro
 CMD_SIZE = 2
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
-NUM_OUTPUTS = 20
+NUM_OUTPUTS = 20 * 2
 
+MAX_TORQUE = {
+    "00": 17.0,
+    "02": 17.0,
+    "03": 40.0,
+    "04": 60.0,
+}
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class AuxOutputs:
     log_probs: Array
     values: Array
-
-
-@attrs.define(frozen=True, kw_only=True)
-class JointDeviationPenalty(ksim.Reward):
-    """Penalty for joint deviations."""
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        diff = trajectory.qpos[:, 7:] - jnp.zeros_like(trajectory.qpos[:, 7:])
-        x = jnp.sum(jnp.square(diff), axis=-1)
-        # y = jnp.abs(diff)
-        # y2 = jnp.exp(-2 * jnp.abs(diff)) - 0.2 * jnp.abs(diff).clip(0, 0.5)
-        return x
-
-
-@attrs.define(frozen=True, kw_only=True)
-class HeightReward(ksim.Reward):
-    """Reward for how high the robot is."""
-
-    height_target: float = attrs.field(default=1.4)
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        height = trajectory.qpos[:, 2]
-        reward = jnp.exp(-jnp.abs(height - self.height_target) * 10)
-        return reward
-
-
-@attrs.define(frozen=True)
-class DHJointVelocityObservation(ksim.Observation):
-    noise: float = attrs.field(default=0.0)
-
-    def observe(self, state: ksim.PhysicsData, rng: PRNGKeyArray) -> Array:
-        qvel = state.qvel  # (N,)
-        return qvel
-
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return observation + jax.random.normal(rng, observation.shape) * self.noise
-
-
-@attrs.define(frozen=True)
-class DHJointPositionObservation(ksim.Observation):
-    noise: float = attrs.field(default=0.0)
-
-    def observe(self, state: ksim.PhysicsData, rng: PRNGKeyArray) -> Array:
-        qpos = state.qpos[2:]  # (N,)
-        return qpos
-
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return observation + jax.random.normal(rng, observation.shape) * self.noise
-
 
 @attrs.define(frozen=True, kw_only=True)
 class DHForwardReward(ksim.Reward):
@@ -144,15 +102,14 @@ class KbotActor(eqx.Module):
 
     def __call__(
         self,
-        dh_joint_pos_n: Array,
-        dh_joint_vel_n: Array,
-        com_inertia_n: Array,
-        com_vel_n: Array,
-        act_frc_obs_n: Array,
+        joint_pos_n: Array,
+        joint_vel_n: Array,
+        imu_acc_n: Array,
+        imu_gyro_n: Array,
         lin_vel_cmd_n: Array,
     ) -> distrax.Normal:
         x_n = jnp.concatenate(
-            [dh_joint_pos_n, dh_joint_vel_n, com_inertia_n, com_vel_n, act_frc_obs_n, lin_vel_cmd_n], axis=-1
+            [joint_pos_n, joint_vel_n, imu_acc_n, imu_gyro_n, lin_vel_cmd_n], axis=-1
         )  # (NUM_INPUTS)
 
         # Split the output into mean and standard deviation.
@@ -172,7 +129,6 @@ class KbotActor(eqx.Module):
     def call_flat_obs(
         self,
         flat_obs_n: Array,
-        cmd_n: Array,
     ) -> distrax.Normal:
         prediction_n = self.mlp(flat_obs_n)
         mean_n = prediction_n[..., :NUM_OUTPUTS]
@@ -204,15 +160,14 @@ class KbotCritic(eqx.Module):
 
     def __call__(
         self,
-        dh_joint_pos_n: Array,
-        dh_joint_vel_n: Array,
-        com_inertia_n: Array,
-        com_vel_n: Array,
-        act_frc_obs_n: Array,
+        joint_pos_n: Array,
+        joint_vel_n: Array,
+        imu_acc_n: Array,
+        imu_gyro_n: Array,
         lin_vel_cmd_n: Array,
     ) -> Array:
         x_n = jnp.concatenate(
-            [dh_joint_pos_n, dh_joint_vel_n, com_inertia_n, com_vel_n, act_frc_obs_n, lin_vel_cmd_n], axis=-1
+            [joint_pos_n, joint_vel_n, imu_acc_n, imu_gyro_n, lin_vel_cmd_n], axis=-1
         )  # (NUM_INPUTS)
         return self.mlp(x_n)
 
@@ -237,7 +192,7 @@ class KbotWalkingTaskConfig(ksim.PPOConfig):
     """Config for the KBot walking task."""
 
     robot_urdf_path: str = xax.field(
-        value="examples/kscale-assets/kbot-v2-feet/",
+        value="ksim_kbot/kscale-assets/kbot-v2-lw-feet/",
         help="The path to the assets directory for the robot.",
     )
 
@@ -314,7 +269,7 @@ class KbotWalkingTask(ksim.PPOTask[KbotWalkingTaskConfig]):
         return optimizer
 
     def get_mujoco_model(self) -> mujoco.MjModel:
-        mjcf_path = (Path(__file__).parent / "scene.mjcf").resolve().as_posix()
+        mjcf_path = (Path(self.config.robot_urdf_path) / "scene.mjcf").resolve().as_posix()
         mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
 
         mj_model.opt.timestep = jnp.array(self.config.dt)
@@ -327,10 +282,8 @@ class KbotWalkingTask(ksim.PPOTask[KbotWalkingTaskConfig]):
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, JointMetadataOutput]:
         metadata = asyncio.run(ksim.get_mujoco_model_metadata(self.config.robot_urdf_path, cache=False))
-
         if metadata.joint_name_to_metadata is None:
             raise ValueError("Joint metadata is not available")
-
         return metadata.joint_name_to_metadata
 
     def get_actuators(
@@ -341,62 +294,93 @@ class KbotWalkingTask(ksim.PPOTask[KbotWalkingTaskConfig]):
         if self.config.use_mit_actuators:
             if metadata is None:
                 raise ValueError("Metadata is required for MIT actuators")
-            return ksim.MITPositionActuators(physics_model, metadata)
+            return ksim.MITPositionVelocityActuators(
+                physics_model,
+                metadata,
+                pos_action_noise=0.0,
+                vel_action_noise=0.0,
+                pos_action_noise_type="gaussian",
+                vel_action_noise_type="gaussian",
+                ctrl_clip=[
+                    # right arm
+                    MAX_TORQUE["03"],
+                    MAX_TORQUE["03"],
+                    MAX_TORQUE["02"],
+                    MAX_TORQUE["02"],
+                    MAX_TORQUE["00"],
+                    # left arm
+                    MAX_TORQUE["03"],
+                    MAX_TORQUE["03"],
+                    MAX_TORQUE["02"],
+                    MAX_TORQUE["02"],
+                    MAX_TORQUE["00"],
+                    # right leg
+                    MAX_TORQUE["04"],
+                    MAX_TORQUE["03"],
+                    MAX_TORQUE["03"],
+                    MAX_TORQUE["04"],
+                    MAX_TORQUE["02"],
+                    # left leg
+                    MAX_TORQUE["04"],
+                    MAX_TORQUE["03"],
+                    MAX_TORQUE["03"],
+                    MAX_TORQUE["04"],
+                    MAX_TORQUE["02"],
+                ],
+            )
         else:
             return ksim.TorqueActuators()
 
     def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
         return [
             ksim.WeightRandomization(scale=0.01),
+            ksim.StaticFrictionRandomization(scale_lower=0.1, scale_upper=1.5),
+
         ]
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
         return [
-            ksim.RandomJointPositionReset(scale=0.01),
-            ksim.RandomJointVelocityReset(scale=0.01),
+            ksim.RandomBaseVelocityXYReset(scale=0.01),
+            ksim.RandomJointPositionReset(scale=0.02),
+            ksim.RandomJointVelocityReset(scale=0.02),
+        ]
+
+    def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
+        return [
+            ksim.PushEvent(
+                probability=0.0005,
+                interval_range=(1, 3),
+                linear_force_scale=0.2,
+            ),
         ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
-            DHJointPositionObservation(),
-            DHJointVelocityObservation(),
+            ksim.JointPositionObservation(noise=0.02),
+            ksim.JointVelocityObservation(noise=0.2),
             ksim.ActuatorForceObservation(),
-            ksim.CenterOfMassInertiaObservation(),
-            ksim.CenterOfMassVelocityObservation(),
+            ksim.SensorObservation.create(physics_model, "imu_acc", noise=0.0),
+            ksim.SensorObservation.create(physics_model, "imu_gyro", noise=0.0),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            ksim.LinearVelocityCommand(x_range=(-0.1, 0.1), y_range=(-0.1, 0.1), switch_prob=0.0, zero_prob=0.0),
+            ksim.LinearVelocityCommand(x_range=(-1.0, 1.0), y_range=(-1.0, 1.0), switch_prob=0.0, zero_prob=0.0),
         ]
 
     # from ksim.rewards import AngularVelocityXYPenalty, LinearVelocityZPenalty,TerminationPenalty, JointVelocityPenalty
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
-        # return [
-        #     DHControlPenalty(scale=-0.01),
-        #     HeightReward(scale=5.0, height_target=0.7),
-        #     # ActionSmoothnessPenalty(scale=-0.01),
-        # ]
         return [
-            JointDeviationPenalty(scale=-1.0),
-            DHControlPenalty(scale=-0.05),
             DHHealthyReward(scale=0.5),
-            # TerminationPenalty(scale=-10.0),
-            # JointVelocityPenalty(scale=-0.05),
-            # These seem necessary to prevent some physics artifacts.
-            # LinearVelocityZPenalty(scale=-0.001),
-            # AngularVelocityXYPenalty(scale=-0.001),
-            # DHForwardReward(scale=0.25),
-            DHControlPenalty(scale=-0.01),
-            # HeightReward(scale=.5, height_target=0.7),
+            ksim.LinearVelocityTrackingPenalty(scale=-0.1),
+            ksim.LinearVelocityZPenalty(scale=-0.01),
+            ksim.AngularVelocityXYPenalty(scale=-0.01),
+            ksim.BaseHeightReward(scale=1.0, height_target=1.0),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
-            # BadZTermination(unhealthy_z_lower=0.4, unhealthy_z_upper=3.0),
-            ksim.RollTooGreatTermination(max_roll=1.04),
-            ksim.PitchTooGreatTermination(max_pitch=1.04),
-            # FastAccelerationTermination(),
+            ksim.BadZTermination(unhealthy_z_lower=0.4, unhealthy_z_upper=3.0),
         ]
 
     def get_model(self, key: PRNGKeyArray) -> KbotModel:
@@ -411,13 +395,12 @@ class KbotWalkingTask(ksim.PPOTask[KbotWalkingTaskConfig]):
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
     ) -> distrax.Normal:
-        dh_joint_pos_n = observations["dhjoint_position_observation"]
-        dh_joint_vel_n = observations["dhjoint_velocity_observation"]
-        com_inertia_n = observations["center_of_mass_inertia_observation"]
-        com_vel_n = observations["center_of_mass_velocity_observation"]
-        act_frc_obs_n = observations["actuator_force_observation"] / 100.0
+        joint_pos_n = observations["joint_position_observation"]
+        joint_vel_n = observations["joint_velocity_observation"]
+        imu_acc_n = observations["imu_acc_obs"]
+        imu_gyro_n = observations["imu_gyro_obs"]
         lin_vel_cmd_n = commands["linear_velocity_command"]
-        return model.actor(dh_joint_pos_n, dh_joint_vel_n, com_inertia_n, com_vel_n, act_frc_obs_n, lin_vel_cmd_n)
+        return model.actor(joint_pos_n, joint_vel_n, imu_acc_n, imu_gyro_n, lin_vel_cmd_n)
 
     def _run_critic(
         self,
@@ -425,13 +408,12 @@ class KbotWalkingTask(ksim.PPOTask[KbotWalkingTaskConfig]):
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
     ) -> Array:
-        dh_joint_pos_n = observations["dhjoint_position_observation"]
-        dh_joint_vel_n = observations["dhjoint_velocity_observation"]
-        com_inertia_n = observations["center_of_mass_inertia_observation"]
-        com_vel_n = observations["center_of_mass_velocity_observation"]
-        act_frc_obs_n = observations["actuator_force_observation"] / 100.0
+        joint_pos_n = observations["joint_position_observation"]
+        joint_vel_n = observations["joint_velocity_observation"]
+        imu_acc_n = observations["imu_acc_obs"]
+        imu_gyro_n = observations["imu_gyro_obs"]
         lin_vel_cmd_n = commands["linear_velocity_command"]
-        return model.critic(dh_joint_pos_n, dh_joint_vel_n, com_inertia_n, com_vel_n, act_frc_obs_n, lin_vel_cmd_n)
+        return model.critic(joint_pos_n, joint_vel_n, imu_acc_n, imu_gyro_n, lin_vel_cmd_n)
 
     def get_on_policy_log_probs(
         self,
@@ -502,20 +484,48 @@ class KbotWalkingTask(ksim.PPOTask[KbotWalkingTaskConfig]):
 
         return action_n, None, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
 
+    def make_export_model(self, model: KbotModel, stochastic: bool = False, batched: bool = False) -> Callable:
+        """Makes a callable inference function that directly takes a flattened input vector and returns an action.
+
+        Returns:
+            A tuple containing the inference function and the size of the input vector.
+        """
+
+        def deterministic_model_fn(obs: Array) -> Array:
+            return model.actor.call_flat_obs(obs).mode()
+
+        def stochastic_model_fn(obs: Array) -> Array:
+            distribution = model.actor.call_flat_obs(obs)
+            return distribution.sample(seed=jax.random.PRNGKey(0))
+
+        if stochastic:
+            model_fn = stochastic_model_fn
+        else:
+            model_fn = deterministic_model_fn
+
+        if batched:
+
+            def batched_model_fn(obs: Array) -> Array:
+                return jax.vmap(model_fn)(obs)
+
+            return batched_model_fn
+
+        return model_fn
+
     def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
         state = super().on_after_checkpoint_save(ckpt_path, state)
 
-        if not self.config.export_for_inference:
-            return state
-
-        # Load the checkpoint and export it using xax's export function.
         model: KbotModel = self.load_checkpoint(ckpt_path, part="model")
 
-        def model_fn(obs: Array, cmd: Array) -> Array:
-            return model.actor.call_flat_obs(obs, cmd).mode()
+        model_fn = self.make_export_model(model, stochastic=False, batched=True)
 
-        input_shapes = [(OBS_SIZE,), (CMD_SIZE,)]
-        xax.export(model_fn, input_shapes, ckpt_path.parent / "tf_model")  # type: ignore [arg-type]
+        input_shapes = [(NUM_INPUTS,)]
+
+        xax.export(
+            model_fn,
+            input_shapes,  # type: ignore [arg-type]
+            ckpt_path.parent / "tf_model",
+        )
 
         return state
 
@@ -524,25 +534,25 @@ if __name__ == "__main__":
     # python -m ksim_kbot.kbot2.walking run_environment=True
     KbotWalkingTask.launch(
         KbotWalkingTaskConfig(
-            num_envs=4096,
+            num_envs=2048,
             num_batches=64,
             num_passes=10,
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,
-            max_action_latency=0.0,
+            max_action_latency=0.002,
             min_action_latency=0.0,
             valid_every_n_steps=25,
             valid_first_n_steps=0,
-            rollout_length_seconds=2.5,
+            rollout_length_seconds=5.0,
             # PPO parameters
             gamma=0.97,
             lam=0.95,
             entropy_coef=0.001,
-            learning_rate=3e-4,
+            learning_rate=1e-4,
             clip_param=0.3,
             max_grad_norm=1.0,
             use_mit_actuators=True,
-            action_scale=0.5,
+            export_for_inference=True,
         ),
     )
