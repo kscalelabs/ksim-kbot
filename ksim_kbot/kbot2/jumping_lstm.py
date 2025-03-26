@@ -75,6 +75,11 @@ class KbotJumpingLSTMTask(KbotStandingLSTMTask[KbotJumpingLSTMTaskConfig]):
                 linear_force_scale=0.1,
             ),
         ]
+    
+    def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
+        return [
+            ksim.MinimumHeightTermination(min_height=0.3),
+        ]
 
     def get_actuators(
         self,
