@@ -30,7 +30,7 @@ HISTORY_LENGTH = 0
 NUM_INPUTS = (OBS_SIZE + CMD_SIZE) + SINGLE_STEP_HISTORY_SIZE * HISTORY_LENGTH
 
 MAX_TORQUE = {
-    "00": 10.0,
+    "00": 1.0,
     "02": 12.0,
     "03": 40.0,
     "04": 60.0,
@@ -71,12 +71,46 @@ class JointDeviationPenalty(ksim.Reward):
 class ResetDefaultJointPosition(ksim.Reset):
     """Resets the joint positions of the robot to random values."""
 
-    default_keyframe: str = attrs.field(default="default")
+    default_targets: tuple[float, ...] = attrs.field(
+        default=(
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        )
+    )
 
     def __call__(self, data: ksim.PhysicsData, rng: PRNGKeyArray) -> ksim.PhysicsData:
-        # jax.debu()
-        default_qpos = data.model.keyframe("default").qpos
-        return ksim.utils.mujoco.update_data_field(data, "qpos", default_qpos)
+        qpos = data.qpos
+        match type(data):
+            case mujoco.MjData:
+                qpos[:] = self.default_targets
+            case mjx.Data:
+                qpos = qpos.at[:].set(self.default_targets)
+        return ksim.utils.mujoco.update_data_field(data, "qpos", qpos)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -357,7 +391,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         return [
             ksim.WeightRandomization(scale=0.05),
             ksim.StaticFrictionRandomization(scale_lower=0.5, scale_upper=2.0),
-            ksim.JointZeroPositionRandomization(scale_lower=-0.05, scale_upper=0.05),
+            # ksim.JointZeroPositionRandomization(scale_lower=-0.05, scale_upper=0.05),
             # ksim.FloorFrictionRandomization.from_body_name(
             #     model=physics_model,
             #     scale_lower=0.2,
@@ -379,7 +413,41 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ksim.RandomBaseVelocityXYReset(scale=0.01),
             ksim.RandomJointPositionReset(scale=0.02),
             ksim.RandomJointVelocityReset(scale=0.02),
-            ResetDefaultJointPosition(default_keyframe="default"),
+            ResetDefaultJointPosition(
+                default_targets=(
+                    0.0,
+                    0.0,
+                    0.91,
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    # right arm
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    # left arm
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    # right leg
+                    -0.23,
+                    0.0,
+                    0.0,
+                    -0.441,
+                    0.195,
+                    # left leg
+                    0.23,
+                    0.0,
+                    0.0,
+                    0.441,
+                    -0.195,
+                )
+            ),
         ]
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
