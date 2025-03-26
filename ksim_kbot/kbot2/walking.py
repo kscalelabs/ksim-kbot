@@ -367,7 +367,7 @@ class KbotWalkingTask(ksim.PPOTask[KbotWalkingTaskConfig]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            ksim.LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.0, zero_prob=0.0),
+            ksim.LinearVelocityCommand(x_range=(-0.1, 0.1), y_range=(-0.1, 0.1), switch_prob=0.0, zero_prob=0.0),
         ]
 
     # from ksim.rewards import AngularVelocityXYPenalty, LinearVelocityZPenalty,TerminationPenalty, JointVelocityPenalty
