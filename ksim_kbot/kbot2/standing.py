@@ -21,8 +21,13 @@ from mujoco import mjx
 
 OBS_SIZE = 20 * 2 + 3 + 3  # = 46 position + velocity + imu_acc + imu_gyro
 CMD_SIZE = 2
-NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_OUTPUTS = 20 * 2  # position + velocity
+
+SINGLE_STEP_HISTORY_SIZE = NUM_OUTPUTS + OBS_SIZE + CMD_SIZE
+
+HISTORY_LENGTH = 0
+
+NUM_INPUTS = (OBS_SIZE + CMD_SIZE) + SINGLE_STEP_HISTORY_SIZE * HISTORY_LENGTH
 
 MAX_TORQUE = {
     "00": 17.0,
@@ -31,12 +36,22 @@ MAX_TORQUE = {
     "04": 60.0,
 }
 
+Config = TypeVar("Config", bound="KbotStandingTaskConfig")
+
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class AuxOutputs:
     log_probs: Array
     values: Array
+
+
+@attrs.define(frozen=True)
+class HistoryObservation(ksim.Observation):
+    def observe(self, state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
+        if not isinstance(state.carry, Array):
+            raise ValueError("Carry is not a history array")
+        return state.carry
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -108,6 +123,7 @@ class KbotActor(eqx.Module):
         imu_acc_n: Array,
         imu_gyro_n: Array,
         lin_vel_cmd_n: Array,
+        history_n: Array,
     ) -> distrax.Normal:
         x_n = jnp.concatenate(
             [
@@ -116,23 +132,12 @@ class KbotActor(eqx.Module):
                 imu_acc_n,
                 imu_gyro_n,
                 lin_vel_cmd_n,
+                # history_n,
             ],
             axis=-1,
         )  # (NUM_INPUTS)
 
-        # Split the output into mean and standard deviation.
-        prediction_n = self.mlp(x_n)
-        mean_n = prediction_n[..., :NUM_OUTPUTS]
-        std_n = prediction_n[..., NUM_OUTPUTS:]
-
-        # Scale the mean.
-        mean_n = jnp.tanh(mean_n) * self.mean_scale
-
-        # Softplus and clip to ensure positive standard deviations.
-        std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
-
-        # return distrax.Transformed(distrax.Normal(mean_n, std_n), distrax.Tanh())
-        return distrax.Normal(mean_n, std_n)
+        return self.call_flat_obs(x_n)
 
     def call_flat_obs(
         self,
@@ -173,6 +178,7 @@ class KbotCritic(eqx.Module):
         imu_acc_n: Array,
         imu_gyro_n: Array,
         lin_vel_cmd_n: Array,
+        history_n: Array,
     ) -> Array:
         x_n = jnp.concatenate(
             [
@@ -181,6 +187,7 @@ class KbotCritic(eqx.Module):
                 imu_acc_n,
                 imu_gyro_n,
                 lin_vel_cmd_n,
+                # history_n,
             ],
             axis=-1,
         )  # (NUM_INPUTS)
@@ -247,9 +254,6 @@ class KbotStandingTaskConfig(ksim.PPOConfig):
         value=False,
         help="Whether to export the model for inference.",
     )
-
-
-Config = TypeVar("Config", bound=KbotStandingTaskConfig)
 
 
 class KbotStandingTask(ksim.PPOTask[Config], Generic[Config]):
@@ -349,9 +353,9 @@ class KbotStandingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
             ksim.PushEvent(
-                probability=0.001,
-                interval_range=(5, 300),
-                linear_force_scale=0.1,
+                probability=0.0005,
+                interval_range=(1, 3),
+                linear_force_scale=0.5,
             ),
         ]
 
@@ -362,11 +366,12 @@ class KbotStandingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.ActuatorForceObservation(),
             ksim.SensorObservation.create(physics_model, "imu_acc", noise=0.8),
             ksim.SensorObservation.create(physics_model, "imu_gyro", noise=0.1),
+            HistoryObservation(),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            ksim.LinearVelocityCommand(x_range=(0.0, 0.0), y_range=(0.0, 0.0), switch_prob=0.0, zero_prob=0.0),
+            ksim.LinearVelocityCommand(x_range=(-0.0, 0.0), y_range=(-0.0, 0.0), switch_prob=0.0, zero_prob=0.0),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
@@ -387,8 +392,8 @@ class KbotStandingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_model(self, key: PRNGKeyArray) -> KbotModel:
         return KbotModel(key)
 
-    def get_initial_carry(self, rng: PRNGKeyArray) -> None:
-        return None
+    def get_initial_carry(self, rng: PRNGKeyArray) -> Array:
+        return jnp.zeros(HISTORY_LENGTH * SINGLE_STEP_HISTORY_SIZE)
 
     def _run_actor(
         self,
@@ -401,7 +406,8 @@ class KbotStandingTask(ksim.PPOTask[Config], Generic[Config]):
         imu_acc_n = observations["imu_acc_obs"]
         imu_gyro_n = observations["imu_gyro_obs"]
         lin_vel_cmd_n = commands["linear_velocity_command"]
-        return model.actor(joint_pos_n, joint_vel_n, imu_acc_n, imu_gyro_n, lin_vel_cmd_n)
+        history_n = observations["history_observation"]
+        return model.actor(joint_pos_n, joint_vel_n, imu_acc_n, imu_gyro_n, lin_vel_cmd_n, history_n)
 
     def _run_critic(
         self,
@@ -414,7 +420,8 @@ class KbotStandingTask(ksim.PPOTask[Config], Generic[Config]):
         imu_acc_n = observations["imu_acc_obs"]
         imu_gyro_n = observations["imu_gyro_obs"]
         lin_vel_cmd_n = commands["linear_velocity_command"]
-        return model.critic(joint_pos_n, joint_vel_n, imu_acc_n, imu_gyro_n, lin_vel_cmd_n)
+        history_n = observations["history_observation"]
+        return model.critic(joint_pos_n, joint_vel_n, imu_acc_n, imu_gyro_n, lin_vel_cmd_n, history_n)
 
     def get_on_policy_log_probs(
         self,
@@ -470,12 +477,12 @@ class KbotStandingTask(ksim.PPOTask[Config], Generic[Config]):
     def sample_action(
         self,
         model: KbotModel,
-        carry: None,
+        carry: Array,
         physics_model: ksim.PhysicsModel,
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, None, AuxOutputs]:
+    ) -> tuple[Array, Array, AuxOutputs]:
         action_dist_n = self._run_actor(model, observations, commands)
         action_n = action_dist_n.sample(seed=rng)
         action_log_prob_n = action_dist_n.log_prob(action_n)
@@ -483,7 +490,34 @@ class KbotStandingTask(ksim.PPOTask[Config], Generic[Config]):
         critic_n = self._run_critic(model, observations, commands)
         value_n = critic_n.squeeze(-1)
 
-        return action_n, None, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
+        joint_pos_n = observations["joint_position_observation"]
+        joint_vel_n = observations["joint_velocity_observation"]
+        imu_acc_n = observations["imu_acc_obs"]
+        imu_gyro_n = observations["imu_gyro_obs"]
+        lin_vel_cmd_n = commands["linear_velocity_command"]
+
+        history_n = jnp.concatenate(
+            [
+                joint_pos_n,
+                joint_vel_n,
+                imu_acc_n,
+                imu_gyro_n,
+                lin_vel_cmd_n,
+                action_n,
+            ],
+            axis=-1,
+        )
+
+        if HISTORY_LENGTH > 0:
+            # Roll the history by shifting the existing history and adding the new data
+            carry_reshaped = carry.reshape(HISTORY_LENGTH, SINGLE_STEP_HISTORY_SIZE)
+            shifted_history = jnp.roll(carry_reshaped, shift=-1, axis=0)
+            new_history = shifted_history.at[HISTORY_LENGTH - 1].set(history_n)
+            history_n = new_history.reshape(-1)
+        else:
+            history_n = jnp.zeros(0)
+
+        return action_n, history_n, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
 
     def make_export_model(self, model: KbotModel, stochastic: bool = False, batched: bool = False) -> Callable:
         """Makes a callable inference function that directly takes a flattened input vector and returns an action.
@@ -541,12 +575,11 @@ if __name__ == "__main__":
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,
-            max_action_latency=0.005,
+            max_action_latency=0.002,
             min_action_latency=0.0,
             valid_every_n_steps=25,
             valid_first_n_steps=0,
             rollout_length_seconds=10.0,
-            eval_rollout_length_seconds=10.0,
             # PPO parameters
             gamma=0.97,
             lam=0.95,
