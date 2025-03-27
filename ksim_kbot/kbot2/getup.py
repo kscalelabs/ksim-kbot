@@ -11,6 +11,7 @@ import jax.numpy as jnp
 import ksim
 import mujoco
 import xax
+from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 from mujoco import mjx
 
@@ -62,7 +63,7 @@ class ResetDefaultJointPosition(ksim.Reset):
             # xyz
             0.0,
             0.0,
-            0.05,
+            0.4,
             # quat
             0.7071,
             0.7071,
@@ -103,6 +104,18 @@ class ResetDefaultJointPosition(ksim.Reset):
 
 
 @attrs.define(frozen=True)
+class HeightOrientationObservation(ksim.Observation):
+    noise: float = attrs.field(default=0.0)
+
+    def observe(self, rollout_state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
+        qpos = rollout_state.physics_state.data.qpos[2:7]  # (N, 5)
+        return qpos
+
+    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
+        return observation + jax.random.normal(rng, observation.shape) * self.noise
+
+
+@attrs.define(frozen=True)
 class HistoryObservation(ksim.Observation):
     def observe(self, state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
         if not isinstance(state.carry, Array):
@@ -139,57 +152,47 @@ class LastActionObservation(ksim.Observation):
 
 @attrs.define(frozen=True, kw_only=True)
 class JointDeviationPenalty(ksim.Reward):
-    """Penalty for joint deviations."""
+    """Penalty for joint deviations with a height threshold."""
 
     joint_targets: tuple[float, ...] = attrs.field(
         default=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     )
-    height_threshold: float = attrs.field(default=0.7)
+    height_threshold: float = attrs.field(default=0.5)
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         height = trajectory.qpos[:, 2]
         diff = trajectory.qpos[:, 7:] - jnp.array(self.joint_targets)
         diff = jnp.sum(jnp.square(diff), axis=-1)
-        # y2 = jnp.zeros_like(diff.shape[0])
-        x = jax.lax.cond(
-            jnp.all(height < self.height_threshold),
-            lambda: diff,
-            lambda: jnp.zeros_like(diff),
-        )
-        return x
+        # Gate the reward subject to the height.
+        gate = height > self.height_threshold
+        return diff * gate
 
 
 @attrs.define(frozen=True, kw_only=True)
-class StandStillReward(ksim.Reward):
-    """Reward for standing still."""
+class StandStillPenalty(ksim.Reward):
+    """Penalty for not standing still."""
 
-    height_threshold: float = attrs.field(default=0.7)
+    height_threshold: float = attrs.field(default=0.5)
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         height = trajectory.qpos[:, 2]
         cost = jnp.sum(jnp.square(trajectory.qvel[..., :2]), axis=-1)
-        rew = jnp.exp(-0.5 * cost)
-        # y = rew
-        # y2 = jnp.zeros_like(rew.shape[0])
-        x = jax.lax.cond(
-            jnp.all(height < self.height_threshold),
-            lambda: rew,
-            lambda: jnp.zeros_like(rew),
-        )
-        return x
+        # Gate the reward subject to the height.
+        gate = height > self.height_threshold
+        return cost * gate
 
 
 @attrs.define(frozen=True, kw_only=True)
-class UpwardPositionPenalty(ksim.Reward):
+class UpwardPositionReward(ksim.Reward):
     """Reward for the upward position."""
 
-    dt: float = attrs.field(default=0.02)
-    target_pos: float = attrs.field(default=0.91)
+    target_pos: float = attrs.field(default=0.71)
+    sensitivity: float = attrs.field(default=10)
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         pos_after = trajectory.qpos[:, 2]
-        uph_cost = jnp.abs(pos_after - self.target_pos)  # / self.dt
-        return uph_cost
+        diff = jnp.abs(pos_after - self.target_pos)
+        return jnp.exp(-self.sensitivity * diff)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -287,14 +290,14 @@ class KbotActor(eqx.Module):
         return distrax.Normal(mean_n, std_n)
 
 
-class KbotCritic(eqx.Module):
-    """Critic for the standing task."""
+class KbotCriticGetup(eqx.Module):
+    """Critic for the getup task."""
 
     mlp: eqx.nn.MLP
 
     def __init__(self, key: PRNGKeyArray) -> None:
         self.mlp = eqx.nn.MLP(
-            in_size=NUM_INPUTS,
+            in_size=NUM_INPUTS + 5,
             out_size=1,  # Always output a single critic value.
             width_size=64,
             depth=5,
@@ -310,6 +313,7 @@ class KbotCritic(eqx.Module):
         imu_gyro_n: Array,
         lin_vel_cmd_n: Array,
         last_action_n: Array,
+        height_orientation_5: Array,
         history_n: Array,
     ) -> Array:
         x_n = jnp.concatenate(
@@ -320,16 +324,17 @@ class KbotCritic(eqx.Module):
                 imu_gyro_n,
                 lin_vel_cmd_n,
                 last_action_n,
-                # history_n,
+                height_orientation_5,
+                history_n,
             ],
             axis=-1,
-        )  # (NUM_INPUTS)
+        )  # (NUM_INPUTS + 5)
         return self.mlp(x_n)
 
 
 class KbotModel(eqx.Module):
     actor: KbotActor
-    critic: KbotCritic
+    critic: KbotCriticGetup
 
     def __init__(self, key: PRNGKeyArray) -> None:
         self.actor = KbotActor(
@@ -339,18 +344,49 @@ class KbotModel(eqx.Module):
             var_scale=1.0,
             mean_scale=1.0,
         )
-        self.critic = KbotCritic(key)
+        self.critic = KbotCriticGetup(key)
 
 
 @dataclass
 class KbotGetupTaskConfig(KbotStandingTaskConfig):
-    pass
+    robot_urdf_path: str = xax.field(
+        value="ksim_kbot/kscale-assets/kbot-v2-lw-full/",
+        help="The path to the assets directory for the robot.",
+    )
 
 
 Config = TypeVar("Config", bound=KbotGetupTaskConfig)
 
 
 class KbotGetupTask(KbotStandingTask[Config], Generic[Config]):
+    def get_model(self, key: PRNGKeyArray) -> KbotModel:
+        return KbotModel(key)
+
+    def _run_critic(
+        self,
+        model: KbotModel,
+        observations: FrozenDict[str, Array],
+        commands: FrozenDict[str, Array],
+    ) -> Array:
+        joint_pos_n = observations["joint_position_observation"]
+        joint_vel_n = observations["joint_velocity_observation"]
+        imu_acc_3 = observations["imu_acc_obs"]
+        imu_gyro_3 = observations["imu_gyro_obs"]
+        lin_vel_cmd_2 = commands["linear_velocity_command"]
+        last_action_n = observations["last_action_observation"]
+        height_orientation_5 = observations["height_orientation_observation"]
+        history_n = observations["history_observation"]
+        return model.critic(
+            joint_pos_n,
+            joint_vel_n,
+            imu_acc_3,
+            imu_gyro_3,
+            lin_vel_cmd_2,
+            last_action_n,
+            height_orientation_5,
+            history_n,
+        )
+
     def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
         return [
             ksim.WeightRandomization(scale=0.05),
@@ -374,21 +410,16 @@ class KbotGetupTask(KbotStandingTask[Config], Generic[Config]):
         ]
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
-        return [
-            ksim.PushEvent(
-                probability=0.0005,
-                interval_range=(1, 3),
-                linear_force_scale=0.2,
-            ),
-        ]
+        return []
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
-            JointPositionObservation(noise=0.02),
-            ksim.JointVelocityObservation(noise=0.5),
+            HeightOrientationObservation(),
+            JointPositionObservation(noise=0.0),
+            ksim.JointVelocityObservation(noise=0.0),
             ksim.ActuatorForceObservation(),
-            ksim.SensorObservation.create(physics_model, "imu_acc", noise=0.5),
-            ksim.SensorObservation.create(physics_model, "imu_gyro", noise=0.2),
+            ksim.SensorObservation.create(physics_model, "imu_acc", noise=0.0),
+            ksim.SensorObservation.create(physics_model, "imu_gyro", noise=0.0),
             LastActionObservation(noise=0.0),
             HistoryObservation(),
         ]
@@ -400,11 +431,11 @@ class KbotGetupTask(KbotStandingTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            UpwardPositionPenalty(scale=-0.5),
+            UpwardPositionReward(scale=1.0),
             UpwardVelocityReward(scale=0.05),
             StationaryPenalty(scale=-0.05),
             ksim.ActuatorForcePenalty(scale=-0.01),
-            StandStillReward(scale=0.2),
+            StandStillPenalty(scale=-0.2),
             JointDeviationPenalty(scale=-0.01),
         ]
 
@@ -418,8 +449,8 @@ if __name__ == "__main__":
     # python -m ksim_kbot.kbot2.getup run_environment=True
     KbotGetupTask.launch(
         KbotGetupTaskConfig(
-            num_envs=2048,
-            num_batches=64,
+            num_envs=2,
+            num_batches=1,
             num_passes=10,
             # Simulation parameters.
             dt=0.002,
