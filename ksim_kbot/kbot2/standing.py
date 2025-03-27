@@ -373,8 +373,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ksim.JointPositionObservation(noise=0.02),
             ksim.JointVelocityObservation(noise=0.2),
             ksim.ActuatorForceObservation(),
-            ksim.SensorObservation.create(physics_model, "imu_acc", noise=0.5),
-            ksim.SensorObservation.create(physics_model, "imu_gyro", noise=0.2),
+            ksim.SensorObservation.create(physics_model, "imu_acc", noise=0.6),
+            ksim.SensorObservation.create(physics_model, "imu_gyro", noise=0.3),
             HistoryObservation(),
         ]
 
@@ -399,6 +399,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                 ),
             ),
             # DHControlPenalty(scale=-0.05),
+            ksim.LinearVelocityTrackingPenalty(scale=-1.5),
             DHHealthyReward(scale=0.5),
             ksim.ActuatorForcePenalty(scale=-0.01),
             ksim.BaseHeightReward(scale=1.0, height_target=1.0),
@@ -606,7 +607,7 @@ if __name__ == "__main__":
             gamma=0.97,
             lam=0.95,
             entropy_coef=0.001,
-            learning_rate=1e-4,
+            learning_rate=1e-3,
             clip_param=0.3,
             max_grad_norm=1.0,
             use_mit_actuators=True,
