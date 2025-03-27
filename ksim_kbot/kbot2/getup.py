@@ -308,9 +308,9 @@ class KbotGetupCritic(eqx.Module):
         self,
         joint_pos_n: Array,
         joint_vel_n: Array,
-        imu_acc_n: Array,
-        imu_gyro_n: Array,
-        lin_vel_cmd_n: Array,
+        imu_acc_3: Array,
+        imu_gyro_3: Array,
+        lin_vel_cmd_2: Array,
         last_action_n: Array,
         height_orientation_5: Array,
         history_n: Array,
@@ -319,9 +319,9 @@ class KbotGetupCritic(eqx.Module):
             [
                 joint_pos_n,
                 joint_vel_n,
-                imu_acc_n,
-                imu_gyro_n,
-                lin_vel_cmd_n,
+                imu_acc_3,
+                imu_gyro_3,
+                lin_vel_cmd_2,
                 last_action_n,
                 height_orientation_5,
                 history_n,
@@ -358,6 +358,12 @@ Config = TypeVar("Config", bound=KbotGetupTaskConfig)
 
 
 class KbotGetupTask(KbotStandingTask[Config], Generic[Config]):
+    def get_model(self, key: PRNGKeyArray) -> KbotModel:
+        return KbotModel(key)
+
+    def get_initial_carry(self, rng: PRNGKeyArray) -> Array:
+        return jnp.zeros(HISTORY_LENGTH * SINGLE_STEP_HISTORY_SIZE)
+
     def _run_critic(
         self,
         model: KbotModel,
@@ -446,8 +452,8 @@ if __name__ == "__main__":
     # run_environment_save_path=videos/test.mp4
     KbotGetupTask.launch(
         KbotGetupTaskConfig(
-            num_envs=2,
-            batch_size=1,
+            num_envs=2048,
+            batch_size=256,
             num_passes=10,
             # Simulation parameters.
             dt=0.002,
@@ -465,7 +471,5 @@ if __name__ == "__main__":
             clip_param=0.3,
             max_grad_norm=1.0,
             use_mit_actuators=True,
-            export_for_inference=True,
-            save_every_n_steps=25,
         ),
     )

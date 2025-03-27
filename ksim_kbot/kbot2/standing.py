@@ -3,7 +3,7 @@
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Generic, TypeVar
+from typing import Generic, TypeVar
 
 import attrs
 import distrax
@@ -741,51 +741,6 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             history_n = jnp.zeros(0)
 
         return action_n, history_n, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
-
-    def make_export_model(self, model: KbotModel, stochastic: bool = False, batched: bool = False) -> Callable:
-        """Makes a callable inference function that directly takes a flattened input vector and returns an action.
-
-        Returns:
-            A tuple containing the inference function and the size of the input vector.
-        """
-
-        def deterministic_model_fn(obs: Array) -> Array:
-            return model.actor.call_flat_obs(obs).mode()
-
-        def stochastic_model_fn(obs: Array) -> Array:
-            distribution = model.actor.call_flat_obs(obs)
-            return distribution.sample(seed=jax.random.PRNGKey(0))
-
-        if stochastic:
-            model_fn = stochastic_model_fn
-        else:
-            model_fn = deterministic_model_fn
-
-        if batched:
-
-            def batched_model_fn(obs: Array) -> Array:
-                return jax.vmap(model_fn)(obs)
-
-            return batched_model_fn
-
-        return model_fn
-
-    def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
-        state = super().on_after_checkpoint_save(ckpt_path, state)
-
-        model: KbotModel = self.load_checkpoint(ckpt_path, part="model")
-
-        model_fn = self.make_export_model(model, stochastic=False, batched=True)
-
-        input_shapes = [(NUM_INPUTS,)]
-
-        xax.export(
-            model_fn,
-            input_shapes,  # type: ignore [arg-type]
-            ckpt_path.parent / "tf_model",
-        )
-
-        return state
 
 
 if __name__ == "__main__":

@@ -2,15 +2,13 @@
 """Defines simple task for training a walking policy for K-Bot."""
 
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Callable, Generic, TypeVar
+from typing import Generic, TypeVar
 
 import distrax
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import ksim
-import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 
@@ -320,53 +318,6 @@ class KbotStandingLSTMTask(KbotStandingTask[Config], Generic[Config]):
         value_n = critic_n.squeeze(-1)
 
         return action_n, next_carry, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
-
-    def make_export_model(self, model: KbotModel, stochastic: bool = False, batched: bool = False) -> Callable:
-        """Makes a callable inference function that directly takes a flattened input vector and returns an action.
-
-        Returns:
-            A tuple containing the inference function and the size of the input vector.
-        """
-
-        def deterministic_model_fn(obs: Array, hidden_states: Array) -> tuple[Array, Array]:
-            distribution, hidden_states = model.actor.call_flat_obs(obs, hidden_states)
-            return distribution.mode(), hidden_states
-
-        def stochastic_model_fn(obs: Array, hidden_states: Array) -> tuple[Array, Array]:
-            distribution, hidden_states = model.actor.call_flat_obs(obs, hidden_states)
-            return distribution.sample(seed=jax.random.PRNGKey(0)), hidden_states
-
-        if stochastic:
-            model_fn = stochastic_model_fn
-        else:
-            model_fn = deterministic_model_fn
-
-        if batched:
-
-            def batched_model_fn(obs: Array, hidden_states: Array) -> tuple[Array, Array]:
-                return jax.vmap(model_fn)(obs, hidden_states)
-
-            return batched_model_fn
-
-        return model_fn
-
-    def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
-        if not self.config.export_for_inference:
-            return state
-
-        model: KbotModel = self.load_checkpoint(ckpt_path, part="model")
-
-        model_fn = self.make_export_model(model, stochastic=False, batched=True)
-
-        input_shapes = [(NUM_INPUTS,), (DEPTH, 2, HIDDEN_SIZE)]
-
-        xax.export(
-            model_fn,
-            input_shapes,
-            ckpt_path.parent / "tf_model",
-        )
-
-        return state
 
 
 if __name__ == "__main__":
