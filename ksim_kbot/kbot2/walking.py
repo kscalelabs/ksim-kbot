@@ -503,23 +503,6 @@ class KbotWalkingTask(ksim.PPOTask[KbotWalkingTaskConfig]):
 
         return action_n, None, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
 
-    def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
-        state = super().on_after_checkpoint_save(ckpt_path, state)
-
-        if not self.config.export_for_inference:
-            return state
-
-        # Load the checkpoint and export it using xax's export function.
-        model: KbotModel = self.load_checkpoint(ckpt_path, part="model")
-
-        def model_fn(obs: Array, cmd: Array) -> Array:
-            return model.actor.call_flat_obs(obs, cmd).mode()
-
-        input_shapes = [(OBS_SIZE,), (CMD_SIZE,)]
-        xax.export(model_fn, input_shapes, ckpt_path.parent / "tf_model")  # type: ignore [arg-type]
-
-        return state
-
 
 if __name__ == "__main__":
     # python -m ksim_kbot.kbot2.walking run_environment=True
