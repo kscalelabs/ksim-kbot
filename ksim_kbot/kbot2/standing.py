@@ -144,6 +144,24 @@ class ResetDefaultJointPosition(ksim.Reset):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class FeetSlipPenalty(ksim.Reward):
+    """Penalty for feet slipping."""
+
+    norm: xax.NormType = attrs.field(default="l2")
+    observation_name: str = attrs.field(default="feet_contact_observation")
+    command_name: str = attrs.field(default="linear_velocity_command")
+    com_vel_obs_name: str = attrs.field(default="center_of_mass_velocity_observation")
+    command_vel_scale: float = attrs.field(default=0.02)
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        if self.observation_name not in trajectory.obs:
+            raise ValueError(f"Observation {self.observation_name} not found; add it as an observation in your task.")
+        contact = trajectory.obs[self.observation_name]
+        com_vel = trajectory.obs[self.com_vel_obs_name][..., :2]
+        return (xax.get_norm(com_vel, self.norm) * contact).sum(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
 class DHControlPenalty(ksim.Reward):
     """Legacy default humanoid control cost that penalizes squared action magnitude."""
 
@@ -576,6 +594,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ksim.ActionSmoothnessPenalty(scale=-0.01),
             ksim.LinearVelocityTrackingPenalty(scale=-0.05),
             ksim.AngularVelocityTrackingPenalty(scale=-0.05),
+            # FeetSlipPenalty(scale=-0.01),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
