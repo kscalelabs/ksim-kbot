@@ -376,7 +376,7 @@ if __name__ == "__main__":
     KbotStandingLSTMTask.launch(
         KbotStandingLSTMTaskConfig(
             num_envs=2048,
-            num_batches=64,
+            batch_size=256,
             num_passes=10,
             # Simulation parameters.
             dt=0.002,
