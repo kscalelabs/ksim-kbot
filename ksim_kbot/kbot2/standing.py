@@ -19,7 +19,7 @@ from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
-OBS_SIZE = 20 * 2 + 3 + 3 + 40 # = 46 position + velocity + imu_acc + imu_gyro + last_action
+OBS_SIZE = 20 * 2 + 3 + 3 + 40  # = 46 position + velocity + imu_acc + imu_gyro + last_action
 CMD_SIZE = 2
 NUM_OUTPUTS = 20 * 2  # position + velocity
 
@@ -58,13 +58,14 @@ class HistoryObservation(ksim.Observation):
 class JointDeviationPenalty(ksim.Reward):
     """Penalty for joint deviations."""
 
+    norm: xax.NormType = attrs.field(default="l2")
     joint_targets: tuple[float, ...] = attrs.field(
         default=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     )
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        diff = trajectory.qpos[:, 7:] - jnp.array(self.joint_targets)
-        return jnp.sum(jnp.square(diff), axis=-1)
+        diff = trajectory.qpos[..., 7:] - jnp.array(self.joint_targets)
+        return xax.get_norm(diff, self.norm).sum(axis=-1)
 
 
 @attrs.define(frozen=True)
@@ -149,7 +150,7 @@ class FeetSlipPenalty(ksim.Reward):
 
     norm: xax.NormType = attrs.field(default="l2")
     observation_name: str = attrs.field(default="feet_contact_observation")
-    command_name: str = attrs.field(default="linear_velocity_command")
+    command_name: str = attrs.field(default="linear_velocity_step_command")
     com_vel_obs_name: str = attrs.field(default="center_of_mass_velocity_observation")
     command_vel_scale: float = attrs.field(default=0.02)
 
@@ -177,7 +178,7 @@ class DHHealthyReward(ksim.Reward):
     healthy_z_upper: float = attrs.field(default=1.5)
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        height = trajectory.qpos[:, 2]
+        height = trajectory.qpos[..., 2]
         is_healthy = jnp.where(height < self.healthy_z_lower, 0.0, 1.0)
         is_healthy = jnp.where(height > self.healthy_z_upper, 0.0, is_healthy)
         return is_healthy
@@ -498,12 +499,12 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
-            # ksim.PushEvent(
-            #     x_force=1.0,
-            #     y_force=1.0,
-            #     z_force=0.0,
-            #     interval_range=(1.0, 2.0),
-            # ),
+            ksim.PushEvent(
+                x_force=0.2,
+                y_force=0.2,
+                z_force=0.0,
+                interval_range=(1.0, 2.0),
+            ),
         ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
@@ -596,10 +597,10 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             DHHealthyReward(scale=0.5),
             ksim.ActuatorForcePenalty(scale=-0.01),
             ksim.BaseHeightReward(scale=1.0, height_target=0.9),
-            ksim.ActionSmoothnessPenalty(scale=-0.01),
-            # ksim.LinearVelocityTrackingPenalty(scale=-0.05),
-            # ksim.AngularVelocityTrackingPenalty(scale=-0.05),
+            ksim.LinearVelocityTrackingPenalty(command_name="linear_velocity_step_command", scale=-0.05),
+            ksim.AngularVelocityTrackingPenalty(command_name="angular_velocity_step_command", scale=-0.05),
             # FeetSlipPenalty(scale=-0.01),
+            # ksim.ActionSmoothnessPenalty(scale=-0.01),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -715,7 +716,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         joint_vel_n = observations["joint_velocity_observation"]
         imu_acc_3 = observations["imu_acc_obs"]
         imu_gyro_3 = observations["imu_gyro_obs"]
-        lin_vel_cmd_2 = commands["linear_velocity_command"]
+        lin_vel_cmd_2 = commands["linear_velocity_step_command"]
         last_action_n = observations["last_action_observation"]
         history_n = jnp.concatenate(
             [
@@ -788,7 +789,13 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
 
 
 if __name__ == "__main__":
-    # python -m ksim_kbot.kbot2.standing run_environment=True
+    # To run training, use the following command:
+    # python -m ksim_kbot.kbot2.standing
+    # To visualize the environment, use the following command:
+    # python -m ksim_kbot.kbot2.standing \
+    #  run_environment=True \
+    #  run_environment_num_seconds=1 \
+    #  run_environment_save_path=videos/test.mp4
     KbotStandingTask.launch(
         KbotStandingTaskConfig(
             num_envs=4096,
