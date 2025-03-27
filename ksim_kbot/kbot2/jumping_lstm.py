@@ -68,13 +68,7 @@ class KbotJumpingLSTMTask(KbotStandingLSTMTask[KbotJumpingLSTMTaskConfig]):
         ]
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
-        return [
-            ksim.PushEvent(
-                probability=0.0,
-                interval_range=(2, 4),
-                linear_force_scale=0.1,
-            ),
-        ]
+        return []
 
     def get_actuators(
         self,
@@ -105,7 +99,7 @@ if __name__ == "__main__":
     KbotJumpingLSTMTask.launch(
         KbotJumpingLSTMTaskConfig(
             num_envs=2048,
-            num_batches=64,
+            batch_size=256,
             num_passes=8,
             # Simulation parameters.
             dt=0.005,
