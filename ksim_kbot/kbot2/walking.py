@@ -346,9 +346,7 @@ class KbotWalkingTask(ksim.PPOTask[KbotWalkingTaskConfig]):
             return ksim.TorqueActuators()
 
     def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
-        return [
-            ksim.WeightRandomization(scale=0.01),
-        ]
+        return []
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
         return [
@@ -367,7 +365,10 @@ class KbotWalkingTask(ksim.PPOTask[KbotWalkingTaskConfig]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            ksim.LinearVelocityCommand(x_range=(-0.1, 0.1), y_range=(-0.1, 0.1), switch_prob=0.0, zero_prob=0.0),
+            ksim.LinearVelocityCommand(
+                x_range=(0.0, 1.0),
+                y_range=(0.0, 0.0),
+            ),
         ]
 
     # from ksim.rewards import AngularVelocityXYPenalty, LinearVelocityZPenalty,TerminationPenalty, JointVelocityPenalty
@@ -525,7 +526,7 @@ if __name__ == "__main__":
     KbotWalkingTask.launch(
         KbotWalkingTaskConfig(
             num_envs=4096,
-            num_batches=64,
+            batch_size=256,
             num_passes=10,
             # Simulation parameters.
             dt=0.002,

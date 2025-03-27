@@ -1,4 +1,5 @@
-"""Defines simple task for training a standing policy for K-Bot."""
+# mypy: disable-error-code="override"
+"""Defines simple task for training a getup policy for K-Bot."""
 
 from dataclasses import dataclass
 from typing import Generic, TypeVar
@@ -34,8 +35,6 @@ MAX_TORQUE = {
     "04": 90.0,
 }
 
-Config = TypeVar("Config", bound="KbotGetupTaskConfig")
-
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
@@ -63,7 +62,7 @@ class ResetDefaultJointPosition(ksim.Reset):
             # xyz
             0.0,
             0.0,
-            0.4,
+            0.1,
             # quat
             0.7071,
             0.7071,
@@ -160,8 +159,8 @@ class JointDeviationPenalty(ksim.Reward):
     height_threshold: float = attrs.field(default=0.5)
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        height = trajectory.qpos[:, 2]
-        diff = trajectory.qpos[:, 7:] - jnp.array(self.joint_targets)
+        height = trajectory.qpos[..., 2]
+        diff = trajectory.qpos[..., 7:] - jnp.array(self.joint_targets)
         diff = jnp.sum(jnp.square(diff), axis=-1)
         # Gate the reward subject to the height.
         gate = height > self.height_threshold
@@ -175,7 +174,7 @@ class StandStillPenalty(ksim.Reward):
     height_threshold: float = attrs.field(default=0.5)
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        height = trajectory.qpos[:, 2]
+        height = trajectory.qpos[..., 2]
         cost = jnp.sum(jnp.square(trajectory.qvel[..., :2]), axis=-1)
         # Gate the reward subject to the height.
         gate = height > self.height_threshold
@@ -190,7 +189,7 @@ class UpwardPositionReward(ksim.Reward):
     sensitivity: float = attrs.field(default=10)
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        pos_after = trajectory.qpos[:, 2]
+        pos_after = trajectory.qpos[..., 2]
         diff = jnp.abs(pos_after - self.target_pos)
         return jnp.exp(-self.sensitivity * diff)
 
@@ -217,7 +216,7 @@ class StationaryPenalty(ksim.Reward):
         return xax.get_norm(trajectory.qvel[..., :2], self.norm).sum(axis=-1)
 
 
-class KbotActor(eqx.Module):
+class KbotGetupActor(eqx.Module):
     """Actor for the walking task."""
 
     mlp: eqx.nn.MLP
@@ -290,7 +289,7 @@ class KbotActor(eqx.Module):
         return distrax.Normal(mean_n, std_n)
 
 
-class KbotCriticGetup(eqx.Module):
+class KbotGetupCritic(eqx.Module):
     """Critic for the getup task."""
 
     mlp: eqx.nn.MLP
@@ -333,18 +332,18 @@ class KbotCriticGetup(eqx.Module):
 
 
 class KbotModel(eqx.Module):
-    actor: KbotActor
-    critic: KbotCriticGetup
+    actor: KbotGetupActor
+    critic: KbotGetupCritic
 
     def __init__(self, key: PRNGKeyArray) -> None:
-        self.actor = KbotActor(
+        self.actor = KbotGetupActor(
             key,
             min_std=0.01,
             max_std=1.0,
             var_scale=1.0,
             mean_scale=1.0,
         )
-        self.critic = KbotCriticGetup(key)
+        self.critic = KbotGetupCritic(key)
 
 
 @dataclass
@@ -359,9 +358,6 @@ Config = TypeVar("Config", bound=KbotGetupTaskConfig)
 
 
 class KbotGetupTask(KbotStandingTask[Config], Generic[Config]):
-    def get_model(self, key: PRNGKeyArray) -> KbotModel:
-        return KbotModel(key)
-
     def _run_critic(
         self,
         model: KbotModel,
@@ -372,7 +368,7 @@ class KbotGetupTask(KbotStandingTask[Config], Generic[Config]):
         joint_vel_n = observations["joint_velocity_observation"]
         imu_acc_3 = observations["imu_acc_obs"]
         imu_gyro_3 = observations["imu_gyro_obs"]
-        lin_vel_cmd_2 = commands["linear_velocity_command"]
+        lin_vel_cmd_2 = commands["linear_velocity_step_command"]
         last_action_n = observations["last_action_observation"]
         height_orientation_5 = observations["height_orientation_observation"]
         history_n = observations["history_observation"]
@@ -388,18 +384,7 @@ class KbotGetupTask(KbotStandingTask[Config], Generic[Config]):
         )
 
     def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
-        return [
-            ksim.WeightRandomization(scale=0.05),
-            ksim.StaticFrictionRandomization(scale_lower=0.5, scale_upper=2.0),
-            ksim.ArmatureRandomization(scale_lower=1.0, scale_upper=1.05),
-            ksim.TorsoMassRandomization.from_body_name(
-                model=physics_model,
-                scale_lower=-1.0,
-                scale_upper=1.0,
-                torso_body_name="Torso_Side_Right",
-            ),
-            ksim.JointDampingRandomization(scale_lower=0.95, scale_upper=1.05),
-        ]
+        return []
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
         return [
@@ -426,17 +411,23 @@ class KbotGetupTask(KbotStandingTask[Config], Generic[Config]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            ksim.LinearVelocityCommand(x_range=(-0.0, 0.0), y_range=(-0.0, 0.0), switch_prob=0.0, zero_prob=0.0),
+            ksim.LinearVelocityStepCommand(
+                x_range=(-0.0, 0.0),
+                y_range=(-0.0, 0.0),
+                x_fwd_prob=0.0,
+                y_fwd_prob=0.0,
+            ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             UpwardPositionReward(scale=1.0),
             UpwardVelocityReward(scale=0.05),
-            StationaryPenalty(scale=-0.05),
-            ksim.ActuatorForcePenalty(scale=-0.01),
-            StandStillPenalty(scale=-0.2),
-            JointDeviationPenalty(scale=-0.01),
+            # For now we do not penalize for wild moves.
+            # StandStillPenalty(scale=-0.2),
+            # JointDeviationPenalty(scale=-0.01),
+            # StationaryPenalty(scale=-0.05),
+            # ksim.ActuatorForcePenalty(scale=-0.01),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -446,11 +437,17 @@ class KbotGetupTask(KbotStandingTask[Config], Generic[Config]):
 
 
 if __name__ == "__main__":
-    # python -m ksim_kbot.kbot2.getup run_environment=True
+    # To run training, use the following command:
+    # python -m ksim_kbot.kbot2.getup
+    # To visualize the environment, use the following command:
+    # python -m ksim_kbot.kbot2.getup \
+    # run_environment=True \
+    # run_environment_num_seconds=1 \
+    # run_environment_save_path=videos/test.mp4
     KbotGetupTask.launch(
         KbotGetupTaskConfig(
             num_envs=2,
-            num_batches=1,
+            batch_size=1,
             num_passes=10,
             # Simulation parameters.
             dt=0.002,
