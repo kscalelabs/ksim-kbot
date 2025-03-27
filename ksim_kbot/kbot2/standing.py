@@ -218,9 +218,9 @@ class KbotActor(eqx.Module):
         self,
         joint_pos_n: Array,
         joint_vel_n: Array,
-        imu_acc_n: Array,
-        imu_gyro_n: Array,
-        lin_vel_cmd_n: Array,
+        imu_acc_3: Array,
+        imu_gyro_3: Array,
+        lin_vel_cmd_2: Array,
         last_action_n: Array,
         history_n: Array,
     ) -> distrax.Normal:
@@ -228,9 +228,9 @@ class KbotActor(eqx.Module):
             [
                 joint_pos_n,
                 joint_vel_n,
-                imu_acc_n,
-                imu_gyro_n,
-                lin_vel_cmd_n,
+                imu_acc_3,
+                imu_gyro_3,
+                lin_vel_cmd_2,
                 last_action_n,
                 # history_n,
             ],
@@ -275,9 +275,9 @@ class KbotCritic(eqx.Module):
         self,
         joint_pos_n: Array,
         joint_vel_n: Array,
-        imu_acc_n: Array,
-        imu_gyro_n: Array,
-        lin_vel_cmd_n: Array,
+        imu_acc_3: Array,
+        imu_gyro_3: Array,
+        lin_vel_cmd_2: Array,
         last_action_n: Array,
         history_n: Array,
     ) -> Array:
@@ -285,9 +285,9 @@ class KbotCritic(eqx.Module):
             [
                 joint_pos_n,
                 joint_vel_n,
-                imu_acc_n,
-                imu_gyro_n,
-                lin_vel_cmd_n,
+                imu_acc_3,
+                imu_gyro_3,
+                lin_vel_cmd_2,
                 last_action_n,
                 # history_n,
             ],
@@ -441,23 +441,17 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
 
     def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
         return [
-            ksim.WeightRandomization(scale=0.05),
             ksim.StaticFrictionRandomization(scale_lower=0.5, scale_upper=2.0),
-            # ksim.JointZeroPositionRandomization(scale_lower=-0.05, scale_upper=0.05),
+            ksim.JointZeroPositionRandomization(scale_lower=-0.05, scale_upper=0.05),
+            ksim.ArmatureRandomization(scale_lower=1.0, scale_upper=1.05),
+            ksim.MassMultiplicationRandomization.from_body_name(physics_model, "Torso_Side_Right"),
+            ksim.JointDampingRandomization(scale_lower=0.95, scale_upper=1.05),
             # ksim.FloorFrictionRandomization.from_body_name(
             #     model=physics_model,
             #     scale_lower=0.2,
             #     scale_upper=0.6,
             #     floor_body_name="floor",
             # ),
-            ksim.ArmatureRandomization(scale_lower=1.0, scale_upper=1.05),
-            ksim.TorsoMassRandomization.from_body_name(
-                model=physics_model,
-                scale_lower=-1.0,
-                scale_upper=1.0,
-                torso_body_name="Torso_Side_Right",
-            ),
-            ksim.JointDampingRandomization(scale_lower=0.95, scale_upper=1.05),
         ]
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
@@ -505,9 +499,10 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
             # ksim.PushEvent(
-            #     probability=0.0,
-            #     interval_range=(0.0, 0.2),
-            #     linear_force_scale=0.0,
+            #     x_force=1.0,
+            #     y_force=1.0,
+            #     z_force=0.0,
+            #     interval_range=(1.0, 2.0),
             # ),
         ]
 
@@ -552,8 +547,18 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            ksim.LinearVelocityCommand(x_range=(-0.0, 0.0), y_range=(-0.0, 0.0), switch_prob=0.0, zero_prob=0.0),
-            ksim.AngularVelocityCommand(scale=0.0, switch_prob=0.0, zero_prob=0.0),
+            ksim.LinearVelocityStepCommand(
+                x_range=(0.0, 0.0),
+                y_range=(0.0, 0.0),
+                x_fwd_prob=0.8,
+                y_fwd_prob=0.5,
+                x_zero_prob=0.2,
+                y_zero_prob=0.8,
+            ),
+            ksim.AngularVelocityStepCommand(
+                scale=0.0,
+                zero_prob=1.0,
+            ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
@@ -592,8 +597,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ksim.ActuatorForcePenalty(scale=-0.01),
             ksim.BaseHeightReward(scale=1.0, height_target=0.9),
             ksim.ActionSmoothnessPenalty(scale=-0.01),
-            ksim.LinearVelocityTrackingPenalty(scale=-0.05),
-            ksim.AngularVelocityTrackingPenalty(scale=-0.05),
+            # ksim.LinearVelocityTrackingPenalty(scale=-0.05),
+            # ksim.AngularVelocityTrackingPenalty(scale=-0.05),
             # FeetSlipPenalty(scale=-0.01),
         ]
 
@@ -617,12 +622,12 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     ) -> distrax.Normal:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
-        imu_acc_n = observations["imu_acc_obs"]
-        imu_gyro_n = observations["imu_gyro_obs"]
-        lin_vel_cmd_n = commands["linear_velocity_command"]
+        imu_acc_3 = observations["imu_acc_obs"]
+        imu_gyro_3 = observations["imu_gyro_obs"]
+        lin_vel_cmd_2 = commands["linear_velocity_step_command"]
         last_action_n = observations["last_action_observation"]
         history_n = observations["history_observation"]
-        return model.actor(joint_pos_n, joint_vel_n, imu_acc_n, imu_gyro_n, lin_vel_cmd_n, last_action_n, history_n)
+        return model.actor(joint_pos_n, joint_vel_n, imu_acc_3, imu_gyro_3, lin_vel_cmd_2, last_action_n, history_n)
 
     def _run_critic(
         self,
@@ -632,12 +637,12 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     ) -> Array:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
-        imu_acc_n = observations["imu_acc_obs"]
-        imu_gyro_n = observations["imu_gyro_obs"]
-        lin_vel_cmd_n = commands["linear_velocity_command"]
+        imu_acc_3 = observations["imu_acc_obs"]
+        imu_gyro_3 = observations["imu_gyro_obs"]
+        lin_vel_cmd_2 = commands["linear_velocity_step_command"]
         last_action_n = observations["last_action_observation"]
         history_n = observations["history_observation"]
-        return model.critic(joint_pos_n, joint_vel_n, imu_acc_n, imu_gyro_n, lin_vel_cmd_n, last_action_n, history_n)
+        return model.critic(joint_pos_n, joint_vel_n, imu_acc_3, imu_gyro_3, lin_vel_cmd_2, last_action_n, history_n)
 
     def get_on_policy_log_probs(
         self,
@@ -708,17 +713,17 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
 
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
-        imu_acc_n = observations["imu_acc_obs"]
-        imu_gyro_n = observations["imu_gyro_obs"]
-        lin_vel_cmd_n = commands["linear_velocity_command"]
+        imu_acc_3 = observations["imu_acc_obs"]
+        imu_gyro_3 = observations["imu_gyro_obs"]
+        lin_vel_cmd_2 = commands["linear_velocity_command"]
         last_action_n = observations["last_action_observation"]
         history_n = jnp.concatenate(
             [
                 joint_pos_n,
                 joint_vel_n,
-                imu_acc_n,
-                imu_gyro_n,
-                lin_vel_cmd_n,
+                imu_acc_3,
+                imu_gyro_3,
+                lin_vel_cmd_2,
                 last_action_n,
                 action_n,
             ],
@@ -787,8 +792,9 @@ if __name__ == "__main__":
     KbotStandingTask.launch(
         KbotStandingTaskConfig(
             num_envs=4096,
-            num_batches=64,
+            batch_size=256,
             num_passes=10,
+            epochs_per_log_step=1,
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,
@@ -796,6 +802,7 @@ if __name__ == "__main__":
             min_action_latency=0.0,
             valid_every_n_steps=25,
             valid_first_n_steps=0,
+            save_every_n_steps=25,
             rollout_length_seconds=5.0,
             # PPO parameters
             gamma=0.97,
@@ -806,6 +813,5 @@ if __name__ == "__main__":
             max_grad_norm=1.0,
             use_mit_actuators=True,
             export_for_inference=True,
-            save_every_n_steps=25,
         ),
     )
