@@ -142,25 +142,69 @@ class LastActionObservation(ksim.Observation):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class UpwardPositionReward(ksim.Reward):
+class JointDeviationPenalty(ksim.Reward):
+    """Penalty for joint deviations."""
+
+    joint_targets: tuple[float, ...] = attrs.field(
+        default=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    )
+    height_threshold: float = attrs.field(default=0.7)
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        height = trajectory.qpos[:, 2]
+        diff = trajectory.qpos[:, 7:] - jnp.array(self.joint_targets)
+        diff =jnp.sum(jnp.square(diff), axis=-1)
+        # y2 = jnp.zeros_like(diff.shape[0])
+        x = jax.lax.cond(
+            jnp.all(height < self.height_threshold),
+            lambda: diff,
+            lambda: jnp.zeros_like(diff),
+        )
+        return x
+
+
+@attrs.define(frozen=True, kw_only=True)
+class StandStillReward(ksim.Reward):
+    """Reward for standing still."""
+    height_threshold: float = attrs.field(default=0.7)
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        height = trajectory.qpos[:, 2]
+        cost = jnp.sum(jnp.square(trajectory.qvel[..., :2]), axis=-1)
+        rew = jnp.exp(-0.5 * cost)
+        # y = rew
+        # y2 = jnp.zeros_like(rew.shape[0])
+        x = jax.lax.cond(
+            jnp.all(height < self.height_threshold),
+            lambda: rew,
+            lambda: jnp.zeros_like(rew),
+        )
+        return x
+
+
+@attrs.define(frozen=True, kw_only=True)
+class UpwardPositionPenalty(ksim.Reward):
     """Reward for the upward position."""
 
     dt: float = attrs.field(default=0.02)
+    target_pos: float = attrs.field(default=0.91)
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         pos_after = trajectory.qpos[:, 2]
-        uph_cost = (pos_after -  0)/ self.dt
+        uph_cost = jnp.abs(pos_after - self.target_pos) #/ self.dt
         return uph_cost
+
+
 
 
 @attrs.define(frozen=True, kw_only=True)
 class UpwardVelocityReward(ksim.Reward):
     """Incentives upward velocity."""
-
     velocity_clip: float = attrs.field(default=10.0)
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         z_delta = jnp.clip(trajectory.qvel[..., 2], 0, self.velocity_clip)
+
         return z_delta
     
 
@@ -487,10 +531,12 @@ class KbotGetupTask(ksim.PPOTask[KbotGetupTaskConfig], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            UpwardPositionReward(scale=0.5),
-            # UpwardVelocityReward(scale=0.1),
+            UpwardPositionPenalty(scale=-0.5),
+            UpwardVelocityReward(scale=0.05),
             StationaryPenalty(scale=-0.05),
             ksim.ActuatorForcePenalty(scale=-0.01),
+            StandStillReward(scale=0.2),
+            JointDeviationPenalty(scale=-0.01),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
