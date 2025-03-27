@@ -1,4 +1,4 @@
-"""Defines simple task for training a walking policy for K-Bot."""
+"""Defines simple task for training a standing policy for K-Bot."""
 
 import asyncio
 from dataclasses import dataclass
@@ -19,6 +19,7 @@ from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
+
 OBS_SIZE = 20 * 2 + 3 + 3 + 40 # = 46 position + velocity + imu_acc + imu_gyro + last_action
 CMD_SIZE = 2
 NUM_OUTPUTS = 20 * 2  # position + velocity
@@ -30,13 +31,13 @@ HISTORY_LENGTH = 0
 NUM_INPUTS = (OBS_SIZE + CMD_SIZE) + SINGLE_STEP_HISTORY_SIZE * HISTORY_LENGTH
 
 MAX_TORQUE = {
-    "00": 1.0,
-    "02": 14.0,
-    "03": 40.0,
-    "04": 60.0,
+    "00": 15.0,
+    "02": 20.0,
+    "03": 60.0,
+    "04": 90.0,
 }
 
-Config = TypeVar("Config", bound="KbotStandingTaskConfig")
+Config = TypeVar("Config", bound="KbotGetupTaskConfig")
 
 
 @jax.tree_util.register_dataclass
@@ -46,25 +47,71 @@ class AuxOutputs:
     values: Array
 
 
+@attrs.define(frozen=True, kw_only=True)
+class EnergyTermination(ksim.Termination):
+    energy_termination_threshold: float = attrs.field(default=100.0)
+
+    def __call__(self, data: ksim.PhysicsData) -> jax.Array:
+        energy = jnp.sum(jnp.abs(data.actuator_force * data.qvel[6:]))
+        energy_termination = energy > jnp.inf
+        return energy_termination
+
+
+@attrs.define(frozen=True, kw_only=True)
+class ResetDefaultJointPosition(ksim.Reset):
+    """Resets the joint positions of the robot to random values."""
+
+    default_targets: tuple[float, ...] = attrs.field(
+        default=(
+            # xyz
+            0.0,
+            0.0,
+            0.05,
+            # quat
+            0.7071,
+            0.7071,
+            0.0,
+            0.0,
+            # qpos
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+        )
+    )
+
+    def __call__(self, data: ksim.PhysicsData, rng: PRNGKeyArray) -> ksim.PhysicsData:
+        qpos = data.qpos
+        match type(data):
+            case mujoco.MjData:
+                qpos[:] = self.default_targets
+            case mjx.Data:
+                qpos = qpos.at[:].set(self.default_targets)
+        return ksim.utils.mujoco.update_data_field(data, "qpos", qpos)
+
+
 @attrs.define(frozen=True)
 class HistoryObservation(ksim.Observation):
     def observe(self, state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
         if not isinstance(state.carry, Array):
             raise ValueError("Carry is not a history array")
         return state.carry
-
-
-@attrs.define(frozen=True, kw_only=True)
-class JointDeviationPenalty(ksim.Reward):
-    """Penalty for joint deviations."""
-
-    joint_targets: tuple[float, ...] = attrs.field(
-        default=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-    )
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        diff = trajectory.qpos[:, 7:] - jnp.array(self.joint_targets)
-        return jnp.sum(jnp.square(diff), axis=-1)
 
 
 @attrs.define(frozen=True)
@@ -95,74 +142,36 @@ class LastActionObservation(ksim.Observation):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class ResetDefaultJointPosition(ksim.Reset):
-    """Resets the joint positions of the robot to random values."""
+class UpwardPositionReward(ksim.Reward):
+    """Reward for the upward position."""
 
-    default_targets: tuple[float, ...] = attrs.field(
-        default=(
-            # xyz
-            0.0,
-            0.0,
-            0.0,
-            # quat
-            1.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            # qpos
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        )
-    )
+    dt: float = attrs.field(default=0.02)
 
-    def __call__(self, data: ksim.PhysicsData, rng: PRNGKeyArray) -> ksim.PhysicsData:
-        qpos = data.qpos
-        match type(data):
-            case mujoco.MjData:
-                qpos[:] = self.default_targets
-            case mjx.Data:
-                qpos = qpos.at[:].set(self.default_targets)
-        return ksim.utils.mujoco.update_data_field(data, "qpos", qpos)
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        pos_after = trajectory.qpos[:, 2]
+        uph_cost = (pos_after -  0)/ self.dt
+        return uph_cost
 
 
 @attrs.define(frozen=True, kw_only=True)
-class DHControlPenalty(ksim.Reward):
-    """Legacy default humanoid control cost that penalizes squared action magnitude."""
+class UpwardVelocityReward(ksim.Reward):
+    """Incentives upward velocity."""
+
+    velocity_clip: float = attrs.field(default=10.0)
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        return jnp.sum(jnp.square(trajectory.action), axis=-1)
-
+        z_delta = jnp.clip(trajectory.qvel[..., 2], 0, self.velocity_clip)
+        return z_delta
+    
 
 @attrs.define(frozen=True, kw_only=True)
-class DHHealthyReward(ksim.Reward):
-    """Legacy default humanoid healthy reward that gives binary reward based on height."""
+class StationaryPenalty(ksim.Reward):
+    """Incentives staying in place laterally."""
 
-    healthy_z_lower: float = attrs.field(default=0.5)
-    healthy_z_upper: float = attrs.field(default=1.5)
+    norm: xax.NormType = attrs.field(default="l2")
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        height = trajectory.qpos[:, 2]
-        is_healthy = jnp.where(height < self.healthy_z_lower, 0.0, 1.0)
-        is_healthy = jnp.where(height > self.healthy_z_upper, 0.0, is_healthy)
-        return is_healthy
+        return xax.get_norm(trajectory.qvel[..., :2], self.norm).sum(axis=-1)
 
 
 class KbotActor(eqx.Module):
@@ -340,6 +349,7 @@ class KbotGetupTaskConfig(ksim.PPOConfig):
     )
 
 
+
 class KbotGetupTask(ksim.PPOTask[KbotGetupTaskConfig], Generic[Config]):
     def get_optimizer(self) -> optax.GradientTransformation:
         """Builds the optimizer.
@@ -447,41 +457,7 @@ class KbotGetupTask(ksim.PPOTask[KbotGetupTaskConfig], Generic[Config]):
             ksim.RandomBaseVelocityXYReset(scale=0.01),
             ksim.RandomJointPositionReset(scale=0.02),
             ksim.RandomJointVelocityReset(scale=0.02),
-            ResetDefaultJointPosition(
-                default_targets=(
-                    0.0,
-                    0.0,
-                    0.91,
-                    1.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # right arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # left arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # right leg
-                    -0.23,
-                    0.0,
-                    0.0,
-                    -0.441,
-                    0.195,
-                    # left leg
-                    0.23,
-                    0.0,
-                    0.0,
-                    0.441,
-                    -0.195,
-                )
-            ),
+            ResetDefaultJointPosition(),
         ]
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
@@ -495,35 +471,7 @@ class KbotGetupTask(ksim.PPOTask[KbotGetupTaskConfig], Generic[Config]):
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
-            # ksim.JointPositionObservation(noise=0.02),
-            JointPositionObservation(
-                default_targets=(
-                    # right arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # left arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # right leg
-                    -0.23,
-                    0.0,
-                    0.0,
-                    -0.441,
-                    0.195,
-                    # left leg
-                    0.23,
-                    0.0,
-                    0.0,
-                    0.441,
-                    -0.195,
-                )
-            ),
+            JointPositionObservation(noise=0.02),
             ksim.JointVelocityObservation(noise=0.5),
             ksim.ActuatorForceObservation(),
             ksim.SensorObservation.create(physics_model, "imu_acc", noise=0.5),
@@ -539,17 +487,15 @@ class KbotGetupTask(ksim.PPOTask[KbotGetupTaskConfig], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            DHControlPenalty(scale=-0.05),
-            DHHealthyReward(scale=0.5),
+            UpwardPositionReward(scale=0.5),
+            # UpwardVelocityReward(scale=0.1),
+            StationaryPenalty(scale=-0.05),
             ksim.ActuatorForcePenalty(scale=-0.01),
-            ksim.BaseHeightReward(scale=1.0, height_target=0.9),
-            ksim.ActionSmoothnessPenalty(scale=-0.01),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
-            ksim.RollTooGreatTermination(max_roll=2.04),
-            ksim.PitchTooGreatTermination(max_pitch=2.04),
+            EnergyTermination(),
         ]
 
     def get_model(self, key: PRNGKeyArray) -> KbotModel:

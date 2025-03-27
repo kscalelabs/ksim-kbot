@@ -30,6 +30,7 @@
   <compiler angle="radian" />
 
   <asset>
+  
     <material name="floating_base_link_material" rgba="1 0 0 1" />
     <material name="Torso_Side_Right_material" rgba="0.262745 0.282353 0.301961 1" />
     <material name="imu_material" rgba="0.615686 0.811765 0.929412 1" />
