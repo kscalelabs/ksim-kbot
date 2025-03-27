@@ -486,11 +486,11 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
-            ksim.PushEvent(
-                probability=0.0005,
-                interval_range=(1, 3),
-                linear_force_scale=0.2,
-            ),
+            # ksim.PushEvent(
+            #     probability=0.0,
+            #     interval_range=(0.0, 0.2),
+            #     linear_force_scale=0.0,
+            # ),
         ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
@@ -535,6 +535,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
             ksim.LinearVelocityCommand(x_range=(-0.0, 0.0), y_range=(-0.0, 0.0), switch_prob=0.0, zero_prob=0.0),
+            ksim.AngularVelocityCommand(scale=0.0, switch_prob=0.0, zero_prob=0.0),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
@@ -573,6 +574,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ksim.ActuatorForcePenalty(scale=-0.01),
             ksim.BaseHeightReward(scale=1.0, height_target=0.9),
             ksim.ActionSmoothnessPenalty(scale=-0.01),
+            ksim.LinearVelocityTrackingPenalty(scale=-0.05),
+            ksim.AngularVelocityTrackingPenalty(scale=-0.05),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
