@@ -23,8 +23,8 @@ class HistoryObservation(ksim.Observation):
 
 @attrs.define(frozen=True)
 class JointPositionObservation(ksim.Observation):
-    noise: float = attrs.field(default=0.0)
     default_targets: tuple[float, ...] = attrs.field()
+    noise: float = attrs.field(default=0.0)
 
     def observe(self, rollout_state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
         qpos = rollout_state.physics_state.data.qpos[7:]  # (N,)
