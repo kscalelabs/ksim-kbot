@@ -40,19 +40,17 @@ push-to-pypi: build-for-pypi
 #       Static Checks      #
 # ------------------------ #
 
-py-files := $(shell find . -name '*.py')
-
 format:
-	@black $(py-files)
-	@ruff format $(py-files)
-	@ruff check --fix $(py-files)
+	@black ksim_kbot
+	@ruff format ksim_kbot
+	@ruff check --fix ksim_kbot
 .PHONY: format
 
 static-checks:
-	@black --diff --check $(py-files)
-	@ruff check $(py-files)
-	@mypy --install-types --non-interactive $(py-files)
-.PHONY: lint
+	@black --diff --check ksim_kbot
+	@ruff check ksim_kbot
+	@mypy --install-types --non-interactive ksim_kbot
+.PHONY: static-checks
 
 # ------------------------ #
 #        Unit tests        #
