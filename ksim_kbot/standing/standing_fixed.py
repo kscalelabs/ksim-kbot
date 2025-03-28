@@ -18,7 +18,7 @@ from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
-from ksim_kbot.kbot2.common import (
+from ksim_kbot.common import (
     DHControlPenalty,
     DHHealthyReward,
     HistoryObservation,
