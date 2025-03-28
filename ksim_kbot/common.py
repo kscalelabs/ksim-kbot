@@ -135,11 +135,3 @@ class DHHealthyReward(ksim.Reward):
         is_healthy = jnp.where(height < self.healthy_z_lower, 0.0, 1.0)
         is_healthy = jnp.where(height > self.healthy_z_upper, 0.0, is_healthy)
         return is_healthy
-
-
-class OrientationPenalty(ksim.Reward):
-    """Penalty for the orientation of the robot."""
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        return jnp.sum(jnp.square(z_vector[:2]), axis=-1)
-
