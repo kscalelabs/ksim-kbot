@@ -12,7 +12,7 @@ import ksim
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 
-from .standing import AuxOutputs, KbotStandingTask, KbotStandingTaskConfig
+from ksim_kbot.kbot2.standing.standing import AuxOutputs, KbotStandingTask, KbotStandingTaskConfig
 
 OBS_SIZE = 20 * 2 + 3 + 3  # = 46 position + velocity + imu_acc + imu_gyro
 CMD_SIZE = 2
@@ -321,9 +321,9 @@ class KbotStandingLSTMTask(KbotStandingTask[Config], Generic[Config]):
 
 
 if __name__ == "__main__":
-    # python -m ksim_kbot.kbot2.standing_lstm run_environment=True
+    # python -m ksim_kbot.kbot2.standing.standing_lstm run_environment=True
     # To resume training:
-    # python -m ksim_kbot.kbot2.standing_lstm load_from_ckpt_path=*.run_*.ckpt.*.bin
+    # python -m ksim_kbot.kbot2.standing.standing_lstm load_from_ckpt_path=*.run_*.ckpt.*.bin
     KbotStandingLSTMTask.launch(
         KbotStandingLSTMTaskConfig(
             num_envs=2048,

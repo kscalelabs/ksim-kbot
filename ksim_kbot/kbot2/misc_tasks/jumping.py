@@ -11,7 +11,7 @@ import xax
 from jaxtyping import Array
 from kscale.web.gen.api import JointMetadataOutput
 
-from .standing import KbotStandingTask, KbotStandingTaskConfig
+from ksim_kbot.kbot2.standing.standing import KbotStandingTask, KbotStandingTaskConfig
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -84,9 +84,9 @@ class KbotJumpingTask(KbotStandingTask[KbotJumpingTaskConfig]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m ksim_kbot.kbot2.jumping
+    #   python -m ksim_kbot.kbot2.misc_tasks.jumping
     # To visualize the environment, use the following command:
-    #   python -m ksim_kbot.kbot2.jumping run_environment=True
+    #   python -m ksim_kbot.kbot2.misc_tasks.jumping run_environment=True
     KbotJumpingTask.launch(
         KbotJumpingTaskConfig(
             num_envs=2048,

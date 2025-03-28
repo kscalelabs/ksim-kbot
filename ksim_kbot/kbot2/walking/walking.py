@@ -18,6 +18,8 @@ from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
+from ksim_kbot.kbot2.common import DHControlPenalty, DHHealthyReward
+
 OBS_SIZE = 445
 CMD_SIZE = 2
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
@@ -38,9 +40,19 @@ class JointDeviationPenalty(ksim.Reward):
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         diff = trajectory.qpos[:, 7:] - jnp.zeros_like(trajectory.qpos[:, 7:])
         x = jnp.sum(jnp.square(diff), axis=-1)
-        # y = jnp.abs(diff)
-        # y2 = jnp.exp(-2 * jnp.abs(diff)) - 0.2 * jnp.abs(diff).clip(0, 0.5)
         return x
+
+
+@attrs.define(frozen=True)
+class DHJointPositionObservation(ksim.Observation):
+    noise: float = attrs.field(default=0.0)
+
+    def observe(self, state: ksim.PhysicsData, rng: PRNGKeyArray) -> Array:
+        qpos = state.qpos[2:]  # (N,)
+        return qpos
+
+    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
+        return observation + jax.random.normal(rng, observation.shape) * self.noise
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -65,50 +77,6 @@ class DHJointVelocityObservation(ksim.Observation):
 
     def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
         return observation + jax.random.normal(rng, observation.shape) * self.noise
-
-
-@attrs.define(frozen=True)
-class DHJointPositionObservation(ksim.Observation):
-    noise: float = attrs.field(default=0.0)
-
-    def observe(self, state: ksim.PhysicsData, rng: PRNGKeyArray) -> Array:
-        qpos = state.qpos[2:]  # (N,)
-        return qpos
-
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return observation + jax.random.normal(rng, observation.shape) * self.noise
-
-
-@attrs.define(frozen=True, kw_only=True)
-class DHForwardReward(ksim.Reward):
-    """Incentives forward movement."""
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        # Take just the x velocity component
-        x_delta = -jnp.clip(trajectory.qvel[..., 1], -1.0, 1.0)
-        return x_delta
-
-
-@attrs.define(frozen=True, kw_only=True)
-class DHControlPenalty(ksim.Reward):
-    """Legacy default humanoid control cost that penalizes squared action magnitude."""
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        return jnp.sum(jnp.square(trajectory.action), axis=-1)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class DHHealthyReward(ksim.Reward):
-    """Legacy default humanoid healthy reward that gives binary reward based on height."""
-
-    healthy_z_lower: float = attrs.field(default=0.5)
-    healthy_z_upper: float = attrs.field(default=1.5)
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        height = trajectory.qpos[:, 2]
-        is_healthy = jnp.where(height < self.healthy_z_lower, 0.0, 1.0)
-        is_healthy = jnp.where(height > self.healthy_z_upper, 0.0, is_healthy)
-        return is_healthy
 
 
 class KbotActor(eqx.Module):
@@ -505,7 +473,7 @@ class KbotWalkingTask(ksim.PPOTask[KbotWalkingTaskConfig]):
 
 
 if __name__ == "__main__":
-    # python -m ksim_kbot.kbot2.walking run_environment=True
+    # python -m ksim_kbot.kbot2.walking.walking run_environment=True
     KbotWalkingTask.launch(
         KbotWalkingTaskConfig(
             num_envs=4096,

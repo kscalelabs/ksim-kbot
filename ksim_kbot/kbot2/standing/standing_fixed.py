@@ -1,11 +1,10 @@
-"""Defines simple task for training a walking policy for K-Bot."""
+"""Defines simple task for training a standing policy for K-Bot."""
 
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Generic, TypeVar
 
-import attrs
 import distrax
 import equinox as eqx
 import jax
@@ -19,9 +18,19 @@ from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
-OBS_SIZE = 20 * 2 + 3 + 3 + 40  # = 46 position + velocity + imu_acc + imu_gyro + last_action
+from ksim_kbot.kbot2.common import (
+    DHControlPenalty,
+    DHHealthyReward,
+    HistoryObservation,
+    JointDeviationPenalty,
+    JointPositionObservation,
+    LastActionObservation,
+    ResetDefaultJointPosition,
+)
+
+OBS_SIZE = 10 * 2 + 3 + 3 + 20  # = 36 position + velocity + imu_acc + imu_gyro + last_action
 CMD_SIZE = 2
-NUM_OUTPUTS = 20 * 2  # position + velocity
+NUM_OUTPUTS = 10 * 2  # position + velocity
 
 SINGLE_STEP_HISTORY_SIZE = NUM_OUTPUTS + OBS_SIZE + CMD_SIZE
 
@@ -44,144 +53,6 @@ Config = TypeVar("Config", bound="KbotStandingTaskConfig")
 class AuxOutputs:
     log_probs: Array
     values: Array
-
-
-@attrs.define(frozen=True)
-class HistoryObservation(ksim.Observation):
-    def observe(self, state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
-        if not isinstance(state.carry, Array):
-            raise ValueError("Carry is not a history array")
-        return state.carry
-
-
-@attrs.define(frozen=True, kw_only=True)
-class JointDeviationPenalty(ksim.Reward):
-    """Penalty for joint deviations."""
-
-    norm: xax.NormType = attrs.field(default="l2")
-    joint_targets: tuple[float, ...] = attrs.field(
-        default=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-    )
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        diff = trajectory.qpos[..., 7:] - jnp.array(self.joint_targets)
-        return xax.get_norm(diff, self.norm).sum(axis=-1)
-
-
-@attrs.define(frozen=True)
-class JointPositionObservation(ksim.Observation):
-    noise: float = attrs.field(default=0.0)
-    default_targets: tuple[float, ...] = attrs.field(
-        default=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-    )
-
-    def observe(self, rollout_state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
-        qpos = rollout_state.physics_state.data.qpos[7:]  # (N,)
-        diff = qpos - jnp.array(self.default_targets)
-        return diff
-
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return observation + jax.random.normal(rng, observation.shape) * self.noise
-
-
-@attrs.define(frozen=True)
-class LastActionObservation(ksim.Observation):
-    noise: float = attrs.field(default=0.0)
-
-    def observe(self, rollout_state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
-        return rollout_state.physics_state.most_recent_action
-
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return observation + jax.random.normal(rng, observation.shape) * self.noise
-
-
-@attrs.define(frozen=True, kw_only=True)
-class ResetDefaultJointPosition(ksim.Reset):
-    """Resets the joint positions of the robot to random values."""
-
-    default_targets: tuple[float, ...] = attrs.field(
-        default=(
-            # xyz
-            0.0,
-            0.0,
-            0.0,
-            # quat
-            1.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            # qpos
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        )
-    )
-
-    def __call__(self, data: ksim.PhysicsData, rng: PRNGKeyArray) -> ksim.PhysicsData:
-        qpos = data.qpos
-        match type(data):
-            case mujoco.MjData:
-                qpos[:] = self.default_targets
-            case mjx.Data:
-                qpos = qpos.at[:].set(self.default_targets)
-        return ksim.utils.mujoco.update_data_field(data, "qpos", qpos)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class FeetSlipPenalty(ksim.Reward):
-    """Penalty for feet slipping."""
-
-    norm: xax.NormType = attrs.field(default="l2")
-    observation_name: str = attrs.field(default="feet_contact_observation")
-    command_name: str = attrs.field(default="linear_velocity_step_command")
-    com_vel_obs_name: str = attrs.field(default="center_of_mass_velocity_observation")
-    command_vel_scale: float = attrs.field(default=0.02)
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        if self.observation_name not in trajectory.obs:
-            raise ValueError(f"Observation {self.observation_name} not found; add it as an observation in your task.")
-        contact = trajectory.obs[self.observation_name]
-        com_vel = trajectory.obs[self.com_vel_obs_name][..., :2]
-        return (xax.get_norm(com_vel, self.norm) * contact).sum(axis=-1)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class DHControlPenalty(ksim.Reward):
-    """Legacy default humanoid control cost that penalizes squared action magnitude."""
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        return jnp.sum(jnp.square(trajectory.action), axis=-1)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class DHHealthyReward(ksim.Reward):
-    """Legacy default humanoid healthy reward that gives binary reward based on height."""
-
-    healthy_z_lower: float = attrs.field(default=0.5)
-    healthy_z_upper: float = attrs.field(default=1.5)
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        height = trajectory.qpos[..., 2]
-        is_healthy = jnp.where(height < self.healthy_z_lower, 0.0, 1.0)
-        is_healthy = jnp.where(height > self.healthy_z_upper, 0.0, is_healthy)
-        return is_healthy
 
 
 class KbotActor(eqx.Module):
@@ -378,7 +249,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         return optimizer
 
     def get_mujoco_model(self) -> mujoco.MjModel:
-        mjcf_path = (Path(self.config.robot_urdf_path) / "scene.mjcf").resolve().as_posix()
+        mjcf_path = (Path(self.config.robot_urdf_path) / "scene_fixed.mjcf").resolve().as_posix()
         mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
 
         mj_model.opt.timestep = jnp.array(self.config.dt)
@@ -411,18 +282,6 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                 pos_action_noise_type="gaussian",
                 vel_action_noise_type="gaussian",
                 ctrl_clip=[
-                    # right arm
-                    MAX_TORQUE["03"],
-                    MAX_TORQUE["03"],
-                    MAX_TORQUE["02"],
-                    MAX_TORQUE["02"],
-                    MAX_TORQUE["00"],
-                    # left arm
-                    MAX_TORQUE["03"],
-                    MAX_TORQUE["03"],
-                    MAX_TORQUE["02"],
-                    MAX_TORQUE["02"],
-                    MAX_TORQUE["00"],
                     # right leg
                     MAX_TORQUE["04"],
                     MAX_TORQUE["03"],
@@ -469,18 +328,6 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                     0.0,
                     0.0,
                     0.0,
-                    # right arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # left arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
                     # right leg
                     -0.23,
                     0.0,
@@ -509,21 +356,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
-            # ksim.JointPositionObservation(noise=0.02),
             JointPositionObservation(
                 default_targets=(
-                    # right arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # left arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
                     # right leg
                     -0.23,
                     0.0,
@@ -536,7 +370,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                     0.0,
                     0.441,
                     -0.195,
-                )
+                ),
+                noise=0.01,
             ),
             ksim.JointVelocityObservation(noise=0.5),
             ksim.ActuatorForceObservation(),
@@ -567,18 +402,6 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             JointDeviationPenalty(
                 scale=-0.3,
                 joint_targets=(
-                    # right arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # left arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
                     # right leg
                     -0.23,
                     0.0,
@@ -745,9 +568,9 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    # python -m ksim_kbot.kbot2.standing
+    # python -m ksim_kbot.kbot2.standing.standing_fixed
     # To visualize the environment, use the following command:
-    # python -m ksim_kbot.kbot2.standing \
+    # python -m ksim_kbot.kbot2.standing.standing_fixed \
     #  run_environment=True \
     #  run_environment_num_seconds=1 \
     #  run_environment_save_path=videos/test.mp4

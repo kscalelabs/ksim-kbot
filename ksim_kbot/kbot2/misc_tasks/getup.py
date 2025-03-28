@@ -16,7 +16,7 @@ from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 from mujoco import mjx
 
-from ksim_kbot.kbot2.standing import KbotStandingTask, KbotStandingTaskConfig
+from ksim_kbot.kbot2.standing.standing import KbotStandingTask, KbotStandingTaskConfig
 
 OBS_SIZE = 20 * 2 + 3 + 3 + 40  # = 46 position + velocity + imu_acc + imu_gyro + last_action
 CMD_SIZE = 2
@@ -444,9 +444,9 @@ class KbotGetupTask(KbotStandingTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    # python -m ksim_kbot.kbot2.getup
+    # python -m ksim_kbot.kbot2.misc_tasks.getup
     # To visualize the environment, use the following command:
-    # python -m ksim_kbot.kbot2.getup \
+    # python -m ksim_kbot.kbot2.misc_tasks.getup \
     # run_environment=True \
     # run_environment_num_seconds=1 \
     # run_environment_save_path=videos/test.mp4
