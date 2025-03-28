@@ -321,9 +321,9 @@ class KbotStandingLSTMTask(KbotStandingTask[Config], Generic[Config]):
 
 
 if __name__ == "__main__":
-    # python -m ksim_kbot.kbot2.standing.standing_lstm run_environment=True
+    # python -m ksim_kbot.standing.standing_lstm run_environment=True
     # To resume training:
-    # python -m ksim_kbot.kbot2.standing.standing_lstm load_from_ckpt_path=*.run_*.ckpt.*.bin
+    # python -m ksim_kbot.standing.standing_lstm load_from_ckpt_path=*.run_*.ckpt.*.bin
     KbotStandingLSTMTask.launch(
         KbotStandingLSTMTaskConfig(
             num_envs=2048,

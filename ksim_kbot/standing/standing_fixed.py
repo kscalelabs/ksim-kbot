@@ -541,9 +541,9 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    # python -m ksim_kbot.kbot2.standing.standing_fixed
+    # python -m ksim_kbot.standing.standing_fixed
     # To visualize the environment, use the following command:
-    # python -m ksim_kbot.kbot2.standing.standing_fixed \
+    # python -m ksim_kbot.standing.standing_fixed \
     #  run_environment=True \
     #  run_environment_num_seconds=1 \
     #  run_environment_save_path=videos/test.mp4
