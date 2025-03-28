@@ -19,7 +19,7 @@ from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
-OBS_SIZE = 20 * 2 + 3 + 3 + 40  # = 46 position + velocity + imu_acc + imu_gyro + last_action
+OBS_SIZE = 20 * 2 + 3 + 40  # = 46 position + velocity + projected_gravity + last_action
 CMD_SIZE = 2
 NUM_OUTPUTS = 20 * 2  # position + velocity
 
@@ -44,6 +44,18 @@ Config = TypeVar("Config", bound="KbotStandingTaskConfig")
 class AuxOutputs:
     log_probs: Array
     values: Array
+
+
+@attrs.define(frozen=True)
+class ProjectedGravityObservation(ksim.Observation):
+    noise: float = attrs.field(default=0.0)
+
+    def observe(self, state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
+        x = xax.get_projected_gravity_vector_from_quat(state.physics_state.data.qpos[3:7])
+        return x
+
+    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
+        return observation + jax.random.normal(rng, observation.shape) * self.noise
 
 
 @attrs.define(frozen=True)
@@ -219,8 +231,7 @@ class KbotActor(eqx.Module):
         self,
         joint_pos_n: Array,
         joint_vel_n: Array,
-        imu_acc_3: Array,
-        imu_gyro_3: Array,
+        projected_gravity_3: Array,
         lin_vel_cmd_2: Array,
         last_action_n: Array,
         history_n: Array,
@@ -229,8 +240,7 @@ class KbotActor(eqx.Module):
             [
                 joint_pos_n,
                 joint_vel_n,
-                imu_acc_3,
-                imu_gyro_3,
+                projected_gravity_3,
                 lin_vel_cmd_2,
                 last_action_n,
                 # history_n,
@@ -276,8 +286,7 @@ class KbotCritic(eqx.Module):
         self,
         joint_pos_n: Array,
         joint_vel_n: Array,
-        imu_acc_3: Array,
-        imu_gyro_3: Array,
+        projected_gravity_3: Array,
         lin_vel_cmd_2: Array,
         last_action_n: Array,
         history_n: Array,
@@ -286,8 +295,7 @@ class KbotCritic(eqx.Module):
             [
                 joint_pos_n,
                 joint_vel_n,
-                imu_acc_3,
-                imu_gyro_3,
+                projected_gravity_3,
                 lin_vel_cmd_2,
                 last_action_n,
                 # history_n,
@@ -464,7 +472,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                 default_targets=(
                     0.0,
                     0.0,
-                    0.91,
+                    1.0,
+                    # quat
                     1.0,
                     0.0,
                     0.0,
@@ -540,8 +549,9 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ),
             ksim.JointVelocityObservation(noise=0.5),
             ksim.ActuatorForceObservation(),
-            ksim.SensorObservation.create(physics_model, "imu_acc", noise=0.5),
-            ksim.SensorObservation.create(physics_model, "imu_gyro", noise=0.2),
+            ProjectedGravityObservation(noise=0.0),
+            # ksim.SensorObservation.create(physics_model, "imu_acc", noise=0.5),
+            # ksim.SensorObservation.create(physics_model, "imu_gyro", noise=0.2),
             LastActionObservation(noise=0.0),
             HistoryObservation(),
         ]
@@ -623,12 +633,11 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     ) -> distrax.Normal:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
-        imu_acc_3 = observations["imu_acc_obs"]
-        imu_gyro_3 = observations["imu_gyro_obs"]
+        projected_gravity_3 = observations["projected_gravity_observation"]
         lin_vel_cmd_2 = commands["linear_velocity_step_command"]
         last_action_n = observations["last_action_observation"]
         history_n = observations["history_observation"]
-        return model.actor(joint_pos_n, joint_vel_n, imu_acc_3, imu_gyro_3, lin_vel_cmd_2, last_action_n, history_n)
+        return model.actor(joint_pos_n, joint_vel_n, projected_gravity_3, lin_vel_cmd_2, last_action_n, history_n)
 
     def _run_critic(
         self,
@@ -638,12 +647,11 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     ) -> Array:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
-        imu_acc_3 = observations["imu_acc_obs"]
-        imu_gyro_3 = observations["imu_gyro_obs"]
+        projected_gravity_3 = observations["projected_gravity_observation"]
         lin_vel_cmd_2 = commands["linear_velocity_step_command"]
         last_action_n = observations["last_action_observation"]
         history_n = observations["history_observation"]
-        return model.critic(joint_pos_n, joint_vel_n, imu_acc_3, imu_gyro_3, lin_vel_cmd_2, last_action_n, history_n)
+        return model.critic(joint_pos_n, joint_vel_n, projected_gravity_3, lin_vel_cmd_2, last_action_n, history_n)
 
     def get_on_policy_log_probs(
         self,
@@ -714,16 +722,14 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
 
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
-        imu_acc_3 = observations["imu_acc_obs"]
-        imu_gyro_3 = observations["imu_gyro_obs"]
+        projected_gravity_3 = observations["projected_gravity_observation"]
         lin_vel_cmd_2 = commands["linear_velocity_step_command"]
         last_action_n = observations["last_action_observation"]
         history_n = jnp.concatenate(
             [
                 joint_pos_n,
                 joint_vel_n,
-                imu_acc_3,
-                imu_gyro_3,
+                projected_gravity_3,
                 lin_vel_cmd_2,
                 last_action_n,
                 action_n,
