@@ -23,3 +23,6 @@ out*/
 # Training artifacts
 run_*/
 experimental/
+
+# Development
+scratch/
