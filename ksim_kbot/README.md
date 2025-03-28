@@ -21,19 +21,19 @@ For example, `standing_fixed` is a task that trains the K-Bot V2 using a modifie
 Make sure that `ksim-kbot` is installed (by running `pip install -e .` in the root directory).
 
 ```bash
-python -m ksim_kbot.kbot2.standing.standing_fixed
+python -m ksim_kbot.standing.standing_fixed
 ``` 
 
 To test the model, run:
 
 ```bash
-python -m ksim_kbot.kbot2.deploy.sim --model_path /path/to/model
+python -m ksim_kbot.deploy.sim --model_path /path/to/model
 ```
 
 And to deploy the model on the real robot, run:
 
 ```bash
-python -m ksim_kbot.kbot2.deploy.real --model_path /path/to/model
+python -m ksim_kbot.deploy.real --model_path /path/to/model
 ```
 
 

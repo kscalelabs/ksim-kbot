@@ -12,7 +12,7 @@ import ksim
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 
-from ksim_kbot.kbot2.standing.standing import AuxOutputs, KbotStandingTask, KbotStandingTaskConfig
+from ksim_kbot.standing.standing import AuxOutputs, KbotStandingTask, KbotStandingTaskConfig
 
 OBS_SIZE = 20 * 2 + 3 + 3  # = 46 position + velocity + imu_acc + imu_gyro
 CMD_SIZE = 2

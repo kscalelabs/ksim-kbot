@@ -18,7 +18,7 @@ from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
-from ksim_kbot.kbot2.common import DHControlPenalty, DHHealthyReward
+from ksim_kbot.common import DHControlPenalty, DHHealthyReward
 
 OBS_SIZE = 445
 CMD_SIZE = 2
