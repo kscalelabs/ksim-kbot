@@ -378,7 +378,6 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
-            # ksim.JointPositionObservation(noise=0.02),
             JointPositionObservation(
                 default_targets=(
                     # right arm

@@ -25,6 +25,8 @@ from ksim_kbot.common import (
     JointDeviationPenalty,
     JointPositionObservation,
     LastActionObservation,
+    OrientationPenalty,
+    ProjectedGravityObservation,
     ResetDefaultJointPosition,
 )
 
@@ -379,6 +381,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ksim.SensorObservation.create(physics_model, "imu_gyro", noise=0.2),
             LastActionObservation(noise=0.0),
             HistoryObservation(),
+            ProjectedGravityObservation(noise=0.0),
+            ksim.SensorObservation.create(physics_model, "upvector", noise=0.0),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
@@ -386,10 +390,10 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ksim.LinearVelocityStepCommand(
                 x_range=(0.0, 0.0),
                 y_range=(0.0, 0.0),
-                x_fwd_prob=0.8,
-                y_fwd_prob=0.5,
-                x_zero_prob=0.2,
-                y_zero_prob=0.8,
+                x_fwd_prob=0.0,
+                y_fwd_prob=0.0,
+                x_zero_prob=1.0,
+                y_zero_prob=1.0,
             ),
             ksim.AngularVelocityStepCommand(
                 scale=0.0,
@@ -422,8 +426,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ksim.BaseHeightReward(scale=1.0, height_target=0.9),
             ksim.LinearVelocityTrackingPenalty(command_name="linear_velocity_step_command", scale=-0.05),
             ksim.AngularVelocityTrackingPenalty(command_name="angular_velocity_step_command", scale=-0.05),
+            OrientationPenalty(scale=-1.0),
             # FeetSlipPenalty(scale=-0.01),
-            # ksim.ActionSmoothnessPenalty(scale=-0.01),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
