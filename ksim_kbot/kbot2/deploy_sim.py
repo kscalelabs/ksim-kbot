@@ -19,16 +19,34 @@ logger = logging.getLogger(__name__)
 
 DT = 0.02  # Policy time step (50Hz)
 
-DEFAULT_POSITIONS = np.array([
-    # right arm (nn_id 0-4)
-    0.0, 0.0, 0.0, 0.0, 0.0,
-    # left arm (nn_id 5-9)
-    0.0, 0.0, 0.0, 0.0, 0.0,
-    # right leg (nn_id 10-14)
-    -0.23, 0.0, 0.0, -0.441, 0.195,
-    # left leg (nn_id 15-19)
-    0.23, 0.0, 0.0, 0.441, -0.195,
-])
+DEFAULT_POSITIONS = np.array(
+    [
+        # right arm (nn_id 0-4)
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        # left arm (nn_id 5-9)
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        # right leg (nn_id 10-14)
+        -0.23,
+        0.0,
+        0.0,
+        -0.441,
+        0.195,
+        # left leg (nn_id 15-19)
+        0.23,
+        0.0,
+        0.0,
+        0.441,
+        -0.195,
+    ]
+)
 
 
 @dataclass
@@ -47,9 +65,7 @@ ACTUATOR_LIST: list[Actuator] = [
     Actuator(actuator_id=22, nn_id=1, kp=40.0, kd=4.0, max_torque=40.0, joint_name="dof_right_shoulder_roll_03"),
     Actuator(actuator_id=23, nn_id=2, kp=30.0, kd=1.0, max_torque=14.0, joint_name="dof_right_shoulder_yaw_02"),
     Actuator(actuator_id=24, nn_id=3, kp=30.0, kd=1.0, max_torque=14.0, joint_name="dof_right_elbow_02"),
-    Actuator(
-        actuator_id=25, nn_id=4, kp=20.0, kd=0.45473329537059787, max_torque=1.0, joint_name="dof_right_wrist_00"
-    ),
+    Actuator(actuator_id=25, nn_id=4, kp=20.0, kd=0.45473329537059787, max_torque=1.0, joint_name="dof_right_wrist_00"),
     # Left arm (nn_id 5-9)
     Actuator(actuator_id=11, nn_id=5, kp=40.0, kd=4.0, max_torque=40.0, joint_name="dof_left_shoulder_pitch_03"),
     Actuator(actuator_id=12, nn_id=6, kp=40.0, kd=4.0, max_torque=40.0, joint_name="dof_left_shoulder_roll_03"),
@@ -69,7 +85,6 @@ ACTUATOR_LIST: list[Actuator] = [
     Actuator(actuator_id=34, nn_id=18, kp=85.0, kd=5.0, max_torque=60.0, joint_name="dof_left_knee_04"),
     Actuator(actuator_id=35, nn_id=19, kp=30.0, kd=1.0, max_torque=14.0, joint_name="dof_left_ankle_02"),
 ]
-
 
 
 async def get_observation(kos: pykos.KOS, prev_action: np.ndarray) -> np.ndarray:
@@ -122,14 +137,10 @@ async def configure_actuators(kos: pykos.KOS) -> None:
 async def reset(kos: pykos.KOS) -> None:
     # Define standing joint positions based on standing.py
 
-    
     await kos.sim.reset(
         pos={"x": 0.0, "y": 0.0, "z": 1.01},  # Using the z-value from your existing reset function
         quat={"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
-        joints=[
-            {"name": actuator.joint_name, "pos": pos}
-            for actuator, pos in zip(ACTUATOR_LIST, DEFAULT_POSITIONS)
-        ],
+        joints=[{"name": actuator.joint_name, "pos": pos} for actuator, pos in zip(ACTUATOR_LIST, DEFAULT_POSITIONS)],
     )
 
 
@@ -278,4 +289,3 @@ if __name__ == "__main__":
         logging.basicConfig(level=log_level, format=log_format)
 
     asyncio.run(main(args.model_path, args.ip, args.no_render, args.episode_length))
-
