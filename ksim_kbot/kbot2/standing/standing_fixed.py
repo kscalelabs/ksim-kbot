@@ -18,7 +18,15 @@ from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
-from ksim_kbot.kbot2 import common
+from ksim_kbot.kbot2.common import (
+    DHControlPenalty,
+    DHHealthyReward,
+    HistoryObservation,
+    JointDeviationPenalty,
+    JointPositionObservation,
+    LastActionObservation,
+    ResetDefaultJointPosition,
+)
 
 OBS_SIZE = 10 * 2 + 3 + 3 + 20  # = 36 position + velocity + imu_acc + imu_gyro + last_action
 CMD_SIZE = 2
@@ -311,7 +319,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ksim.RandomBaseVelocityXYReset(scale=0.01),
             ksim.RandomJointPositionReset(scale=0.02),
             ksim.RandomJointVelocityReset(scale=0.02),
-            common.ResetDefaultJointPosition(
+            ResetDefaultJointPosition(
                 default_targets=(
                     0.0,
                     0.0,
@@ -348,7 +356,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
-            common.JointPositionObservation(
+            JointPositionObservation(
                 default_targets=(
                     # right leg
                     -0.23,
@@ -369,8 +377,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ksim.ActuatorForceObservation(),
             ksim.SensorObservation.create(physics_model, "imu_acc", noise=0.5),
             ksim.SensorObservation.create(physics_model, "imu_gyro", noise=0.2),
-            common.LastActionObservation(noise=0.0),
-            common.HistoryObservation(),
+            LastActionObservation(noise=0.0),
+            HistoryObservation(),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
@@ -391,7 +399,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            common.JointDeviationPenalty(
+            JointDeviationPenalty(
                 scale=-0.3,
                 joint_targets=(
                     # right leg
@@ -408,8 +416,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                     -0.195,
                 ),
             ),
-            common.DHControlPenalty(scale=-0.05),
-            common.DHHealthyReward(scale=0.5),
+            DHControlPenalty(scale=-0.05),
+            DHHealthyReward(scale=0.5),
             ksim.ActuatorForcePenalty(scale=-0.01),
             ksim.BaseHeightReward(scale=1.0, height_target=0.9),
             ksim.LinearVelocityTrackingPenalty(command_name="linear_velocity_step_command", scale=-0.05),

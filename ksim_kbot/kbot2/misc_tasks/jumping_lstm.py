@@ -11,7 +11,7 @@ import xax
 from jaxtyping import Array
 from kscale.web.gen.api import JointMetadataOutput
 
-from .standing_lstm import KbotStandingLSTMTask, KbotStandingLSTMTaskConfig
+from ksim_kbot.kbot2.standing.standing_lstm import KbotStandingLSTMTask, KbotStandingLSTMTaskConfig
 
 
 @attrs.define(frozen=True, kw_only=True)

@@ -1,4 +1,7 @@
-"""Common utilities for K-Bot 2."""
+"""Common utilities for K-Bot 2.
+
+If some utilities will become more general, we can move them to ksim or xax.
+"""
 
 import attrs
 import jax
@@ -18,30 +21,38 @@ class HistoryObservation(ksim.Observation):
         return state.carry
 
 
-@attrs.define(frozen=True, kw_only=True)
-class JointDeviationPenalty(ksim.Reward):
-    """Penalty for joint deviations."""
-
-    joint_targets: tuple[float, ...] = attrs.field(
-        default=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-    )
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        diff = trajectory.qpos[..., 7:] - jnp.array(self.joint_targets)
-        return jnp.sum(jnp.square(diff), axis=-1)
-
-
 @attrs.define(frozen=True)
 class JointPositionObservation(ksim.Observation):
     noise: float = attrs.field(default=0.0)
-    default_targets: tuple[float, ...] = attrs.field(
-        default=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-    )
+    default_targets: tuple[float, ...] = attrs.field()
 
     def observe(self, rollout_state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
         qpos = rollout_state.physics_state.data.qpos[7:]  # (N,)
         diff = qpos - jnp.array(self.default_targets)
         return diff
+
+    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
+        return observation + jax.random.normal(rng, observation.shape) * self.noise
+
+
+@attrs.define(frozen=True)
+class ProjectedGravityObservation(ksim.Observation):
+    noise: float = attrs.field(default=0.0)
+
+    def observe(self, state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
+        x = xax.get_projected_gravity_vector_from_quat(state.physics_state.data.qpos[3:7])
+        return x
+
+    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
+        return observation + jax.random.normal(rng, observation.shape) * self.noise
+
+
+@attrs.define(frozen=True)
+class LastActionObservation(ksim.Observation):
+    noise: float = attrs.field(default=0.0)
+
+    def observe(self, rollout_state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
+        return rollout_state.physics_state.most_recent_action
 
     def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
         return observation + jax.random.normal(rng, observation.shape) * self.noise
@@ -64,6 +75,17 @@ class ResetDefaultJointPosition(ksim.Reset):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class JointDeviationPenalty(ksim.Reward):
+    """Penalty for joint deviations."""
+
+    joint_targets: tuple[float, ...] = attrs.field()
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        diff = trajectory.qpos[..., 7:] - jnp.array(self.joint_targets)
+        return jnp.sum(jnp.square(diff), axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
 class FeetSlipPenalty(ksim.Reward):
     """Penalty for feet slipping."""
 
@@ -81,23 +103,24 @@ class FeetSlipPenalty(ksim.Reward):
         return (xax.get_norm(com_vel, self.norm) * contact).sum(axis=-1)
 
 
-@attrs.define(frozen=True)
-class LastActionObservation(ksim.Observation):
-    noise: float = attrs.field(default=0.0)
+@attrs.define(frozen=True, kw_only=True)
+class DHForwardReward(ksim.Reward):
+    """Incentives forward movement."""
 
-    def observe(self, rollout_state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
-        return rollout_state.physics_state.most_recent_action
-
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return observation + jax.random.normal(rng, observation.shape) * self.noise
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        # Take just the x velocity component
+        x_delta = -jnp.clip(trajectory.qvel[..., 1], -1.0, 1.0)
+        return x_delta
 
 
 @attrs.define(frozen=True, kw_only=True)
 class DHControlPenalty(ksim.Reward):
     """Legacy default humanoid control cost that penalizes squared action magnitude."""
 
+    norm: xax.NormType = attrs.field(default="l2")
+
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        return jnp.sum(jnp.square(trajectory.action), axis=-1)
+        return xax.get_norm(trajectory.action, self.norm).sum(axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
