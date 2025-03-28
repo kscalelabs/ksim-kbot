@@ -27,7 +27,7 @@ class JointDeviationPenalty(ksim.Reward):
     )
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        diff = trajectory.qpos[:, 7:] - jnp.array(self.joint_targets)
+        diff = trajectory.qpos[..., 7:] - jnp.array(self.joint_targets)
         return jnp.sum(jnp.square(diff), axis=-1)
 
 
@@ -108,7 +108,7 @@ class DHHealthyReward(ksim.Reward):
     healthy_z_upper: float = attrs.field(default=1.5)
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        height = trajectory.qpos[:, 2]
+        height = trajectory.qpos[..., 2]
         is_healthy = jnp.where(height < self.healthy_z_lower, 0.0, 1.0)
         is_healthy = jnp.where(height > self.healthy_z_upper, 0.0, is_healthy)
         return is_healthy

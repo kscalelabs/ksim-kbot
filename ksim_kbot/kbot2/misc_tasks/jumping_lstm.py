@@ -93,9 +93,9 @@ class KbotJumpingLSTMTask(KbotStandingLSTMTask[KbotJumpingLSTMTaskConfig]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m ksim_kbot.kbot2.jumping
+    #   python -m ksim_kbot.kbot2.misc_tasks.jumping
     # To visualize the environment, use the following command:
-    #   python -m ksim_kbot.kbot2.jumping run_environment=True
+    #   python -m ksim_kbot.kbot2.misc_tasks.jumping run_environment=True
     KbotJumpingLSTMTask.launch(
         KbotJumpingLSTMTaskConfig(
             num_envs=2048,
