@@ -4,7 +4,6 @@ If some utilities will become more general, we can move them to ksim or xax.
 """
 
 import attrs
-import jax
 import jax.numpy as jnp
 import ksim
 import mujoco
@@ -31,20 +30,14 @@ class JointPositionObservation(ksim.Observation):
         diff = qpos - jnp.array(self.default_targets)
         return diff
 
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return observation + jax.random.normal(rng, observation.shape) * self.noise
-
 
 @attrs.define(frozen=True)
 class ProjectedGravityObservation(ksim.Observation):
     noise: float = attrs.field(default=0.0)
 
     def observe(self, state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
-        x = xax.get_projected_gravity_vector_from_quat(state.physics_state.data.qpos[3:7])
-        return x
-
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return observation + jax.random.normal(rng, observation.shape) * self.noise
+        gvec = xax.get_projected_gravity_vector_from_quat(state.physics_state.data.qpos[3:7])
+        return gvec
 
 
 @attrs.define(frozen=True)
@@ -53,9 +46,6 @@ class LastActionObservation(ksim.Observation):
 
     def observe(self, rollout_state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
         return rollout_state.physics_state.most_recent_action
-
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return observation + jax.random.normal(rng, observation.shape) * self.noise
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -135,3 +125,27 @@ class DHHealthyReward(ksim.Reward):
         is_healthy = jnp.where(height < self.healthy_z_lower, 0.0, 1.0)
         is_healthy = jnp.where(height > self.healthy_z_upper, 0.0, is_healthy)
         return is_healthy
+
+
+@attrs.define(frozen=True, kw_only=True)
+class OrientationObservation(ksim.SensorObservation):
+    """Observation for the orientation of the robot."""
+
+    norm: xax.NormType = attrs.field(default="l2")
+
+    def observe(self, rollout_state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
+        sensor_data = rollout_state.physics_state.data.sensordata[
+            self.sensor_idx_range[0] : self.sensor_idx_range[1]
+        ].ravel()
+
+        return xax.get_norm(sensor_data, self.norm).sum(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class OrientationPenalty(ksim.Reward):
+    """Penalty for the orientation of the robot."""
+
+    norm: xax.NormType = attrs.field(default="l2")
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        return xax.get_norm(trajectory.obs["projected_gravity_observation"][..., :2], self.norm).sum(axis=-1)

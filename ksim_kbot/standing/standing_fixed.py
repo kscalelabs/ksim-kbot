@@ -3,7 +3,7 @@
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generic, TypeVar
+from typing import Generic
 
 import distrax
 import equinox as eqx
@@ -12,7 +12,6 @@ import jax.numpy as jnp
 import ksim
 import mujoco
 import optax
-import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
@@ -25,8 +24,11 @@ from ksim_kbot.common import (
     JointDeviationPenalty,
     JointPositionObservation,
     LastActionObservation,
+    OrientationPenalty,
+    ProjectedGravityObservation,
     ResetDefaultJointPosition,
 )
+from ksim_kbot.standing.standing import Config, KbotStandingTaskConfig
 
 OBS_SIZE = 10 * 2 + 3 + 3 + 20  # = 36 position + velocity + imu_acc + imu_gyro + last_action
 CMD_SIZE = 2
@@ -44,8 +46,6 @@ MAX_TORQUE = {
     "03": 40.0,
     "04": 60.0,
 }
-
-Config = TypeVar("Config", bound="KbotStandingTaskConfig")
 
 
 @jax.tree_util.register_dataclass
@@ -135,7 +135,7 @@ class KbotCritic(eqx.Module):
 
     def __init__(self, key: PRNGKeyArray) -> None:
         self.mlp = eqx.nn.MLP(
-            in_size=NUM_INPUTS,
+            in_size=NUM_INPUTS + 3,
             out_size=1,  # Always output a single critic value.
             width_size=64,
             depth=5,
@@ -151,6 +151,7 @@ class KbotCritic(eqx.Module):
         imu_gyro_3: Array,
         lin_vel_cmd_2: Array,
         last_action_n: Array,
+        projected_gravity_n: Array,
         history_n: Array,
     ) -> Array:
         x_n = jnp.concatenate(
@@ -161,6 +162,7 @@ class KbotCritic(eqx.Module):
                 imu_gyro_3,
                 lin_vel_cmd_2,
                 last_action_n,
+                projected_gravity_n,
                 # history_n,
             ],
             axis=-1,
@@ -181,53 +183,6 @@ class KbotModel(eqx.Module):
             mean_scale=1.0,
         )
         self.critic = KbotCritic(key)
-
-
-@dataclass
-class KbotStandingTaskConfig(ksim.PPOConfig):
-    """Config for the KBot walking task."""
-
-    robot_urdf_path: str = xax.field(
-        value="ksim_kbot/kscale-assets/kbot-v2-lw-feet/",
-        help="The path to the assets directory for the robot.",
-    )
-
-    action_scale: float = xax.field(
-        value=1.0,
-        help="The scale to apply to the actions.",
-    )
-
-    # Optimizer parameters.
-    learning_rate: float = xax.field(
-        value=1e-4,
-        help="Learning rate for PPO.",
-    )
-    max_grad_norm: float = xax.field(
-        value=0.5,
-        help="Maximum gradient norm for clipping.",
-    )
-    adam_weight_decay: float = xax.field(
-        value=0.0,
-        help="Weight decay for the Adam optimizer.",
-    )
-
-    # Mujoco parameters.
-    use_mit_actuators: bool = xax.field(
-        value=False,
-        help="Whether to use the MIT actuator model, where the actions are position + velocity commands",
-    )
-
-    # Rendering parameters.
-    render_track_body_id: int | None = xax.field(
-        value=None,
-        help="The body id to track with the render camera.",
-    )
-
-    # Checkpointing parameters.
-    export_for_inference: bool = xax.field(
-        value=False,
-        help="Whether to export the model for inference.",
-    )
 
 
 class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
@@ -300,25 +255,29 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             return ksim.TorqueActuators()
 
     def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
-        return [
-            ksim.StaticFrictionRandomization(scale_lower=0.5, scale_upper=2.0),
-            ksim.JointZeroPositionRandomization(scale_lower=-0.05, scale_upper=0.05),
-            ksim.ArmatureRandomization(scale_lower=1.0, scale_upper=1.05),
-            ksim.MassMultiplicationRandomization.from_body_name(physics_model, "Torso_Side_Right"),
-            ksim.JointDampingRandomization(scale_lower=0.95, scale_upper=1.05),
-            # ksim.FloorFrictionRandomization.from_body_name(
-            #     model=physics_model,
-            #     scale_lower=0.2,
-            #     scale_upper=0.6,
-            #     floor_body_name="floor",
-            # ),
-        ]
+        if self.config.domain_randomize:
+            return [
+                ksim.StaticFrictionRandomization(scale_lower=0.5, scale_upper=2.0),
+                ksim.JointZeroPositionRandomization(scale_lower=-0.05, scale_upper=0.05),
+                ksim.ArmatureRandomization(scale_lower=1.0, scale_upper=1.05),
+                ksim.MassMultiplicationRandomization.from_body_name(physics_model, "Torso_Side_Right"),
+                ksim.JointDampingRandomization(scale_lower=0.95, scale_upper=1.05),
+                # ksim.FloorFrictionRandomization.from_body_name(
+                #     model=physics_model,
+                #     scale_lower=0.2,
+                #     scale_upper=0.6,
+                #     floor_body_name="floor",
+                # ),
+            ]
+        else:
+            return []
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
+        scale = 0.0 if self.config.domain_randomize else 0.01
         return [
-            ksim.RandomBaseVelocityXYReset(scale=0.01),
-            ksim.RandomJointPositionReset(scale=0.02),
-            ksim.RandomJointVelocityReset(scale=0.02),
+            ksim.RandomBaseVelocityXYReset(scale=scale),
+            ksim.RandomJointPositionReset(scale=scale),
+            ksim.RandomJointVelocityReset(scale=scale),
             ResetDefaultJointPosition(
                 default_targets=(
                     0.0,
@@ -345,14 +304,17 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         ]
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
-        return [
-            ksim.PushEvent(
-                x_force=0.2,
-                y_force=0.2,
-                z_force=0.0,
-                interval_range=(1.0, 2.0),
-            ),
-        ]
+        if self.config.domain_randomize:
+            return [
+                ksim.PushEvent(
+                    x_force=0.2,
+                    y_force=0.2,
+                    z_force=0.0,
+                    interval_range=(1.0, 2.0),
+                ),
+            ]
+        else:
+            return []
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
@@ -378,6 +340,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ksim.SensorObservation.create(physics_model, "imu_acc", noise=0.5),
             ksim.SensorObservation.create(physics_model, "imu_gyro", noise=0.2),
             LastActionObservation(noise=0.0),
+            ProjectedGravityObservation(noise=0.0),
             HistoryObservation(),
         ]
 
@@ -386,10 +349,10 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ksim.LinearVelocityStepCommand(
                 x_range=(0.0, 0.0),
                 y_range=(0.0, 0.0),
-                x_fwd_prob=0.8,
-                y_fwd_prob=0.5,
-                x_zero_prob=0.2,
-                y_zero_prob=0.8,
+                x_fwd_prob=0.0,
+                y_fwd_prob=0.0,
+                x_zero_prob=1.0,
+                y_zero_prob=1.0,
             ),
             ksim.AngularVelocityStepCommand(
                 scale=0.0,
@@ -422,8 +385,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ksim.BaseHeightReward(scale=1.0, height_target=0.9),
             ksim.LinearVelocityTrackingPenalty(command_name="linear_velocity_step_command", scale=-0.05),
             ksim.AngularVelocityTrackingPenalty(command_name="angular_velocity_step_command", scale=-0.05),
+            OrientationPenalty(scale=-1.0),
             # FeetSlipPenalty(scale=-0.01),
-            # ksim.ActionSmoothnessPenalty(scale=-0.01),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -465,8 +428,18 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         imu_gyro_3 = observations["imu_gyro_obs"]
         lin_vel_cmd_2 = commands["linear_velocity_step_command"]
         last_action_n = observations["last_action_observation"]
+        projected_gravity_3 = observations["projected_gravity_observation"]
         history_n = observations["history_observation"]
-        return model.critic(joint_pos_n, joint_vel_n, imu_acc_3, imu_gyro_3, lin_vel_cmd_2, last_action_n, history_n)
+        return model.critic(
+            joint_pos_n,
+            joint_vel_n,
+            imu_acc_3,
+            imu_gyro_3,
+            lin_vel_cmd_2,
+            last_action_n,
+            projected_gravity_3,
+            history_n,
+        )
 
     def get_on_policy_log_probs(
         self,
@@ -568,16 +541,16 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    # python -m ksim_kbot.kbot2.standing.standing_fixed
+    # python -m ksim_kbot.standing.standing_fixed
     # To visualize the environment, use the following command:
-    # python -m ksim_kbot.kbot2.standing.standing_fixed \
+    # python -m ksim_kbot.standing.standing_fixed \
     #  run_environment=True \
     #  run_environment_num_seconds=1 \
     #  run_environment_save_path=videos/test.mp4
     KbotStandingTask.launch(
         KbotStandingTaskConfig(
             num_envs=4096,
-            batch_size=256,
+            batch_size=512,
             num_passes=10,
             epochs_per_log_step=1,
             # Simulation parameters.
@@ -598,5 +571,6 @@ if __name__ == "__main__":
             max_grad_norm=1.0,
             use_mit_actuators=True,
             export_for_inference=True,
+            domain_randomize=True,
         ),
     )

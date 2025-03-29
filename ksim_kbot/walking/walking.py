@@ -473,7 +473,7 @@ class KbotWalkingTask(ksim.PPOTask[KbotWalkingTaskConfig]):
 
 
 if __name__ == "__main__":
-    # python -m ksim_kbot.kbot2.walking.walking run_environment=True
+    # python -m ksim_kbot.walking.walking run_environment=True
     KbotWalkingTask.launch(
         KbotWalkingTaskConfig(
             num_envs=4096,

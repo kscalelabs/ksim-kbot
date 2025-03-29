@@ -57,7 +57,7 @@ class AuxOutputs:
 
 
 class KbotActor(eqx.Module):
-    """Actor for the walking task."""
+    """Actor for the standing task."""
 
     mlp: eqx.nn.MLP
     min_std: float = eqx.static_field()
@@ -182,7 +182,7 @@ class KbotModel(eqx.Module):
 
 @dataclass
 class KbotStandingTaskConfig(ksim.PPOConfig):
-    """Config for the KBot walking task."""
+    """Config for the KBot standing task."""
 
     robot_urdf_path: str = xax.field(
         value="ksim_kbot/kscale-assets/kbot-v2-lw-feet/",
@@ -212,6 +212,11 @@ class KbotStandingTaskConfig(ksim.PPOConfig):
     use_mit_actuators: bool = xax.field(
         value=False,
         help="Whether to use the MIT actuator model, where the actions are position + velocity commands",
+    )
+
+    domain_randomize: bool = xax.field(
+        value=True,
+        help="Whether to domain randomize the model.",
     )
 
     # Rendering parameters.
@@ -309,25 +314,29 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             return ksim.TorqueActuators()
 
     def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
-        return [
-            ksim.StaticFrictionRandomization(scale_lower=0.5, scale_upper=2.0),
-            ksim.JointZeroPositionRandomization(scale_lower=-0.05, scale_upper=0.05),
-            ksim.ArmatureRandomization(scale_lower=1.0, scale_upper=1.05),
-            ksim.MassMultiplicationRandomization.from_body_name(physics_model, "Torso_Side_Right"),
-            ksim.JointDampingRandomization(scale_lower=0.95, scale_upper=1.05),
-            # ksim.FloorFrictionRandomization.from_body_name(
-            #     model=physics_model,
-            #     scale_lower=0.2,
-            #     scale_upper=0.6,
-            #     floor_body_name="floor",
-            # ),
-        ]
+        if self.config.domain_randomize:
+            return [
+                ksim.StaticFrictionRandomization(scale_lower=0.5, scale_upper=2.0),
+                ksim.JointZeroPositionRandomization(scale_lower=-0.05, scale_upper=0.05),
+                ksim.ArmatureRandomization(scale_lower=1.0, scale_upper=1.05),
+                ksim.MassMultiplicationRandomization.from_body_name(physics_model, "Torso_Side_Right"),
+                ksim.JointDampingRandomization(scale_lower=0.95, scale_upper=1.05),
+                # ksim.FloorFrictionRandomization.from_body_name(
+                #     model=physics_model,
+                #     scale_lower=0.2,
+                #     scale_upper=0.6,
+                #     floor_body_name="floor",
+                # ),
+            ]
+        else:
+            return []
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
+        scale = 0.0 if self.config.domain_randomize else 0.01
         return [
-            ksim.RandomBaseVelocityXYReset(scale=0.01),
-            ksim.RandomJointPositionReset(scale=0.02),
-            ksim.RandomJointVelocityReset(scale=0.02),
+            ksim.RandomBaseVelocityXYReset(scale=scale),
+            ksim.RandomJointPositionReset(scale=scale),
+            ksim.RandomJointVelocityReset(scale=scale),
             ResetDefaultJointPosition(
                 default_targets=(
                     0.0,
@@ -367,18 +376,20 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         ]
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
-        return [
-            ksim.PushEvent(
-                x_force=0.2,
-                y_force=0.2,
-                z_force=0.0,
-                interval_range=(1.0, 2.0),
-            ),
-        ]
+        if self.config.domain_randomize:
+            return [
+                ksim.PushEvent(
+                    x_force=0.2,
+                    y_force=0.2,
+                    z_force=0.0,
+                    interval_range=(1.0, 2.0),
+                ),
+            ]
+        else:
+            return []
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
-            # ksim.JointPositionObservation(noise=0.02),
             JointPositionObservation(
                 default_targets=(
                     # right arm
@@ -405,7 +416,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                     0.0,
                     0.441,
                     -0.195,
-                )
+                ),
+                noise=0.01,
             ),
             ksim.JointVelocityObservation(noise=0.5),
             ksim.ActuatorForceObservation(),
@@ -611,9 +623,9 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    # python -m ksim_kbot.kbot2.standing.standing
+    # python -m ksim_kbot.standing.standing
     # To visualize the environment, use the following command:
-    # python -m ksim_kbot.kbot2.standing.standing \
+    # python -m ksim_kbot.standing.standing \
     #  run_environment=True \
     #  run_environment_num_seconds=1 \
     #  run_environment_save_path=videos/test.mp4
@@ -641,5 +653,6 @@ if __name__ == "__main__":
             max_grad_norm=1.0,
             use_mit_actuators=True,
             export_for_inference=True,
+            domain_randomize=False,
         ),
     )
