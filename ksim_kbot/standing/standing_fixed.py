@@ -43,7 +43,7 @@ NUM_INPUTS = (OBS_SIZE + CMD_SIZE) + SINGLE_STEP_HISTORY_SIZE * HISTORY_LENGTH
 
 MAX_TORQUE = {
     "00": 1.0,
-    "02": 14.0,
+    "02": 17.0,
     "03": 40.0,
     "04": 60.0,
 }
@@ -77,7 +77,7 @@ class KbotActor(eqx.Module):
         self.mlp = eqx.nn.MLP(
             in_size=NUM_INPUTS,
             out_size=NUM_OUTPUTS * 2,
-            width_size=64,
+            width_size=256,
             depth=5,
             key=key,
             activation=jax.nn.relu,
@@ -138,7 +138,7 @@ class KbotCritic(eqx.Module):
         self.mlp = eqx.nn.MLP(
             in_size=NUM_INPUTS + 3 + 2 + 3 + 4 + 3 + 3 + 10,
             out_size=1,  # Always output a single critic value.
-            width_size=64,
+            width_size=256,
             depth=5,
             key=key,
             activation=jax.nn.relu,
