@@ -76,24 +76,6 @@ class JointDeviationPenalty(ksim.Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class FeetSlipPenalty(ksim.Reward):
-    """Penalty for feet slipping."""
-
-    norm: xax.NormType = attrs.field(default="l2")
-    observation_name: str = attrs.field(default="feet_contact_observation")
-    command_name: str = attrs.field(default="linear_velocity_step_command")
-    com_vel_obs_name: str = attrs.field(default="center_of_mass_velocity_observation")
-    command_vel_scale: float = attrs.field(default=0.02)
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        if self.observation_name not in trajectory.obs:
-            raise ValueError(f"Observation {self.observation_name} not found; add it as an observation in your task.")
-        contact = trajectory.obs[self.observation_name]
-        com_vel = trajectory.obs[self.com_vel_obs_name][..., :2]
-        return (xax.get_norm(com_vel, self.norm) * contact).sum(axis=-1)
-
-
-@attrs.define(frozen=True, kw_only=True)
 class DHForwardReward(ksim.Reward):
     """Incentives forward movement."""
 
@@ -149,3 +131,21 @@ class OrientationPenalty(ksim.Reward):
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         return xax.get_norm(trajectory.obs["projected_gravity_observation"][..., :2], self.norm).sum(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetSlipPenalty(ksim.Reward):
+    """Penalty for feet slipping."""
+
+    scale: float = -1.0
+    com_vel_obs_name: str = attrs.field(default="center_of_mass_velocity_observation")
+    feet_contact_obs_name: str = attrs.field(default="feet_contact_observation")
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        if self.feet_contact_obs_name not in trajectory.obs:
+            raise ValueError(
+                f"Observation {self.feet_contact_obs_name} not found; add it as an observation in your task."
+            )
+        contact = trajectory.obs[self.feet_contact_obs_name]
+        body_vel = trajectory.obs[self.com_vel_obs_name][..., :2]
+        return jnp.sum(jnp.linalg.norm(body_vel, axis=-1, keepdims=True) * contact, axis=-1)

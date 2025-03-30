@@ -20,6 +20,7 @@ from mujoco import mjx
 from ksim_kbot.common import (
     DHControlPenalty,
     DHHealthyReward,
+    FeetSlipPenalty,
     HistoryObservation,
     JointDeviationPenalty,
     JointPositionObservation,
@@ -135,7 +136,7 @@ class KbotCritic(eqx.Module):
 
     def __init__(self, key: PRNGKeyArray) -> None:
         self.mlp = eqx.nn.MLP(
-            in_size=NUM_INPUTS + 3,
+            in_size=NUM_INPUTS + 3 + 2,
             out_size=1,  # Always output a single critic value.
             width_size=64,
             depth=5,
@@ -152,6 +153,7 @@ class KbotCritic(eqx.Module):
         lin_vel_cmd_2: Array,
         last_action_n: Array,
         projected_gravity_n: Array,
+        feet_contact_n: Array,
         history_n: Array,
     ) -> Array:
         x_n = jnp.concatenate(
@@ -163,6 +165,7 @@ class KbotCritic(eqx.Module):
                 lin_vel_cmd_2,
                 last_action_n,
                 projected_gravity_n,
+                feet_contact_n,
                 # history_n,
             ],
             axis=-1,
@@ -342,6 +345,16 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             LastActionObservation(noise=0.0),
             ProjectedGravityObservation(noise=0.0),
             HistoryObservation(),
+            ksim.CenterOfMassVelocityObservation(),
+            ksim.FeetContactObservation.create(
+                physics_model,
+                "KB_D_501L_L_LEG_FOOT_collision_box",
+                "KB_D_501R_R_LEG_FOOT_collision_box",
+                "floor",
+            ),
+            ksim.FeetPositionObservation.create(
+                physics_model, "KB_D_501L_L_LEG_FOOT_collision_box", "KB_D_501R_R_LEG_FOOT_collision_box"
+            ),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
@@ -386,7 +399,9 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ksim.LinearVelocityTrackingPenalty(command_name="linear_velocity_step_command", scale=-0.05),
             ksim.AngularVelocityTrackingPenalty(command_name="angular_velocity_step_command", scale=-0.05),
             OrientationPenalty(scale=-1.0),
-            # FeetSlipPenalty(scale=-0.01),
+            ksim.LinearVelocityTrackingPenalty(command_name="linear_velocity_step_command", scale=-0.05),
+            ksim.AngularVelocityTrackingPenalty(command_name="angular_velocity_step_command", scale=-0.05),
+            FeetSlipPenalty(scale=-0.25),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -429,6 +444,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         lin_vel_cmd_2 = commands["linear_velocity_step_command"]
         last_action_n = observations["last_action_observation"]
         projected_gravity_3 = observations["projected_gravity_observation"]
+        feet_contact_n = observations["feet_contact_observation"]
         history_n = observations["history_observation"]
         return model.critic(
             joint_pos_n,
@@ -438,6 +454,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             lin_vel_cmd_2,
             last_action_n,
             projected_gravity_3,
+            feet_contact_n,
             history_n,
         )
 
