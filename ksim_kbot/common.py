@@ -3,12 +3,15 @@
 If some utilities will become more general, we can move them to ksim or xax.
 """
 
+from typing import Self
+
 import attrs
 import jax.numpy as jnp
 import ksim
 import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray
+from ksim.utils.mujoco import get_qpos_data_idxs_by_name
 from mujoco import mjx
 
 
@@ -149,3 +152,61 @@ class FeetSlipPenalty(ksim.Reward):
         contact = trajectory.obs[self.feet_contact_obs_name]
         body_vel = trajectory.obs[self.com_vel_obs_name][..., :2]
         return jnp.sum(jnp.linalg.norm(body_vel, axis=-1, keepdims=True) * contact, axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class HipDeviationPenalty(ksim.Reward):
+    """Penalty for hip joint deviations."""
+
+    hip_indices: tuple[int, ...] = attrs.field()
+    joint_targets: tuple[float, ...] = attrs.field()
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        diff = trajectory.qpos[..., self.hip_indices] - self.joint_targets[self.hip_indices]
+        return jnp.sum(jnp.square(diff), axis=-1)
+
+    @classmethod
+    def create(
+        cls,
+        physics_model: ksim.PhysicsModel,
+        hip_names: tuple[str, ...],
+        joint_targets: tuple[float, ...],
+        scale: float = -1.0,
+    ) -> Self:
+        """Create a sensor observation from a physics model."""
+        mappings = get_qpos_data_idxs_by_name(physics_model)
+        hip_indices = jnp.array([mappings[name][0] for name in hip_names])
+        return cls(
+            hip_indices=hip_indices,
+            joint_targets=joint_targets,
+            scale=scale,
+        )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class KneeDeviationPenalty(ksim.Reward):
+    """Penalty for knee joint deviations."""
+
+    knee_indices: tuple[int, ...] = attrs.field()
+    joint_targets: tuple[float, ...] = attrs.field()
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        diff = trajectory.qpos[..., self.knee_indices] - self.joint_targets[self.knee_indices]
+        return jnp.sum(jnp.square(diff), axis=-1)
+
+    @classmethod
+    def create(
+        cls,
+        physics_model: ksim.PhysicsModel,
+        knee_names: tuple[str, ...],
+        joint_targets: tuple[float, ...],
+        scale: float = -1.0,
+    ) -> Self:
+        """Create a sensor observation from a physics model."""
+        mappings = get_qpos_data_idxs_by_name(physics_model)
+        knee_indices = jnp.array([mappings[name][0] for name in knee_names])
+        return cls(
+            knee_indices=knee_indices,
+            joint_targets=joint_targets,
+            scale=scale,
+        )
