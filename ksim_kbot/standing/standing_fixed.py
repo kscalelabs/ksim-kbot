@@ -353,7 +353,9 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                 "floor",
             ),
             ksim.FeetPositionObservation.create(
-                physics_model, "KB_D_501L_L_LEG_FOOT_collision_box", "KB_D_501R_R_LEG_FOOT_collision_box"
+                physics_model,
+                "KB_D_501L_L_LEG_FOOT_collision_box",
+                "KB_D_501R_R_LEG_FOOT_collision_box",
             ),
         ]
 
@@ -399,8 +401,6 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ksim.LinearVelocityTrackingPenalty(command_name="linear_velocity_step_command", scale=-0.05),
             ksim.AngularVelocityTrackingPenalty(command_name="angular_velocity_step_command", scale=-0.05),
             OrientationPenalty(scale=-1.0),
-            ksim.LinearVelocityTrackingPenalty(command_name="linear_velocity_step_command", scale=-0.05),
-            ksim.AngularVelocityTrackingPenalty(command_name="angular_velocity_step_command", scale=-0.05),
             FeetSlipPenalty(scale=-0.25),
         ]
 
