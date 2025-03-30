@@ -20,6 +20,7 @@ from mujoco import mjx
 from ksim_kbot.common import (
     DHControlPenalty,
     DHHealthyReward,
+    FeetSlipPenalty,
     HistoryObservation,
     JointDeviationPenalty,
     JointPositionObservation,
@@ -42,7 +43,7 @@ NUM_INPUTS = (OBS_SIZE + CMD_SIZE) + SINGLE_STEP_HISTORY_SIZE * HISTORY_LENGTH
 
 MAX_TORQUE = {
     "00": 1.0,
-    "02": 14.0,
+    "02": 17.0,
     "03": 40.0,
     "04": 60.0,
 }
@@ -76,7 +77,7 @@ class KbotActor(eqx.Module):
         self.mlp = eqx.nn.MLP(
             in_size=NUM_INPUTS,
             out_size=NUM_OUTPUTS * 2,
-            width_size=64,
+            width_size=256,
             depth=5,
             key=key,
             activation=jax.nn.relu,
@@ -135,9 +136,9 @@ class KbotCritic(eqx.Module):
 
     def __init__(self, key: PRNGKeyArray) -> None:
         self.mlp = eqx.nn.MLP(
-            in_size=NUM_INPUTS + 3,
+            in_size=NUM_INPUTS + 3 + 2 + 3 + 4 + 3 + 3 + 10,
             out_size=1,  # Always output a single critic value.
-            width_size=64,
+            width_size=256,
             depth=5,
             key=key,
             activation=jax.nn.relu,
@@ -151,7 +152,13 @@ class KbotCritic(eqx.Module):
         imu_gyro_3: Array,
         lin_vel_cmd_2: Array,
         last_action_n: Array,
-        projected_gravity_n: Array,
+        projected_gravity_3: Array,
+        feet_contact_2: Array,
+        actuator_force_n: Array,
+        base_position_3: Array,
+        base_orientation_4: Array,
+        base_linear_velocity_3: Array,
+        base_angular_velocity_3: Array,
         history_n: Array,
     ) -> Array:
         x_n = jnp.concatenate(
@@ -162,7 +169,13 @@ class KbotCritic(eqx.Module):
                 imu_gyro_3,
                 lin_vel_cmd_2,
                 last_action_n,
-                projected_gravity_n,
+                projected_gravity_3,
+                feet_contact_2,
+                actuator_force_n,
+                base_position_3,
+                base_orientation_4,
+                base_linear_velocity_3,
+                base_angular_velocity_3,
                 # history_n,
             ],
             axis=-1,
@@ -339,6 +352,22 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ksim.ActuatorForceObservation(),
             ksim.SensorObservation.create(physics_model, "imu_acc", noise=0.5),
             ksim.SensorObservation.create(physics_model, "imu_gyro", noise=0.2),
+            ksim.BasePositionObservation(noise=0.0),
+            ksim.BaseOrientationObservation(noise=0.0),
+            ksim.BaseLinearVelocityObservation(noise=0.0),
+            ksim.BaseAngularVelocityObservation(noise=0.0),
+            ksim.CenterOfMassVelocityObservation(),
+            ksim.FeetContactObservation.create(
+                physics_model,
+                "KB_D_501L_L_LEG_FOOT_collision_box",
+                "KB_D_501R_R_LEG_FOOT_collision_box",
+                "floor",
+            ),
+            ksim.FeetPositionObservation.create(
+                physics_model,
+                "KB_D_501L_L_LEG_FOOT_collision_box",
+                "KB_D_501R_R_LEG_FOOT_collision_box",
+            ),
             LastActionObservation(noise=0.0),
             ProjectedGravityObservation(noise=0.0),
             HistoryObservation(),
@@ -386,7 +415,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ksim.LinearVelocityTrackingPenalty(command_name="linear_velocity_step_command", scale=-0.05),
             ksim.AngularVelocityTrackingPenalty(command_name="angular_velocity_step_command", scale=-0.05),
             OrientationPenalty(scale=-1.0),
-            # FeetSlipPenalty(scale=-0.01),
+            FeetSlipPenalty(scale=-0.25),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -429,6 +458,12 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         lin_vel_cmd_2 = commands["linear_velocity_step_command"]
         last_action_n = observations["last_action_observation"]
         projected_gravity_3 = observations["projected_gravity_observation"]
+        feet_contact_2 = observations["feet_contact_observation"]
+        base_position_3 = observations["base_position_observation"]
+        base_orientation_4 = observations["base_orientation_observation"]
+        base_linear_velocity_3 = observations["base_linear_velocity_observation"]
+        base_angular_velocity_3 = observations["base_angular_velocity_observation"]
+        actuator_force_n = observations["actuator_force_observation"]
         history_n = observations["history_observation"]
         return model.critic(
             joint_pos_n,
@@ -438,6 +473,12 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             lin_vel_cmd_2,
             last_action_n,
             projected_gravity_3,
+            feet_contact_2,
+            base_position_3,
+            base_orientation_4,
+            base_linear_velocity_3,
+            base_angular_velocity_3,
+            actuator_force_n,
             history_n,
         )
 
