@@ -13,7 +13,6 @@ import ksim
 import mujoco
 import optax
 import xax
-from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
@@ -500,8 +499,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     def _run_actor(
         self,
         model: KbotModel,
-        observations: FrozenDict[str, Array],
-        commands: FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, Array],
+        commands: xax.FrozenDict[str, Array],
     ) -> distrax.Normal:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
@@ -514,8 +513,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     def _run_critic(
         self,
         model: KbotModel,
-        observations: FrozenDict[str, Array],
-        commands: FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, Array],
+        commands: xax.FrozenDict[str, Array],
     ) -> Array:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
@@ -581,8 +580,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         model: KbotModel,
         carry: Array,
         physics_model: ksim.PhysicsModel,
-        observations: FrozenDict[str, Array],
-        commands: FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, Array],
+        commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> tuple[Array, Array, AuxOutputs]:
         action_dist_n = self._run_actor(model, observations, commands)

@@ -9,7 +9,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import ksim
-from flax.core import FrozenDict
+import xax
 from jaxtyping import Array, PRNGKeyArray
 
 from ksim_kbot.standing.standing import AuxOutputs, KbotStandingTask, KbotStandingTaskConfig
@@ -257,8 +257,8 @@ class KbotStandingLSTMTask(KbotStandingTask[Config], Generic[Config]):
     def _run_actor(
         self,
         model: KbotModel,
-        observations: FrozenDict[str, Array],
-        commands: FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, Array],
+        commands: xax.FrozenDict[str, Array],
         carry: Array,
     ) -> tuple[distrax.Normal, Array]:
         joint_pos_n = observations["joint_position_observation"]
@@ -271,8 +271,8 @@ class KbotStandingLSTMTask(KbotStandingTask[Config], Generic[Config]):
     def _run_critic(
         self,
         model: KbotModel,
-        observations: FrozenDict[str, Array],
-        commands: FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, Array],
+        commands: xax.FrozenDict[str, Array],
     ) -> Array:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
@@ -306,8 +306,8 @@ class KbotStandingLSTMTask(KbotStandingTask[Config], Generic[Config]):
         model: KbotModel,
         carry: Array,
         physics_model: ksim.PhysicsModel,
-        observations: FrozenDict[str, Array],
-        commands: FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, Array],
+        commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> tuple[Array, Array, AuxOutputs]:
         action_dist_n, next_carry = self._run_actor(model, observations, commands, carry)

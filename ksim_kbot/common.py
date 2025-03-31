@@ -71,11 +71,12 @@ class ResetDefaultJointPosition(ksim.Reset):
 class JointDeviationPenalty(ksim.Reward):
     """Penalty for joint deviations."""
 
+    norm: xax.NormType = attrs.field(default="l2")
     joint_targets: tuple[float, ...] = attrs.field()
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         diff = trajectory.qpos[..., 7:] - jnp.array(self.joint_targets)
-        return jnp.sum(jnp.square(diff), axis=-1)
+        return xax.get_norm(diff, self.norm).sum(axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -113,30 +114,6 @@ class DHHealthyReward(ksim.Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class OrientationObservation(ksim.SensorObservation):
-    """Observation for the orientation of the robot."""
-
-    norm: xax.NormType = attrs.field(default="l2")
-
-    def observe(self, rollout_state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
-        sensor_data = rollout_state.physics_state.data.sensordata[
-            self.sensor_idx_range[0] : self.sensor_idx_range[1]
-        ].ravel()
-
-        return xax.get_norm(sensor_data, self.norm).sum(axis=-1)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class OrientationPenalty(ksim.Reward):
-    """Penalty for the orientation of the robot."""
-
-    norm: xax.NormType = attrs.field(default="l2")
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        return xax.get_norm(trajectory.obs["projected_gravity_observation"][..., :2], self.norm).sum(axis=-1)
-
-
-@attrs.define(frozen=True, kw_only=True)
 class FeetSlipPenalty(ksim.Reward):
     """Penalty for feet slipping."""
 
@@ -155,15 +132,73 @@ class FeetSlipPenalty(ksim.Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class OrientationPenalty(ksim.Reward):
+    """Penalty for the orientation of the robot."""
+
+    norm: xax.NormType = attrs.field(default="l2")
+    obs_name: str = attrs.field(default="upvector_torso_obs")
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        return xax.get_norm(trajectory.obs[self.obs_name][..., :2], self.norm).sum(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class LinearVelocityTrackingReward(ksim.Reward):
+    """Reward for tracking the linear velocity."""
+
+    error_scale: float = attrs.field(default=0.25)
+    linvel_obs_name: str = attrs.field(default="local_linvel_torso_obs")
+    command_name: str = attrs.field(default="linear_velocity_command")
+    norm: xax.NormType = attrs.field(default="l2")
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        lin_vel_error = xax.get_norm(
+            trajectory.command[self.command_name][..., :2] - trajectory.obs[self.linvel_obs_name][..., :2], self.norm
+        ).sum(axis=-1)
+        return jnp.exp(-lin_vel_error / self.error_scale)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class AngularVelocityTrackingReward(ksim.Reward):
+    """Reward for tracking the angular velocity."""
+
+    error_scale: float = attrs.field(default=0.25)
+    angvel_obs_name: str = attrs.field(default="gyro_torso_obs")
+    command_name: str = attrs.field(default="angular_velocity_command")
+    norm: xax.NormType = attrs.field(default="l2")
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        ang_vel_error = trajectory.command[self.command_name][..., 2] - trajectory.obs[self.angvel_obs_name][..., 2]
+        return jnp.exp(-ang_vel_error / self.error_scale)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class AngularVelocityXYPenalty(ksim.Reward):
+    """Penalty for the angular velocity."""
+
+    tracking_sigma: float = attrs.field(default=0.25)
+    angvel_obs_name: str = attrs.field(default="global_angvel_torso_obs")
+    norm: xax.NormType = attrs.field(default="l2")
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        ang_vel = trajectory.obs[self.angvel_obs_name][..., :2]
+        return xax.get_norm(ang_vel, self.norm).sum(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
 class HipDeviationPenalty(ksim.Reward):
     """Penalty for hip joint deviations."""
 
+    norm: xax.NormType = attrs.field(default="l2")
     hip_indices: tuple[int, ...] = attrs.field()
     joint_targets: tuple[float, ...] = attrs.field()
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        diff = trajectory.qpos[..., self.hip_indices] - self.joint_targets[self.hip_indices]
-        return jnp.sum(jnp.square(diff), axis=-1)
+        diff = (
+            trajectory.qpos[..., jnp.array(self.hip_indices)]
+            - jnp.array(self.joint_targets)[jnp.array(self.hip_indices)]
+        )
+        return xax.get_norm(diff, self.norm).sum(axis=-1)
 
     @classmethod
     def create(
@@ -175,7 +210,7 @@ class HipDeviationPenalty(ksim.Reward):
     ) -> Self:
         """Create a sensor observation from a physics model."""
         mappings = get_qpos_data_idxs_by_name(physics_model)
-        hip_indices = jnp.array([mappings[name][0] for name in hip_names])
+        hip_indices = tuple([int(mappings[name][0]) - 7 for name in hip_names])
         return cls(
             hip_indices=hip_indices,
             joint_targets=joint_targets,
@@ -187,12 +222,16 @@ class HipDeviationPenalty(ksim.Reward):
 class KneeDeviationPenalty(ksim.Reward):
     """Penalty for knee joint deviations."""
 
+    norm: xax.NormType = attrs.field(default="l2")
     knee_indices: tuple[int, ...] = attrs.field()
     joint_targets: tuple[float, ...] = attrs.field()
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        diff = trajectory.qpos[..., self.knee_indices] - self.joint_targets[self.knee_indices]
-        return jnp.sum(jnp.square(diff), axis=-1)
+        diff = (
+            trajectory.qpos[..., jnp.array(self.knee_indices)]
+            - jnp.array(self.joint_targets)[jnp.array(self.knee_indices)]
+        )
+        return xax.get_norm(diff, self.norm).sum(axis=-1)
 
     @classmethod
     def create(
@@ -204,7 +243,7 @@ class KneeDeviationPenalty(ksim.Reward):
     ) -> Self:
         """Create a sensor observation from a physics model."""
         mappings = get_qpos_data_idxs_by_name(physics_model)
-        knee_indices = jnp.array([mappings[name][0] for name in knee_names])
+        knee_indices = tuple([int(mappings[name][0]) - 7 for name in knee_names])
         return cls(
             knee_indices=knee_indices,
             joint_targets=joint_targets,
