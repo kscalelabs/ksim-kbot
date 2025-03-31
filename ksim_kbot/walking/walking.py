@@ -394,8 +394,9 @@ class KbotWalkingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             # Bring back ksim.FeetPositionObservation
             FeetPositionObservation.create(
                 physics_model=physics_model,
-                foot_left_site_name="KB_D_501L_L_LEG_FOOT_collision_box",
-                foot_right_site_name="KB_D_501R_R_LEG_FOOT_collision_box",
+                foot_left_geom_name="KB_D_501L_L_LEG_FOOT_collision_box",
+                foot_right_geom_name="KB_D_501R_R_LEG_FOOT_collision_box",
+                floor_threshold=0.04,
             ),
             LastActionObservation(),
             ProjectedGravityObservation(noise=gvec_noise),
@@ -691,6 +692,6 @@ if __name__ == "__main__":
             max_grad_norm=1.0,
             use_mit_actuators=True,
             export_for_inference=True,
-            domain_randomize=True,
+            domain_randomize=False,
         ),
     )

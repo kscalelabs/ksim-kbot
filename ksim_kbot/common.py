@@ -11,7 +11,7 @@ import ksim
 import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray
-from ksim.utils.mujoco import get_qpos_data_idxs_by_name, get_site_data_idx_from_name
+from ksim.utils.mujoco import get_geom_data_idx_from_name, get_qpos_data_idxs_by_name
 from mujoco import mjx
 
 
@@ -55,25 +55,32 @@ class LastActionObservation(ksim.Observation):
 class FeetPositionObservation(ksim.Observation):
     foot_left: int = attrs.field()
     foot_right: int = attrs.field()
+    floor_threshold: float = attrs.field(default=0.0)
 
     @classmethod
     def create(
         cls,
         *,
         physics_model: ksim.PhysicsModel,
-        foot_left_site_name: str,
-        foot_right_site_name: str,
+        foot_left_geom_name: str,
+        foot_right_geom_name: str,
+        floor_threshold: float = 0.0,
     ) -> Self:
-        foot_left_idx = get_site_data_idx_from_name(physics_model, foot_left_site_name)
-        foot_right_idx = get_site_data_idx_from_name(physics_model, foot_right_site_name)
+        foot_left_idx = get_geom_data_idx_from_name(physics_model, foot_left_geom_name)
+        foot_right_idx = get_geom_data_idx_from_name(physics_model, foot_right_geom_name)
         return cls(
             foot_left=foot_left_idx,
             foot_right=foot_right_idx,
+            floor_threshold=floor_threshold,
         )
 
     def observe(self, rollout_state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
-        foot_left_pos = rollout_state.physics_state.data.site_xpos[self.foot_left]
-        foot_right_pos = rollout_state.physics_state.data.site_xpos[self.foot_right]
+        foot_left_pos = rollout_state.physics_state.data.geom_xpos[self.foot_left] + jnp.array(
+            [0.0, 0.0, self.floor_threshold]
+        )
+        foot_right_pos = rollout_state.physics_state.data.geom_xpos[self.foot_right] + jnp.array(
+            [0.0, 0.0, self.floor_threshold]
+        )
         return jnp.concatenate([foot_left_pos, foot_right_pos], axis=-1)
 
 
@@ -202,9 +209,9 @@ class FeetPhaseReward(ksim.Reward):
         phase = trajectory.reward_carry["phase"]  # type: ignore[attr-defined]
 
         foot_z = jnp.array([foot_pos[..., 2], foot_pos[..., 5]]).T
-        rz = self.gait_phase(phase, swing_height=self.max_foot_height)
+        ideal_z = self.gait_phase(phase, swing_height=self.max_foot_height)
 
-        error = jnp.sum(jnp.square(foot_z - rz), axis=-1)
+        error = jnp.sum(jnp.square(foot_z - ideal_z), axis=-1)
         reward = jnp.exp(-error / 0.01)
 
         return reward
@@ -230,6 +237,7 @@ class FeetPhaseReward(ksim.Reward):
             return y_start + y_diff * bezier
 
         x = (phi + jnp.pi) / (2 * jnp.pi)
+        x = jnp.clip(x, 0, 1)
         stance = _cubic_bezier_interpolation(0, swing_height, 2 * x)
         swing = _cubic_bezier_interpolation(swing_height, 0, 2 * x - 1)
         return jnp.where(x <= 0.5, stance, swing)
