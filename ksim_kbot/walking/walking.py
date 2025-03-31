@@ -13,12 +13,16 @@ import jax.numpy as jnp
 import ksim
 import mujoco
 import optax
-import xax
+from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
 from ksim_kbot.common import (
+    AngularVelocityTrackingReward,
+    AngularVelocityXYPenalty,
+    FeetAirTimeReward,
+    FeetPhaseReward,
     FeetSlipPenalty,
     HipDeviationPenalty,
     HistoryObservation,
@@ -26,6 +30,8 @@ from ksim_kbot.common import (
     JointPositionObservation,
     KneeDeviationPenalty,
     LastActionObservation,
+    LinearVelocityTrackingReward,
+    OrientationPenalty,
     ProjectedGravityObservation,
     ResetDefaultJointPosition,
 )
@@ -198,7 +204,7 @@ class KbotModel(eqx.Module):
         self.critic = KbotCritic(key)
 
 
-class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
+class KbotWalkingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     def get_optimizer(self) -> optax.GradientTransformation:
         """Builds the optimizer.
 
@@ -371,6 +377,13 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             LastActionObservation(noise=0.0),
             ProjectedGravityObservation(noise=0.0),
             HistoryObservation(),
+            ksim.SensorObservation.create(physics_model, "local_linvel_torso", noise=0.0),
+            ksim.SensorObservation.create(physics_model, "global_linvel_torso", noise=0.0),
+            ksim.SensorObservation.create(physics_model, "global_angvel_torso", noise=0.0),
+            ksim.SensorObservation.create(physics_model, "upvector_torso", noise=0.0),
+            ksim.SensorObservation.create(physics_model, "accelerometer_torso", noise=0.0),
+            ksim.SensorObservation.create(physics_model, "orientation_torso", noise=0.0),
+            ksim.SensorObservation.create(physics_model, "gyro_torso", noise=0.0),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
@@ -408,6 +421,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ),
             ksim.TerminationPenalty(scale=-100.0),
             ksim.HealthyReward(scale=0.25),
+            OrientationPenalty(scale=-2.0),
             HipDeviationPenalty.create(
                 physics_model,
                 hip_names=(
@@ -451,13 +465,14 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                 ),
                 scale=-0.1,
             ),
+            LinearVelocityTrackingReward(scale=1.0),
+            AngularVelocityTrackingReward(scale=0.75),
+            AngularVelocityXYPenalty(scale=-0.15),
             FeetSlipPenalty(scale=-0.25),
+            FeetAirTimeReward(scale=2.0),
+            FeetPhaseReward(scale=1.0),
             # TODO: Add this back in.
             # AvoidLimitsReward(scale=0.1),
-            # LinearVelocityTrackingReward(scale=1.0),
-            # AngularVelocityTrackingReward(scale=0.75),
-            # AngularVelocityXYPenalty(scale=-0.15),
-            # OrientationPenalty(scale=-2.0),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -475,8 +490,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     def _run_actor(
         self,
         model: KbotModel,
-        observations: xax.FrozenDict[str, Array],
-        commands: xax.FrozenDict[str, Array],
+        observations: FrozenDict[str, Array],
+        commands: FrozenDict[str, Array],
     ) -> distrax.Normal:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
@@ -490,8 +505,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     def _run_critic(
         self,
         model: KbotModel,
-        observations: xax.FrozenDict[str, Array],
-        commands: xax.FrozenDict[str, Array],
+        observations: FrozenDict[str, Array],
+        commands: FrozenDict[str, Array],
     ) -> Array:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
@@ -580,8 +595,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         model: KbotModel,
         carry: Array,
         physics_model: ksim.PhysicsModel,
-        observations: xax.FrozenDict[str, Array],
-        commands: xax.FrozenDict[str, Array],
+        observations: FrozenDict[str, Array],
+        commands: FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> tuple[Array, Array, AuxOutputs]:
         action_dist_n = self._run_actor(model, observations, commands)
@@ -630,7 +645,7 @@ if __name__ == "__main__":
     #  run_environment=True \
     #  run_environment_num_seconds=1 \
     #  run_environment_save_path=videos/test.mp4
-    KbotStandingTask.launch(
+    KbotWalkingTask.launch(
         KbotStandingTaskConfig(
             num_envs=1024,
             batch_size=512,

@@ -132,6 +132,80 @@ class FeetSlipPenalty(ksim.Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class FeetHeightPenalty(ksim.Reward):
+    """Cost penalizing feet height."""
+
+    scale: float = -1.0
+    max_foot_height: float = 0.1
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        swing_peak = trajectory.reward_carry["swing_peak"]
+        first_contact = trajectory.reward_carry["first_contact"]
+        error = swing_peak / self.max_foot_height - 1.0
+        return jnp.sum(jnp.square(error) * first_contact, axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetAirTimeReward(ksim.Reward):
+    """Reward for feet air time."""
+
+    scale: float = 1.0
+    threshold_min: float = 0.1
+    threshold_max: float = 0.4
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        first_contact = trajectory.reward_carry["first_contact"]
+        air_time = trajectory.reward_carry["feet_air_time"]
+        air_time = (air_time - self.threshold_min) * first_contact
+        air_time = jnp.clip(air_time, max=self.threshold_max - self.threshold_min)
+        return jnp.sum(air_time, axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetPhaseReward(ksim.Reward):
+    """Reward for tracking the desired foot height."""
+
+    scale: float = 1.0
+    feet_pos_obs_name: str = attrs.field(default="feet_position_observation")
+    max_foot_height: float = 0.12
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        foot_pos = trajectory.obs[self.feet_pos_obs_name]
+        phase = trajectory.reward_carry["phase"]
+
+        foot_z = jnp.array([foot_pos[..., 2], foot_pos[..., 5]]).T
+        rz = self.gait_phase(phase, swing_height=self.max_foot_height)
+
+        error = jnp.sum(jnp.square(foot_z - rz), axis=-1)
+        reward = jnp.exp(-error / 0.01)
+
+        return reward
+
+    def gait_phase(
+        self,
+        phi: Array | float,
+        swing_height: Array | float = 0.08,
+    ) -> Array:
+        """Cubic Bezier interpolation for the gait phase.
+
+        Original implementation:
+        https://arxiv.org/pdf/2201.00206
+        https://github.com/google-deepmind/mujoco_playground/blob/main/mujoco_playground/_src/gait.py#L33
+        """
+
+        def _cubic_bezier_interpolation(y_start: Array, y_end: Array, x: Array) -> Array:
+            """Cubic Bezier interpolation for the gait phase."""
+            y_diff = y_end - y_start
+            bezier = x**3 + 3 * (x**2 * (1 - x))
+            return y_start + y_diff * bezier
+
+        x = (phi + jnp.pi) / (2 * jnp.pi)
+        stance = _cubic_bezier_interpolation(0, swing_height, 2 * x)
+        swing = _cubic_bezier_interpolation(swing_height, 0, 2 * x - 1)
+        return jnp.where(x <= 0.5, stance, swing)
+
+
+@attrs.define(frozen=True, kw_only=True)
 class OrientationPenalty(ksim.Reward):
     """Penalty for the orientation of the robot."""
 
