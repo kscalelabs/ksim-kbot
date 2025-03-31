@@ -23,6 +23,7 @@ from ksim_kbot.common import (
     AngularVelocityXYPenalty,
     FeetAirTimeReward,
     FeetPhaseReward,
+    FeetPositionObservation,
     FeetSlipPenalty,
     HipDeviationPenalty,
     HistoryObservation,
@@ -377,34 +378,34 @@ class KbotWalkingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ),
             ksim.JointVelocityObservation(noise=imu_gyro_noise),
             ksim.ActuatorForceObservation(),
-            ksim.SensorObservation.create(physics_model, "imu_acc", noise=imu_acc_noise),
-            ksim.SensorObservation.create(physics_model, "imu_gyro", noise=imu_gyro_noise),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_acc", noise=imu_acc_noise),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_gyro", noise=imu_gyro_noise),
             ksim.BasePositionObservation(noise=base_position_noise),
             ksim.BaseOrientationObservation(noise=base_orientation_noise),
             ksim.BaseLinearVelocityObservation(noise=base_linear_velocity_noise),
             ksim.BaseAngularVelocityObservation(noise=base_angular_velocity_noise),
             ksim.CenterOfMassVelocityObservation(),
             ksim.FeetContactObservation.create(
-                physics_model,
-                "KB_D_501L_L_LEG_FOOT_collision_box",
-                "KB_D_501R_R_LEG_FOOT_collision_box",
-                "floor",
+                physics_model=physics_model,
+                foot_left_geom_name="KB_D_501L_L_LEG_FOOT_collision_box",
+                foot_right_geom_name="KB_D_501R_R_LEG_FOOT_collision_box",
+                floor_geom_name="floor",
             ),
-            ksim.FeetPositionObservation.create(
-                physics_model,
-                "KB_D_501L_L_LEG_FOOT_collision_box",
-                "KB_D_501R_R_LEG_FOOT_collision_box",
+            # Bring back ksim.FeetPositionObservation
+            FeetPositionObservation.create(
+                physics_model=physics_model,
+                foot_left_site_name="KB_D_501L_L_LEG_FOOT_collision_box",
+                foot_right_site_name="KB_D_501R_R_LEG_FOOT_collision_box",
             ),
             LastActionObservation(),
             ProjectedGravityObservation(noise=gvec_noise),
             HistoryObservation(),
-            ksim.SensorObservation.create(physics_model, "local_linvel_torso", noise=noise),
-            ksim.SensorObservation.create(physics_model, "global_linvel_torso", noise=noise),
-            ksim.SensorObservation.create(physics_model, "global_angvel_torso", noise=noise),
-            ksim.SensorObservation.create(physics_model, "upvector_torso", noise=noise),
-            ksim.SensorObservation.create(physics_model, "accelerometer_torso", noise=noise),
-            ksim.SensorObservation.create(physics_model, "orientation_torso", noise=noise),
-            ksim.SensorObservation.create(physics_model, "gyro_torso", noise=noise),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="local_linvel_torso", noise=noise),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="global_linvel_torso", noise=noise),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="global_angvel_torso", noise=noise),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="upvector_torso", noise=noise),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="orientation_torso", noise=noise),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="gyro_torso", noise=noise),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
@@ -516,8 +517,8 @@ class KbotWalkingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     ) -> distrax.Normal:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
-        imu_acc_3 = observations["imu_acc_obs"]
-        imu_gyro_3 = observations["imu_gyro_obs"]
+        imu_acc_3 = observations["sensor_observation_imu_acc"]
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         last_action_n = observations["last_action_observation"]
         history_n = observations["history_observation"]
@@ -531,8 +532,8 @@ class KbotWalkingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     ) -> Array:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
-        imu_acc_3 = observations["imu_acc_obs"]
-        imu_gyro_3 = observations["imu_gyro_obs"]
+        imu_acc_3 = observations["sensor_observation_imu_acc"]
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         last_action_n = observations["last_action_observation"]
         projected_gravity_3 = observations["projected_gravity_observation"]
@@ -629,8 +630,8 @@ class KbotWalkingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
 
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
-        imu_acc_3 = observations["imu_acc_obs"]
-        imu_gyro_3 = observations["imu_gyro_obs"]
+        imu_acc_3 = observations["sensor_observation_imu_acc"]
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         last_action_n = observations["last_action_observation"]
         history_n = jnp.concatenate(

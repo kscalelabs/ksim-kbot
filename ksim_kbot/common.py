@@ -11,7 +11,7 @@ import ksim
 import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray
-from ksim.utils.mujoco import get_qpos_data_idxs_by_name
+from ksim.utils.mujoco import get_qpos_data_idxs_by_name, get_site_data_idx_from_name
 from mujoco import mjx
 
 
@@ -49,6 +49,32 @@ class LastActionObservation(ksim.Observation):
 
     def observe(self, rollout_state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
         return rollout_state.physics_state.most_recent_action
+
+
+@attrs.define(frozen=True)
+class FeetPositionObservation(ksim.Observation):
+    foot_left: int = attrs.field()
+    foot_right: int = attrs.field()
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        physics_model: ksim.PhysicsModel,
+        foot_left_site_name: str,
+        foot_right_site_name: str,
+    ) -> Self:
+        foot_left_idx = get_site_data_idx_from_name(physics_model, foot_left_site_name)
+        foot_right_idx = get_site_data_idx_from_name(physics_model, foot_right_site_name)
+        return cls(
+            foot_left=foot_left_idx,
+            foot_right=foot_right_idx,
+        )
+
+    def observe(self, rollout_state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
+        foot_left_pos = rollout_state.physics_state.data.site_xpos[self.foot_left]
+        foot_right_pos = rollout_state.physics_state.data.site_xpos[self.foot_right]
+        return jnp.concatenate([foot_left_pos, foot_right_pos], axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -170,6 +196,8 @@ class FeetPhaseReward(ksim.Reward):
     max_foot_height: float = 0.12
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        if self.feet_pos_obs_name not in trajectory.obs:
+            raise ValueError(f"Observation {self.feet_pos_obs_name} not found; add it as an observation in your task.")
         foot_pos = trajectory.obs[self.feet_pos_obs_name]
         phase = trajectory.reward_carry["phase"]  # type: ignore[attr-defined]
 
@@ -186,7 +214,7 @@ class FeetPhaseReward(ksim.Reward):
         phi: Array | float,
         swing_height: Array | float = 0.08,
     ) -> Array:
-        """Cubic Bezier interpolation for the gait phase.
+        """Interpolation logic for the gait phase.
 
         Original implementation:
         https://arxiv.org/pdf/2201.00206
@@ -228,6 +256,8 @@ class LinearVelocityTrackingReward(ksim.Reward):
     norm: xax.NormType = attrs.field(default="l2")
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        if self.linvel_obs_name not in trajectory.obs:
+            raise ValueError(f"Observation {self.linvel_obs_name} not found; add it as an observation in your task.")
         lin_vel_error = xax.get_norm(
             trajectory.command[self.command_name][..., :2] - trajectory.obs[self.linvel_obs_name][..., :2], self.norm
         ).sum(axis=-1)
@@ -244,6 +274,8 @@ class AngularVelocityTrackingReward(ksim.Reward):
     norm: xax.NormType = attrs.field(default="l2")
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        if self.angvel_obs_name not in trajectory.obs:
+            raise ValueError(f"Observation {self.angvel_obs_name} not found; add it as an observation in your task.")
         ang_vel_error = trajectory.command[self.command_name][..., 2] - trajectory.obs[self.angvel_obs_name][..., 2]
         return jnp.exp(-ang_vel_error / self.error_scale)
 
@@ -257,6 +289,8 @@ class AngularVelocityXYPenalty(ksim.Reward):
     norm: xax.NormType = attrs.field(default="l2")
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        if self.angvel_obs_name not in trajectory.obs:
+            raise ValueError(f"Observation {self.angvel_obs_name} not found; add it as an observation in your task.")
         ang_vel = trajectory.obs[self.angvel_obs_name][..., :2]
         return xax.get_norm(ang_vel, self.norm).sum(axis=-1)
 
