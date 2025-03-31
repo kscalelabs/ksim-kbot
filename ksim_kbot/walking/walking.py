@@ -246,14 +246,18 @@ class KbotWalkingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         physics_model: ksim.PhysicsModel,
         metadata: dict[str, JointMetadataOutput] | None = None,
     ) -> ksim.Actuators:
+        if self.config.domain_randomize:
+            noise = 0.1
+        else:
+            noise = 0.0
         if self.config.use_mit_actuators:
             if metadata is None:
                 raise ValueError("Metadata is required for MIT actuators")
             return ksim.MITPositionVelocityActuators(
                 physics_model,
                 metadata,
-                pos_action_noise=0.1,
-                vel_action_noise=0.1,
+                pos_action_noise=noise,
+                vel_action_noise=noise,
                 pos_action_noise_type="gaussian",
                 vel_action_noise_type="gaussian",
                 ctrl_clip=[
