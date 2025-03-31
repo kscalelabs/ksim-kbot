@@ -12,7 +12,6 @@ import jax.numpy as jnp
 import ksim
 import mujoco
 import xax
-from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 from mujoco import mjx
 
@@ -367,8 +366,8 @@ class KbotGetupTask(KbotStandingTask[Config], Generic[Config]):
     def _run_critic(
         self,
         model: KbotModel,
-        observations: FrozenDict[str, Array],
-        commands: FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, Array],
+        commands: xax.FrozenDict[str, Array],
     ) -> Array:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]

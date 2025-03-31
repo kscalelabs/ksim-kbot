@@ -1,3 +1,4 @@
+# mypy: disable-error-code="override"
 """Defines simple task for training a standing policy for K-Bot."""
 
 import asyncio
@@ -12,7 +13,7 @@ import jax.numpy as jnp
 import ksim
 import mujoco
 import optax
-from flax.core import FrozenDict
+import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
@@ -25,7 +26,6 @@ from ksim_kbot.common import (
     JointDeviationPenalty,
     JointPositionObservation,
     LastActionObservation,
-    OrientationPenalty,
     ProjectedGravityObservation,
     ResetDefaultJointPosition,
 )
@@ -414,7 +414,6 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ksim.BaseHeightReward(scale=1.0, height_target=0.9),
             ksim.LinearVelocityTrackingPenalty(command_name="linear_velocity_step_command", scale=-0.05),
             ksim.AngularVelocityTrackingPenalty(command_name="angular_velocity_step_command", scale=-0.05),
-            OrientationPenalty(scale=-1.0),
             FeetSlipPenalty(scale=-0.25),
         ]
 
@@ -433,8 +432,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     def _run_actor(
         self,
         model: KbotModel,
-        observations: FrozenDict[str, Array],
-        commands: FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, Array],
+        commands: xax.FrozenDict[str, Array],
     ) -> distrax.Normal:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
@@ -448,8 +447,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     def _run_critic(
         self,
         model: KbotModel,
-        observations: FrozenDict[str, Array],
-        commands: FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, Array],
+        commands: xax.FrozenDict[str, Array],
     ) -> Array:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
@@ -538,8 +537,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         model: KbotModel,
         carry: Array,
         physics_model: ksim.PhysicsModel,
-        observations: FrozenDict[str, Array],
-        commands: FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, Array],
+        commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> tuple[Array, Array, AuxOutputs]:
         action_dist_n = self._run_actor(model, observations, commands)
