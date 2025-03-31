@@ -13,6 +13,7 @@ import xax
 from jaxtyping import Array, PRNGKeyArray
 from ksim.utils.mujoco import get_geom_data_idx_from_name, get_qpos_data_idxs_by_name
 from mujoco import mjx
+import jax
 
 
 @attrs.define(frozen=True)
@@ -284,7 +285,7 @@ class AngularVelocityTrackingReward(ksim.Reward):
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         if self.angvel_obs_name not in trajectory.obs:
             raise ValueError(f"Observation {self.angvel_obs_name} not found; add it as an observation in your task.")
-        ang_vel_error = trajectory.command[self.command_name][..., 2] - trajectory.obs[self.angvel_obs_name][..., 2]
+        ang_vel_error = jnp.square(trajectory.command[self.command_name][..., 2] - trajectory.obs[self.angvel_obs_name][..., 2])
         return jnp.exp(-ang_vel_error / self.error_scale)
 
 
