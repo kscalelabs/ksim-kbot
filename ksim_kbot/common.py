@@ -139,8 +139,8 @@ class FeetHeightPenalty(ksim.Reward):
     max_foot_height: float = 0.1
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        swing_peak = trajectory.reward_carry["swing_peak"]
-        first_contact = trajectory.reward_carry["first_contact"]
+        swing_peak = trajectory.reward_carry["swing_peak"]  # type: ignore[attr-defined]
+        first_contact = trajectory.reward_carry["first_contact"]  # type: ignore[attr-defined]
         error = swing_peak / self.max_foot_height - 1.0
         return jnp.sum(jnp.square(error) * first_contact, axis=-1)
 
@@ -154,8 +154,8 @@ class FeetAirTimeReward(ksim.Reward):
     threshold_max: float = 0.4
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        first_contact = trajectory.reward_carry["first_contact"]
-        air_time = trajectory.reward_carry["feet_air_time"]
+        first_contact = trajectory.reward_carry["first_contact"]  # type: ignore[attr-defined]
+        air_time = trajectory.reward_carry["feet_air_time"]  # type: ignore[attr-defined]
         air_time = (air_time - self.threshold_min) * first_contact
         air_time = jnp.clip(air_time, max=self.threshold_max - self.threshold_min)
         return jnp.sum(air_time, axis=-1)
@@ -171,7 +171,7 @@ class FeetPhaseReward(ksim.Reward):
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         foot_pos = trajectory.obs[self.feet_pos_obs_name]
-        phase = trajectory.reward_carry["phase"]
+        phase = trajectory.reward_carry["phase"]  # type: ignore[attr-defined]
 
         foot_z = jnp.array([foot_pos[..., 2], foot_pos[..., 5]]).T
         rz = self.gait_phase(phase, swing_height=self.max_foot_height)
@@ -193,7 +193,9 @@ class FeetPhaseReward(ksim.Reward):
         https://github.com/google-deepmind/mujoco_playground/blob/main/mujoco_playground/_src/gait.py#L33
         """
 
-        def _cubic_bezier_interpolation(y_start: Array, y_end: Array, x: Array) -> Array:
+        def _cubic_bezier_interpolation(
+            y_start: Array | float, y_end: Array | float, x: Array | float
+        ) -> Array | float:
             """Cubic Bezier interpolation for the gait phase."""
             y_diff = y_end - y_start
             bezier = x**3 + 3 * (x**2 * (1 - x))

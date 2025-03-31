@@ -13,7 +13,7 @@ import jax.numpy as jnp
 import ksim
 import mujoco
 import optax
-from flax.core import FrozenDict
+import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
@@ -281,6 +281,7 @@ class KbotWalkingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                 ksim.ArmatureRandomization(scale_lower=1.0, scale_upper=1.05),
                 ksim.MassMultiplicationRandomization.from_body_name(physics_model, "Torso_Side_Right"),
                 ksim.JointDampingRandomization(scale_lower=0.95, scale_upper=1.05),
+                # TODO: Add this back in.
                 # ksim.FloorFrictionRandomization.from_body_name(
                 #     model=physics_model,
                 #     scale_lower=0.2,
@@ -336,6 +337,26 @@ class KbotWalkingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             return []
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
+        if self.config.domain_randomize:
+            imu_acc_noise = 0.5
+            imu_gyro_noise = 0.2
+            gvec_noise = 0.0
+            base_position_noise = 0.0
+            base_orientation_noise = 0.0
+            base_linear_velocity_noise = 0.0
+            base_angular_velocity_noise = 0.0
+            base_angular_velocity_noise = 0.0
+            noise = 0.0
+        else:
+            imu_acc_noise = 0.0
+            imu_gyro_noise = 0.0
+            gvec_noise = 0.0
+            base_position_noise = 0.0
+            base_orientation_noise = 0.0
+            base_linear_velocity_noise = 0.0
+            base_angular_velocity_noise = 0.0
+            noise = 0.0
+
         return [
             JointPositionObservation(
                 default_targets=(
@@ -354,14 +375,14 @@ class KbotWalkingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                 ),
                 noise=0.01,
             ),
-            ksim.JointVelocityObservation(noise=0.5),
+            ksim.JointVelocityObservation(noise=imu_gyro_noise),
             ksim.ActuatorForceObservation(),
-            ksim.SensorObservation.create(physics_model, "imu_acc", noise=0.5),
-            ksim.SensorObservation.create(physics_model, "imu_gyro", noise=0.2),
-            ksim.BasePositionObservation(noise=0.0),
-            ksim.BaseOrientationObservation(noise=0.0),
-            ksim.BaseLinearVelocityObservation(noise=0.0),
-            ksim.BaseAngularVelocityObservation(noise=0.0),
+            ksim.SensorObservation.create(physics_model, "imu_acc", noise=imu_acc_noise),
+            ksim.SensorObservation.create(physics_model, "imu_gyro", noise=imu_gyro_noise),
+            ksim.BasePositionObservation(noise=base_position_noise),
+            ksim.BaseOrientationObservation(noise=base_orientation_noise),
+            ksim.BaseLinearVelocityObservation(noise=base_linear_velocity_noise),
+            ksim.BaseAngularVelocityObservation(noise=base_angular_velocity_noise),
             ksim.CenterOfMassVelocityObservation(),
             ksim.FeetContactObservation.create(
                 physics_model,
@@ -374,16 +395,16 @@ class KbotWalkingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                 "KB_D_501L_L_LEG_FOOT_collision_box",
                 "KB_D_501R_R_LEG_FOOT_collision_box",
             ),
-            LastActionObservation(noise=0.0),
-            ProjectedGravityObservation(noise=0.0),
+            LastActionObservation(),
+            ProjectedGravityObservation(noise=gvec_noise),
             HistoryObservation(),
-            ksim.SensorObservation.create(physics_model, "local_linvel_torso", noise=0.0),
-            ksim.SensorObservation.create(physics_model, "global_linvel_torso", noise=0.0),
-            ksim.SensorObservation.create(physics_model, "global_angvel_torso", noise=0.0),
-            ksim.SensorObservation.create(physics_model, "upvector_torso", noise=0.0),
-            ksim.SensorObservation.create(physics_model, "accelerometer_torso", noise=0.0),
-            ksim.SensorObservation.create(physics_model, "orientation_torso", noise=0.0),
-            ksim.SensorObservation.create(physics_model, "gyro_torso", noise=0.0),
+            ksim.SensorObservation.create(physics_model, "local_linvel_torso", noise=noise),
+            ksim.SensorObservation.create(physics_model, "global_linvel_torso", noise=noise),
+            ksim.SensorObservation.create(physics_model, "global_angvel_torso", noise=noise),
+            ksim.SensorObservation.create(physics_model, "upvector_torso", noise=noise),
+            ksim.SensorObservation.create(physics_model, "accelerometer_torso", noise=noise),
+            ksim.SensorObservation.create(physics_model, "orientation_torso", noise=noise),
+            ksim.SensorObservation.create(physics_model, "gyro_torso", noise=noise),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
@@ -490,8 +511,8 @@ class KbotWalkingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     def _run_actor(
         self,
         model: KbotModel,
-        observations: FrozenDict[str, Array],
-        commands: FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, Array],
+        commands: xax.FrozenDict[str, Array],
     ) -> distrax.Normal:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
@@ -505,8 +526,8 @@ class KbotWalkingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     def _run_critic(
         self,
         model: KbotModel,
-        observations: FrozenDict[str, Array],
-        commands: FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, Array],
+        commands: xax.FrozenDict[str, Array],
     ) -> Array:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
@@ -595,8 +616,8 @@ class KbotWalkingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         model: KbotModel,
         carry: Array,
         physics_model: ksim.PhysicsModel,
-        observations: FrozenDict[str, Array],
-        commands: FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, Array],
+        commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> tuple[Array, Array, AuxOutputs]:
         action_dist_n = self._run_actor(model, observations, commands)
