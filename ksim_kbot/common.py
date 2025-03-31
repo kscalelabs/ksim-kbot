@@ -240,7 +240,7 @@ class OrientationPenalty(ksim.Reward):
     """Penalty for the orientation of the robot."""
 
     norm: xax.NormType = attrs.field(default="l2")
-    obs_name: str = attrs.field(default="upvector_torso_obs")
+    obs_name: str = attrs.field(default="sensor_observation_upvector_torso")
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         return xax.get_norm(trajectory.obs[self.obs_name][..., :2], self.norm).sum(axis=-1)
@@ -251,7 +251,7 @@ class LinearVelocityTrackingReward(ksim.Reward):
     """Reward for tracking the linear velocity."""
 
     error_scale: float = attrs.field(default=0.25)
-    linvel_obs_name: str = attrs.field(default="local_linvel_torso_obs")
+    linvel_obs_name: str = attrs.field(default="sensor_observation_local_linvel_torso")
     command_name: str = attrs.field(default="linear_velocity_command")
     norm: xax.NormType = attrs.field(default="l2")
 
@@ -269,7 +269,7 @@ class AngularVelocityTrackingReward(ksim.Reward):
     """Reward for tracking the angular velocity."""
 
     error_scale: float = attrs.field(default=0.25)
-    angvel_obs_name: str = attrs.field(default="gyro_torso_obs")
+    angvel_obs_name: str = attrs.field(default="sensor_observation_gyro_torso")
     command_name: str = attrs.field(default="angular_velocity_command")
     norm: xax.NormType = attrs.field(default="l2")
 
@@ -285,7 +285,7 @@ class AngularVelocityXYPenalty(ksim.Reward):
     """Penalty for the angular velocity."""
 
     tracking_sigma: float = attrs.field(default=0.25)
-    angvel_obs_name: str = attrs.field(default="global_angvel_torso_obs")
+    angvel_obs_name: str = attrs.field(default="sensor_observation_global_angvel_torso")
     norm: xax.NormType = attrs.field(default="l2")
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
