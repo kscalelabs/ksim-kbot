@@ -310,7 +310,7 @@ class KbotWalkingPositionTask(KbotWalkingTask[Config], Generic[Config]):
                 default_targets=(
                     0.0,
                     0.0,
-                    0.91,
+                    1.01,
                     1.0,
                     0.0,
                     0.0,
