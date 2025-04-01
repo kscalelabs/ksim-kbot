@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 from typing import Generic, Literal, TypeVar
+import uuid
 
 import distrax
 import equinox as eqx
@@ -299,8 +300,9 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
     def get_mujoco_model(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
         mjcf_path = (Path(self.config.robot_urdf_path) / "robot_scene.mjcf").resolve().as_posix()
         mj_model_joint_removed = remove_joints_except(mjcf_path, ["dof_right_shoulder_pitch_03", "dof_right_shoulder_roll_03", "dof_right_shoulder_yaw_02", "dof_right_elbow_02", "dof_right_wrist_00"])
-        # save to a temp file in the same directory
-        temp_path = (Path(self.config.robot_urdf_path) / "robot_scene_joint_removed.mjcf").resolve().as_posix()
+
+       # save to a temp file in the same directory
+        temp_path = (Path(self.config.robot_urdf_path) / f"robot_scene_joint_removed_{uuid.uuid4()}.mjcf").resolve().as_posix()
         with open(temp_path, "w") as f:
             f.write(mj_model_joint_removed)
 
@@ -396,8 +398,9 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 base_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
                 command_name="quat_command",
                 switch_prob=self.config.ctrl_dt / 1,  # will last 1 seconds in expectation
-                vis_scale=0.05,
-                vis_color=(1.0, 0.0, 0.0, 0.8),
+                vis_size=0.02,
+                vis_magnitude=0.5,
+                vis_color=(1.0, 0.0, 0.0, 0.5),
             ),
         ]
 
