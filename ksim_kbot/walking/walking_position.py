@@ -61,33 +61,22 @@ class ScaledTorqueActuators(ksim.Actuators):
     """Direct torque control."""
 
     def __init__(
-        self, noise: float = 0.0, noise_type: ksim.actuators.NoiseType = "none", action_scale: float = 0.5
+        self,
+        default_targets: Array,
+        action_scale: float = 0.5,
+        noise: float = 0.0,
+        noise_type: ksim.actuators.NoiseType = "none",
     ) -> None:
         super().__init__()
 
         self._action_scale = action_scale
         self.noise = noise
         self.noise_type = noise_type
-        self.default_targets = jnp.array(
-            [
-                # right leg
-                -0.23,
-                0.0,
-                0.0,
-                -0.441,
-                0.195,
-                # left leg
-                0.23,
-                0.0,
-                0.0,
-                -0.441,
-                0.195,
-            ]
-        )
+        self.default_targets = default_targets
 
     def get_ctrl(self, action: Array, physics_data: ksim.PhysicsData, rng: PRNGKeyArray) -> Array:
         """Just use the action as the torque, the simplest actuator model."""
-        action = action * self._action_scale + self.default_targets
+        action = self.default_targets + action * self._action_scale
         return self.add_noise(self.noise, self.noise_type, action, rng)
 
 
@@ -295,7 +284,27 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             noise = 0.1
         else:
             noise = 0.0
-        return ScaledTorqueActuators(noise=noise, noise_type="gaussian")
+        return ScaledTorqueActuators(
+            default_targets=jnp.array(
+                [
+                    # right leg
+                    -0.23,
+                    0.0,
+                    0.0,
+                    -0.441,
+                    0.195,
+                    # left leg
+                    0.23,
+                    0.0,
+                    0.0,
+                    0.441,
+                    -0.195,
+                ]
+            ),
+            action_scale=0.5,
+            noise=noise,
+            noise_type="gaussian",
+        )
 
     def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
         if self.config.domain_randomize:
