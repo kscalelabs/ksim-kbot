@@ -26,7 +26,7 @@ NoiseType = Literal["none", "uniform", "gaussian"]
 
 NUM_JOINTS = 5  # disabling all DoFs except for the right arm.
 
-NUM_INPUTS = NUM_JOINTS + NUM_JOINTS + 3 + 3 + 4
+NUM_INPUTS = NUM_JOINTS + NUM_JOINTS + 3 + 4
 NUM_OUTPUTS = NUM_JOINTS * 2
 
 MAX_TORQUE = {
@@ -35,62 +35,6 @@ MAX_TORQUE = {
     "03": 40.0,
     "04": 60.0,
 }
-
-
-class ModifiedMITPositionVelocityActuators(ksim.MITPositionActuators):
-    """MIT-mode actuator controller operating on both position and velocity."""
-
-    def __init__(
-        self,
-        physics_model: ksim.PhysicsModel,
-        joint_name_to_metadata: dict[str, JointMetadataOutput],
-        pos_action_noise: float = 0.0,
-        pos_action_noise_type: NoiseType = "none",
-        vel_action_noise: float = 0.0,
-        vel_action_noise_type: NoiseType = "none",
-        torque_noise: float = 0.0,
-        torque_noise_type: NoiseType = "none",
-        ctrl_clip: list[float] | None = None,
-    ) -> None:
-        super().__init__(
-            physics_model=physics_model,
-            joint_name_to_metadata=joint_name_to_metadata,
-            action_noise=pos_action_noise,
-            action_noise_type=pos_action_noise_type,
-            torque_noise=torque_noise,
-            torque_noise_type=torque_noise_type,
-            ctrl_clip=ctrl_clip,
-        )
-
-        self.vel_action_noise = vel_action_noise
-        self.vel_action_noise_type = vel_action_noise_type
-
-    def get_ctrl(self, action: Array, physics_data: ksim.PhysicsData, rng: PRNGKeyArray) -> Array:
-        """Get the control signal from the (position and velocity) action vector."""
-        pos_rng, vel_rng, tor_rng = jax.random.split(rng, 3)
-        current_pos = physics_data.qpos[:]
-        current_vel = physics_data.qvel[:]
-
-        # Adds position and velocity noise.
-        target_position = action[: len(current_pos)]
-        target_velocity = action[len(current_pos) :]
-        target_position = self.add_noise(self.action_noise, self.action_noise_type, target_position, pos_rng)
-        target_velocity = self.add_noise(self.vel_action_noise, self.vel_action_noise_type, target_velocity, vel_rng)
-
-        pos_delta = target_position - current_pos
-        vel_delta = target_velocity - current_vel
-
-        ctrl = self.kps * pos_delta + self.kds * vel_delta
-        return jnp.clip(
-            self.add_noise(self.torque_noise, self.torque_noise_type, ctrl, tor_rng),
-            -self.ctrl_clip,
-            self.ctrl_clip,
-        )
-
-    def get_default_action(self, physics_data: ksim.PhysicsData) -> Array:
-        """Get the default action (zeros) with the correct shape."""
-        qpos_dim = len(physics_data.qpos)
-        return jnp.zeros(qpos_dim * 2)
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
@@ -135,7 +79,6 @@ class KbotActor(eqx.Module):
         self,
         joint_pos_n: Array,
         joint_vel_n: Array,
-        imu_acc_3: Array,
         xyz_target_3: Array,
         quat_target_4: Array,
     ) -> distrax.Normal:
@@ -143,7 +86,6 @@ class KbotActor(eqx.Module):
             [
                 joint_pos_n,  # NUM_JOINTS
                 joint_vel_n,  # NUM_JOINTS
-                imu_acc_3,  # 3
                 xyz_target_3,  # 3
                 quat_target_4,  # 4
             ],
@@ -186,7 +128,6 @@ class KbotCritic(eqx.Module):
         joint_pos_n: Array,
         joint_vel_n: Array,
         actuator_force_n: Array,
-        imu_acc_3: Array,
         xyz_target_3: Array,
         quat_target_4: Array,
     ) -> Array:
@@ -195,7 +136,6 @@ class KbotCritic(eqx.Module):
                 joint_pos_n,  # NUM_JOINTS
                 joint_vel_n,  # NUM_JOINTS
                 actuator_force_n,  # NUM_JOINTS
-                imu_acc_3,  # 3
                 xyz_target_3,  # 3
                 quat_target_4,  # 4
             ],
@@ -333,7 +273,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         if self.config.use_mit_actuators:
             if metadata is None:
                 raise ValueError("Metadata is required for MIT actuators")
-            return ModifiedMITPositionVelocityActuators(
+            return ksim.MITPositionVelocityActuators(
                 physics_model,
                 metadata,
                 pos_action_noise=0.1,
@@ -348,6 +288,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                     MAX_TORQUE["02"],
                     MAX_TORQUE["00"],
                 ],
+                freejoint_first=False,
             )
         else:
             return ksim.TorqueActuators()
@@ -374,8 +315,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.JointPositionObservation(freejoint_first=False),
             ksim.JointVelocityObservation(freejoint_first=False),
             ksim.ActuatorForceObservation(),
-            # ksim.ActuatorAccelerationObservation(freejoint_first=False),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_acc"),
+            ksim.ActuatorAccelerationObservation(freejoint_first=False),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
@@ -425,7 +365,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 sensitivity=1.0,
             ),
             ksim.ActuatorForcePenalty(scale=-0.01, norm="l2"),
-            ksim.JointVelocityPenalty(scale=-0.001, norm="l2", freejoint_first=False),
+            ksim.ActuatorJerkPenalty(scale=-0.001, ctrl_dt=self.config.ctrl_dt, norm="l2"),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -448,13 +388,11 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
     ) -> distrax.Normal:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"] / 50.0
-        imu_acc_3 = observations["sensor_observation_imu_acc"]
         xyz_target_3 = commands["cartesian_body_target_command"]
         quat_target_4 = commands["quat_command"]
         return model.actor(
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
-            imu_acc_3=imu_acc_3,
             xyz_target_3=xyz_target_3,
             quat_target_4=quat_target_4,
         )
@@ -468,14 +406,12 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         joint_pos_n = observations["joint_position_observation"]  # 26
         joint_vel_n = observations["joint_velocity_observation"] / 100.0  # 27
         actuator_force_n = observations["actuator_force_observation"]  # 27
-        imu_acc_3 = observations["sensor_observation_imu_acc"]  # 3
         xyz_target_3 = commands["cartesian_body_target_command"]  # 3
         quat_target_4 = commands["quat_command"]  # 4
         return model.critic(
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
             actuator_force_n=actuator_force_n,
-            imu_acc_3=imu_acc_3,
             xyz_target_3=xyz_target_3,
             quat_target_4=quat_target_4,
         )
@@ -575,6 +511,8 @@ if __name__ == "__main__":
             max_action_latency=0.0,
             min_action_latency=0.0,
             rollout_length_seconds=4.0,
+            # Apparently rendering markers can sometimes cause segfaults.
+            # Disable this if you are running into segfaults.
             render_markers=True,
         ),
     )
