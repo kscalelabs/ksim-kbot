@@ -11,9 +11,8 @@ import ksim
 import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray
-from ksim.utils.mujoco import get_geom_data_idx_from_name, get_qpos_data_idxs_by_name
+from ksim.utils.mujoco import get_geom_data_idx_from_name, get_qpos_data_idxs_by_name, get_sensor_data_idxs_by_name
 from mujoco import mjx
-import jax
 
 
 @attrs.define(frozen=True)
@@ -83,6 +82,23 @@ class FeetPositionObservation(ksim.Observation):
             [0.0, 0.0, self.floor_threshold]
         )
         return jnp.concatenate([foot_left_pos, foot_right_pos], axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class GVecTermination(ksim.Termination):
+    """Terminates the episode if the robot is facing down."""
+
+    sensor_idx_range: tuple[int, int] = attrs.field()
+    min_z: float = attrs.field(default=0.0)
+
+    def __call__(self, state: ksim.PhysicsData) -> Array:
+        start, end = self.sensor_idx_range
+        return state.sensordata[start:end][-1] < self.min_z
+
+    @classmethod
+    def create(cls, physics_model: ksim.PhysicsModel, sensor_name: str) -> Self:
+        sensor_idx_range = get_sensor_data_idxs_by_name(physics_model)[sensor_name]
+        return cls(sensor_idx_range=sensor_idx_range)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -285,7 +301,9 @@ class AngularVelocityTrackingReward(ksim.Reward):
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         if self.angvel_obs_name not in trajectory.obs:
             raise ValueError(f"Observation {self.angvel_obs_name} not found; add it as an observation in your task.")
-        ang_vel_error = jnp.square(trajectory.command[self.command_name][..., 2] - trajectory.obs[self.angvel_obs_name][..., 2])
+        ang_vel_error = jnp.square(
+            trajectory.command[self.command_name][..., 2] - trajectory.obs[self.angvel_obs_name][..., 2]
+        )
         return jnp.exp(-ang_vel_error / self.error_scale)
 
 
@@ -293,9 +311,8 @@ class AngularVelocityTrackingReward(ksim.Reward):
 class AngularVelocityXYPenalty(ksim.Reward):
     """Penalty for the angular velocity."""
 
-    tracking_sigma: float = attrs.field(default=0.25)
-    angvel_obs_name: str = attrs.field(default="sensor_observation_global_angvel_torso")
     norm: xax.NormType = attrs.field(default="l2")
+    angvel_obs_name: str = attrs.field(default="sensor_observation_global_angvel_torso")
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         if self.angvel_obs_name not in trajectory.obs:

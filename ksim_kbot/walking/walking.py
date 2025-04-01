@@ -25,6 +25,7 @@ from ksim_kbot.common import (
     FeetPhaseReward,
     FeetPositionObservation,
     FeetSlipPenalty,
+    GVecTermination,
     HipDeviationPenalty,
     HistoryObservation,
     JointDeviationPenalty,
@@ -50,9 +51,9 @@ NUM_INPUTS = (OBS_SIZE + CMD_SIZE) + SINGLE_STEP_HISTORY_SIZE * HISTORY_LENGTH
 
 MAX_TORQUE = {
     "00": 1.0,
-    "02": 17.0,
-    "03": 40.0,
-    "04": 60.0,
+    "02": 30.0,
+    "03": 60.0,
+    "04": 100.0,
 }
 
 
@@ -446,8 +447,7 @@ class KbotWalkingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                     -0.195,
                 ),
             ),
-            ksim.TerminationPenalty(scale=-100.0),
-            ksim.HealthyReward(scale=0.25),
+            ksim.TerminationPenalty(scale=-1.0),
             OrientationPenalty(scale=-2.0),
             HipDeviationPenalty.create(
                 physics_model,
@@ -500,12 +500,13 @@ class KbotWalkingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             FeetPhaseReward(scale=1.0),
             # TODO: Add this back in.
             # AvoidLimitsReward(scale=0.1),
+            # Either termination or healthy reward.
+            # ksim.HealthyReward(scale=0.25),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
-            ksim.RollTooGreatTermination(max_roll=2.04),
-            ksim.PitchTooGreatTermination(max_pitch=2.04),
+            GVecTermination.create(physics_model, sensor_name="upvector_torso"),
         ]
 
     def get_model(self, key: PRNGKeyArray) -> KbotModel:
@@ -666,7 +667,7 @@ class KbotWalkingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    # python -m ksim_kbot.walking.walking num_envs=3 batch_size=1
+    # python -m ksim_kbot.walking.walking num_envs=1 batch_size=1 rollout_length_seconds=1.0
     # To visualize the environment, use the following command:
     # python -m ksim_kbot.walking.walking \
     #  run_environment=True \
