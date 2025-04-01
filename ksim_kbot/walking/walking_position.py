@@ -1,7 +1,6 @@
 # mypy: disable-error-code="override"
 """Defines simple task for training a standing policy for K-Bot."""
 
-import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Generic, TypeVar
@@ -12,7 +11,6 @@ import jax
 import jax.numpy as jnp
 import ksim
 import mujoco
-import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
@@ -37,7 +35,7 @@ from ksim_kbot.common import (
     ProjectedGravityObservation,
     ResetDefaultJointPosition,
 )
-from ksim_kbot.standing.standing import KbotStandingTask, KbotStandingTaskConfig
+from ksim_kbot.walking.walking import KbotWalkingTask, KbotWalkingTaskConfig
 
 OBS_SIZE = 10 + 3 + 3 + 20  # = 36 position + velocity + imu_acc + imu_gyro + last_action
 CMD_SIZE = 2
@@ -230,7 +228,7 @@ class KbotModel(eqx.Module):
 
 
 @dataclass
-class KbotWalkingTaskConfig(KbotStandingTaskConfig):
+class KbotWalkingPositionTaskConfig(KbotWalkingTaskConfig):
     """Config for the K-Bot walking task."""
 
     use_gait_rewards: bool = xax.field(value=False)
@@ -239,24 +237,7 @@ class KbotWalkingTaskConfig(KbotStandingTaskConfig):
 Config = TypeVar("Config", bound=KbotWalkingTaskConfig)
 
 
-class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
-    def get_optimizer(self) -> optax.GradientTransformation:
-        """Builds the optimizer.
-
-        This provides a reasonable default optimizer for training PPO models,
-        but can be overridden by subclasses who want to do something different.
-        """
-        optimizer = optax.chain(
-            optax.clip_by_global_norm(self.config.max_grad_norm),
-            (
-                optax.adam(self.config.learning_rate)
-                if self.config.adam_weight_decay == 0.0
-                else optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay)
-            ),
-        )
-
-        return optimizer
-
+class KbotWalkingPositionTask(KbotWalkingTask[Config], Generic[Config]):
     def get_mujoco_model(self) -> mujoco.MjModel:
         mjcf_path = (Path(self.config.robot_urdf_path) / "scene_fixed_position.mjcf").resolve().as_posix()
         mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
@@ -268,12 +249,6 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         mj_model.opt.solver = mjx.SolverType.CG
 
         return mj_model
-
-    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, JointMetadataOutput]:
-        metadata = asyncio.run(ksim.get_mujoco_model_metadata(self.config.robot_urdf_path, cache=False))
-        if metadata.joint_name_to_metadata is None:
-            raise ValueError("Joint metadata is not available")
-        return metadata.joint_name_to_metadata
 
     def get_actuators(
         self,
@@ -600,103 +575,6 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             history_n,
         )
 
-    def get_on_policy_log_probs(
-        self,
-        model: KbotModel,
-        trajectories: ksim.Trajectory,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        if trajectories.aux_outputs is None:
-            raise ValueError("No aux outputs found in trajectories")
-        return trajectories.aux_outputs.log_probs
-
-    def get_on_policy_values(
-        self,
-        model: KbotModel,
-        trajectories: ksim.Trajectory,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        if trajectories.aux_outputs is None:
-            raise ValueError("No aux outputs found in trajectories")
-        return trajectories.aux_outputs.values
-
-    def get_log_probs(
-        self,
-        model: KbotModel,
-        trajectories: ksim.Trajectory,
-        rng: PRNGKeyArray,
-    ) -> tuple[Array, Array]:
-        # Vectorize over both batch and time dimensions.
-        par_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0))
-        action_dist_btn = par_fn(model, trajectories.obs, trajectories.command)
-
-        # Compute the log probabilities of the trajectory's actions according
-        # to the current policy, along with the entropy of the distribution.
-        action_btn = trajectories.action
-        log_probs_btn = action_dist_btn.log_prob(action_btn)
-        entropy_btn = action_dist_btn.entropy()
-
-        return log_probs_btn, entropy_btn
-
-    def get_values(
-        self,
-        model: KbotModel,
-        trajectories: ksim.Trajectory,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        # Vectorize over both batch and time dimensions.
-        par_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
-        values_bt1 = par_fn(model, trajectories.obs, trajectories.command)
-
-        # Remove the last dimension.
-        return values_bt1.squeeze(-1)
-
-    def sample_action(
-        self,
-        model: KbotModel,
-        carry: Array,
-        physics_model: ksim.PhysicsModel,
-        observations: xax.FrozenDict[str, Array],
-        commands: xax.FrozenDict[str, Array],
-        rng: PRNGKeyArray,
-    ) -> tuple[Array, Array, AuxOutputs]:
-        action_dist_n = self._run_actor(model, observations, commands)
-        action_n = action_dist_n.sample(seed=rng)
-        action_log_prob_n = action_dist_n.log_prob(action_n)
-
-        critic_n = self._run_critic(model, observations, commands)
-        value_n = critic_n.squeeze(-1)
-
-        joint_pos_n = observations["joint_position_observation"]
-        joint_vel_n = observations["joint_velocity_observation"]
-        imu_acc_3 = observations["sensor_observation_imu_acc"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
-        lin_vel_cmd_2 = commands["linear_velocity_command"]
-        last_action_n = observations["last_action_observation"]
-        history_n = jnp.concatenate(
-            [
-                joint_pos_n,
-                joint_vel_n,
-                imu_acc_3,
-                imu_gyro_3,
-                lin_vel_cmd_2,
-                last_action_n,
-                action_n,
-            ],
-            axis=-1,
-        )
-
-        if HISTORY_LENGTH > 0:
-            # Roll the history by shifting the existing history and adding the new data
-            carry_reshaped = carry.reshape(HISTORY_LENGTH, SINGLE_STEP_HISTORY_SIZE)
-            shifted_history = jnp.roll(carry_reshaped, shift=-1, axis=0)
-            new_history = shifted_history.at[HISTORY_LENGTH - 1].set(history_n)
-            history_n = new_history.reshape(-1)
-        else:
-            history_n = jnp.zeros(0)
-
-        return action_n, history_n, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
-
 
 if __name__ == "__main__":
     # To run training, use the following command:
@@ -706,8 +584,8 @@ if __name__ == "__main__":
     #  run_environment=True \
     #  run_environment_num_seconds=1 \
     #  run_environment_save_path=videos/test.mp4
-    KbotWalkingTask.launch(
-        KbotWalkingTaskConfig(
+    KbotWalkingPositionTask.launch(
+        KbotWalkingPositionTaskConfig(
             num_envs=1024,
             batch_size=512,
             num_passes=10,
