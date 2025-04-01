@@ -578,9 +578,9 @@ class KbotWalkingPositionTask(KbotWalkingTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    # python -m ksim_kbot.walking.walking num_envs=1 batch_size=1 rollout_length_seconds=1.0
+    # python -m ksim_kbot.walking.walking_posirion num_envs=1 batch_size=1 rollout_length_seconds=1.0
     # To visualize the environment, use the following command:
-    # python -m ksim_kbot.walking.walking \
+    # python -m ksim_kbot.walking.walking_position \
     #  run_environment=True \
     #  run_environment_num_seconds=1 \
     #  run_environment_save_path=videos/test.mp4

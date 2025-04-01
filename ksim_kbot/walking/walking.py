@@ -298,7 +298,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 ksim.MassMultiplicationRandomization.from_body_name(physics_model, "Torso_Side_Right"),
                 ksim.JointDampingRandomization(scale_lower=0.95, scale_upper=1.05),
                 # TODO: Add this back in.
-                # ksim.FloorFrictionRandomization.from_body_name(
+                # ksim.FloorFrictitonRandomization.from_body_name(
                 #     model=physics_model,
                 #     scale_lower=0.2,
                 #     scale_upper=0.6,
@@ -411,7 +411,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 physics_model=physics_model,
                 foot_left_geom_name="KB_D_501L_L_LEG_FOOT_collision_box",
                 foot_right_geom_name="KB_D_501R_R_LEG_FOOT_collision_box",
-                floor_threshold=0.04,
+                floor_threshold=0.00,
             ),
             LastActionObservation(),
             ProjectedGravityObservation(noise=gvec_noise),
