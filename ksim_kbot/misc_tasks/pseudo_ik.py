@@ -66,7 +66,7 @@ class KbotActor(eqx.Module):
 
         self.mlp = eqx.nn.MLP(
             in_size=NUM_INPUTS,
-            out_size=NUM_OUTPUTS,
+            out_size=NUM_OUTPUTS * 2,
             width_size=64,
             depth=5,
             key=key,
@@ -99,8 +99,8 @@ class KbotActor(eqx.Module):
     def call_flat_obs(self, obs_n: Array) -> distrax.Normal:
 
         prediction_n = self.mlp(obs_n)
-        mean_n = prediction_n[..., :NUM_JOINTS]
-        std_n = prediction_n[..., NUM_JOINTS:]
+        mean_n = prediction_n[..., :NUM_OUTPUTS]
+        std_n = prediction_n[..., NUM_OUTPUTS:]
 
         # Scale the mean.
         mean_n = jnp.tanh(mean_n) * self.mean_scale
@@ -192,23 +192,6 @@ class KbotPseudoIKTaskConfig(ksim.PPOConfig):
         value=False,
         help="Whether to use the MIT actuator model, where the actions are position commands",
     )
-    kp: float = xax.field(
-        value=1.0,
-        help="The Kp for the actuators",
-    )
-    kd: float = xax.field(
-        value=0.1,
-        help="The Kd for the actuators",
-    )
-    armature: float = xax.field(
-        value=1e-2,
-        help="A value representing the effective inertia of the actuator armature",
-    )
-    friction: float = xax.field(
-        value=1e-6,
-        help="The dynamic friction loss for the actuator",
-    )
-
     # Rendering parameters.
     render_track_body_id: int | None = xax.field(
         value=0,
@@ -381,8 +364,8 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 scale=0.1,
                 sensitivity=1.0,
             ),
-            ksim.ActuatorForcePenalty(scale=-0.01, norm="l2"),
-            ksim.ActuatorJerkPenalty(scale=-0.001, ctrl_dt=self.config.ctrl_dt, norm="l2"),
+            # ksim.ActuatorForcePenalty(scale=-0.001, norm="l2"),
+            # ksim.ActuatorJerkPenalty(scale=-0.001, ctrl_dt=self.config.ctrl_dt, norm="l2"),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -541,10 +524,16 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
 
         input_shapes = [(NUM_INPUTS,)]
 
+        tf_path = (
+            ckpt_path.parent / f"tf_model"
+            if self.config.only_save_most_recent
+            else ckpt_path.parent / f"tf_model_{state.num_steps}"
+        )
+
         export(
             model_fn,
             input_shapes,  # type: ignore [arg-type]
-            ckpt_path.parent / f"tf_model_{state.num_steps}",
+            tf_path,
         )
 
         return state
@@ -574,9 +563,12 @@ if __name__ == "__main__":
             max_action_latency=0.0,
             min_action_latency=0.0,
             rollout_length_seconds=4.0,
+            save_every_n_steps=25,
             export_for_inference=True,
             # Apparently rendering markers can sometimes cause segfaults.
             # Disable this if you are running into segfaults.
             render_markers=True,
+            render_camera_name="iso_camera",
+            use_mit_actuators=True,
         ),
     )
