@@ -400,6 +400,8 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 sensitivity=1.0,
                 command_name="cartesian_body_target_command_KC_C_104R_PitchHardstopDriven",
             ),
+            ksim.ActuatorForcePenalty(scale=-0.01, norm="l2"),
+            ksim.JointVelocityPenalty(scale=-0.001, norm="l2", freejoint_first=False),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -545,5 +547,6 @@ if __name__ == "__main__":
             max_action_latency=0.0,
             min_action_latency=0.0,
             rollout_length_seconds=4.0,
+            render_markers=True,
         ),
     )
