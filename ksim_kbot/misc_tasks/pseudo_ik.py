@@ -4,7 +4,7 @@ import asyncio
 from dataclasses import dataclass
 import os
 from pathlib import Path
-from typing import Generic, Literal, TypeVar
+from typing import Callable, Generic, Literal, TypeVar
 import uuid
 
 import distrax
@@ -14,6 +14,7 @@ import jax.numpy as jnp
 import mujoco
 import optax
 import xax
+from xax.nn.export import export
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
@@ -35,6 +36,7 @@ MAX_TORQUE = {
     "03": 40.0,
     "04": 60.0,
 }
+
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
@@ -91,6 +93,10 @@ class KbotActor(eqx.Module):
             ],
             axis=-1,
         )
+
+        return self.call_flat_obs(obs_n)
+
+    def call_flat_obs(self, obs_n: Array) -> distrax.Normal:
 
         prediction_n = self.mlp(obs_n)
         mean_n = prediction_n[..., :NUM_JOINTS]
@@ -239,10 +245,21 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_mujoco_model(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
         mjcf_path = (Path(self.config.robot_urdf_path) / "robot_scene.mjcf").resolve().as_posix()
-        mj_model_joint_removed = remove_joints_except(mjcf_path, ["dof_right_shoulder_pitch_03", "dof_right_shoulder_roll_03", "dof_right_shoulder_yaw_02", "dof_right_elbow_02", "dof_right_wrist_00"])
+        mj_model_joint_removed = remove_joints_except(
+            mjcf_path,
+            [
+                "dof_right_shoulder_pitch_03",
+                "dof_right_shoulder_roll_03",
+                "dof_right_shoulder_yaw_02",
+                "dof_right_elbow_02",
+                "dof_right_wrist_00",
+            ],
+        )
 
-       # save to a temp file in the same directory
-        temp_path = (Path(self.config.robot_urdf_path) / f"robot_scene_joint_removed_{uuid.uuid4()}.mjcf").resolve().as_posix()
+        # save to a temp file in the same directory
+        temp_path = (
+            (Path(self.config.robot_urdf_path) / f"robot_scene_joint_removed_{uuid.uuid4()}.mjcf").resolve().as_posix()
+        )
         with open(temp_path, "w") as f:
             f.write(mj_model_joint_removed)
 
@@ -486,6 +503,52 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
 
         return action_n, None, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
 
+    def make_export_model(self, model: KbotModel, stochastic: bool = False, batched: bool = False) -> Callable:
+        """Makes a callable inference function that directly takes a flattened input vector and returns an action.
+
+        Returns:
+            A tuple containing the inference function and the size of the input vector.
+        """
+
+        def deterministic_model_fn(obs: Array) -> Array:
+            return model.actor.call_flat_obs(obs).mode()
+
+        def stochastic_model_fn(obs: Array) -> Array:
+            dist = model.actor.call_flat_obs(obs)
+            return dist.sample(seed=jax.random.PRNGKey(0))
+
+        if stochastic:
+            model_fn = stochastic_model_fn
+        else:
+            model_fn = deterministic_model_fn
+
+        if batched:
+
+            def batched_model_fn(obs: Array) -> Array:
+                return jax.vmap(model_fn)(obs)
+
+            return batched_model_fn
+
+        return model_fn
+
+    def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
+        if not self.config.export_for_inference:
+            return state
+
+        model: KbotModel = self.load_checkpoint(ckpt_path, part="model")
+
+        model_fn = self.make_export_model(model, stochastic=False, batched=True)
+
+        input_shapes = [(NUM_INPUTS,)]
+
+        export(
+            model_fn,
+            input_shapes,  # type: ignore [arg-type]
+            ckpt_path.parent / f"tf_model_{state.num_steps}",
+        )
+
+        return state
+
 
 if __name__ == "__main__":
     # To run training, use the following command:
@@ -511,6 +574,7 @@ if __name__ == "__main__":
             max_action_latency=0.0,
             min_action_latency=0.0,
             rollout_length_seconds=4.0,
+            export_for_inference=True,
             # Apparently rendering markers can sometimes cause segfaults.
             # Disable this if you are running into segfaults.
             render_markers=True,
