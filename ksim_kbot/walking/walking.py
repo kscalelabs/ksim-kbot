@@ -4,7 +4,7 @@
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generic
+from typing import Generic, TypeVar
 
 import distrax
 import equinox as eqx
@@ -37,7 +37,7 @@ from ksim_kbot.common import (
     ProjectedGravityObservation,
     ResetDefaultJointPosition,
 )
-from ksim_kbot.standing.standing import Config, KbotStandingTaskConfig
+from ksim_kbot.standing.standing import KbotStandingTask, KbotStandingTaskConfig
 
 OBS_SIZE = 10 * 2 + 3 + 3 + 20  # = 36 position + velocity + imu_acc + imu_gyro + last_action
 CMD_SIZE = 2
@@ -206,7 +206,17 @@ class KbotModel(eqx.Module):
         self.critic = KbotCritic(key)
 
 
-class KbotWalkingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
+@dataclass
+class KbotWalkingTaskConfig(KbotStandingTaskConfig):
+    """Config for the K-Bot walking task."""
+
+    use_gait_rewards: bool = xax.field(value=False)
+
+
+Config = TypeVar("Config", bound=KbotWalkingTaskConfig)
+
+
+class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
     def get_optimizer(self) -> optax.GradientTransformation:
         """Builds the optimizer.
 
@@ -429,7 +439,7 @@ class KbotWalkingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
-        return [
+        rewards = [
             JointDeviationPenalty(
                 scale=-0.1,
                 joint_targets=(
@@ -495,14 +505,20 @@ class KbotWalkingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             LinearVelocityTrackingReward(scale=1.0),
             AngularVelocityTrackingReward(scale=0.75),
             AngularVelocityXYPenalty(scale=-0.15),
-            FeetSlipPenalty(scale=-0.25),
-            FeetAirTimeReward(scale=2.0),
-            FeetPhaseReward(scale=1.0),
             # TODO: Add this back in.
             # AvoidLimitsReward(scale=0.1),
             # Either termination or healthy reward.
             # ksim.HealthyReward(scale=0.25),
         ]
+        if self.config.use_gait_rewards:
+            gait_rewards = [
+                FeetSlipPenalty(scale=-0.25),
+                FeetAirTimeReward(scale=2.0),
+                FeetPhaseReward(scale=1.0),
+            ]
+            rewards += gait_rewards
+
+        return rewards
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
@@ -674,7 +690,7 @@ if __name__ == "__main__":
     #  run_environment_num_seconds=1 \
     #  run_environment_save_path=videos/test.mp4
     KbotWalkingTask.launch(
-        KbotStandingTaskConfig(
+        KbotWalkingTaskConfig(
             num_envs=1024,
             batch_size=512,
             num_passes=10,
@@ -691,12 +707,13 @@ if __name__ == "__main__":
             # PPO parameters
             gamma=0.97,
             lam=0.95,
-            entropy_coef=0.001,
+            entropy_coef=0.005,
             learning_rate=1e-4,
             clip_param=0.3,
             max_grad_norm=1.0,
             use_mit_actuators=True,
             export_for_inference=True,
             domain_randomize=False,
+            use_gait_rewards=True,
         ),
     )
