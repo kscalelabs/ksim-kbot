@@ -448,7 +448,7 @@ class KbotWalkingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                 ),
             ),
             ksim.TerminationPenalty(scale=-1.0),
-            OrientationPenalty(scale=-2.0),
+            OrientationPenalty(scale=-1.0),
             HipDeviationPenalty.create(
                 physics_model,
                 hip_names=(
