@@ -25,7 +25,7 @@ NoiseType = Literal["none", "uniform", "gaussian"]
 
 NUM_JOINTS = 5  # disabling all DoFs except for the right arm.
 
-NUM_INPUTS = NUM_JOINTS + NUM_JOINTS + 3 + 3
+NUM_INPUTS = NUM_JOINTS + NUM_JOINTS + 3 + 3 + 4
 NUM_OUTPUTS = NUM_JOINTS * 2
 
 MAX_TORQUE = {
@@ -136,6 +136,7 @@ class KbotActor(eqx.Module):
         joint_vel_n: Array,
         imu_acc_3: Array,
         xyz_target_3: Array,
+        quat_target_4: Array,
     ) -> distrax.Normal:
         obs_n = jnp.concatenate(
             [
@@ -143,6 +144,7 @@ class KbotActor(eqx.Module):
                 joint_vel_n,  # NUM_JOINTS
                 imu_acc_3,  # 3
                 xyz_target_3,  # 3
+                quat_target_4,  # 4
             ],
             axis=-1,
         )
@@ -185,6 +187,7 @@ class KbotCritic(eqx.Module):
         actuator_force_n: Array,
         imu_acc_3: Array,
         xyz_target_3: Array,
+        quat_target_4: Array,
     ) -> Array:
         x_n = jnp.concatenate(
             [
@@ -193,6 +196,7 @@ class KbotCritic(eqx.Module):
                 actuator_force_n,  # NUM_JOINTS
                 imu_acc_3,  # 3
                 xyz_target_3,  # 3
+                quat_target_4,  # 4
             ],
             axis=-1,
         )
@@ -376,7 +380,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         return [
             ksim.CartesianBodyTargetCommand.create(
                 model=physics_model,
-                command_name="cartesian_body_target_command_KC_C_104R_PitchHardstopDriven",
+                command_name="cartesian_body_target_command",
                 pivot_name="KC_C_104R_PitchHardstopDriven",
                 base_name="floating_base_link",
                 sample_sphere_radius=0.5,
@@ -385,6 +389,14 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 positive_z=False,
                 switch_prob=self.config.ctrl_dt / 1,  # will last 1 seconds in expectation
                 vis_radius=0.05,
+                vis_color=(1.0, 0.0, 0.0, 0.8),
+            ),
+            ksim.GlobalBodyQuaternionCommand.create(
+                model=physics_model,
+                base_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
+                command_name="quat_command",
+                switch_prob=self.config.ctrl_dt / 1,  # will last 1 seconds in expectation
+                vis_scale=0.05,
                 vis_color=(1.0, 0.0, 0.0, 0.8),
             ),
         ]
@@ -396,9 +408,18 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 tracked_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
                 base_body_name="floating_base_link",
                 norm="l2",
+                scale=1.0,
+                sensitivity=1.0,
+                command_name="cartesian_body_target_command",
+            ),
+            ksim.GlobalBodyQuaternionReward.create(
+                model=physics_model,
+                command_name="quat_command",
+                tracked_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
+                base_body_name="floating_base_link",
+                norm="l2",
                 scale=0.1,
                 sensitivity=1.0,
-                command_name="cartesian_body_target_command_KC_C_104R_PitchHardstopDriven",
             ),
             ksim.ActuatorForcePenalty(scale=-0.01, norm="l2"),
             ksim.JointVelocityPenalty(scale=-0.001, norm="l2", freejoint_first=False),
@@ -425,12 +446,14 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"] / 50.0
         imu_acc_3 = observations["sensor_observation_imu_acc"]
-        xyz_target_3 = commands["cartesian_body_target_command_KC_C_104R_PitchHardstopDriven"]
+        xyz_target_3 = commands["cartesian_body_target_command"]
+        quat_target_4 = commands["quat_command"]
         return model.actor(
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
             imu_acc_3=imu_acc_3,
             xyz_target_3=xyz_target_3,
+            quat_target_4=quat_target_4,
         )
 
     def _run_critic(
@@ -443,13 +466,15 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         joint_vel_n = observations["joint_velocity_observation"] / 100.0  # 27
         actuator_force_n = observations["actuator_force_observation"]  # 27
         imu_acc_3 = observations["sensor_observation_imu_acc"]  # 3
-        xyz_target_3 = commands["cartesian_body_target_command_KC_C_104R_PitchHardstopDriven"]  # 3
+        xyz_target_3 = commands["cartesian_body_target_command"]  # 3
+        quat_target_4 = commands["quat_command"]  # 4
         return model.critic(
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
             actuator_force_n=actuator_force_n,
             imu_acc_3=imu_acc_3,
             xyz_target_3=xyz_target_3,
+            quat_target_4=quat_target_4,
         )
 
     def get_on_policy_log_probs(
