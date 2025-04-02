@@ -5,7 +5,7 @@ import os
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Generic, Literal, TypeVar
+from typing import Callable, Generic, TypeVar
 
 import distrax
 import equinox as eqx
@@ -20,9 +20,6 @@ from kscale.web.gen.api import JointMetadataOutput
 from ksim.utils.mujoco import remove_joints_except
 from mujoco import mjx
 from xax.nn.export import export
-
-NoiseType = Literal["none", "uniform", "gaussian"]
-
 
 NUM_JOINTS = 5  # disabling all DoFs except for the right arm.
 
