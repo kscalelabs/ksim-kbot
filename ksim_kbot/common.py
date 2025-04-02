@@ -189,8 +189,8 @@ class FeetHeightPenalty(ksim.Reward):
     max_foot_height: float = 0.1
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        swing_peak = trajectory.reward_carry["swing_peak"]  # type: ignore[attr-defined]
-        first_contact = trajectory.reward_carry["first_contact"]  # type: ignore[attr-defined]
+        swing_peak = trajectory.reward_carry["swing_peak"]
+        first_contact = trajectory.reward_carry["first_contact"]
         error = swing_peak / self.max_foot_height - 1.0
         return jnp.sum(jnp.square(error) * first_contact, axis=-1)
 
@@ -204,8 +204,8 @@ class FeetAirTimeReward(ksim.Reward):
     threshold_max: float = 0.4
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        first_contact = trajectory.reward_carry["first_contact"]  # type: ignore[attr-defined]
-        air_time = trajectory.reward_carry["feet_air_time"]  # type: ignore[attr-defined]
+        first_contact = trajectory.reward_carry["first_contact"]
+        air_time = trajectory.reward_carry["feet_air_time"]
         air_time = (air_time - self.threshold_min) * first_contact
         air_time = jnp.clip(air_time, max=self.threshold_max - self.threshold_min)
         return jnp.sum(air_time, axis=-1)
@@ -223,7 +223,7 @@ class FeetPhaseReward(ksim.Reward):
         if self.feet_pos_obs_name not in trajectory.obs:
             raise ValueError(f"Observation {self.feet_pos_obs_name} not found; add it as an observation in your task.")
         foot_pos = trajectory.obs[self.feet_pos_obs_name]
-        phase = trajectory.reward_carry["phase"]  # type: ignore[attr-defined]
+        phase = trajectory.reward_carry["phase"]
 
         foot_z = jnp.array([foot_pos[..., 2], foot_pos[..., 5]]).T
         ideal_z = self.gait_phase(phase, swing_height=self.max_foot_height)
