@@ -295,10 +295,11 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
         return [
-            # ksim.StaticFrictionRandomization(),
-            # ksim.ArmatureRandomization(),
-            # ksim.MassMultiplicationRandomization.from_body_name(physics_model, "upper_arm_right"),
-            # ksim.JointDampingRandomization(),
+            ksim.StaticFrictionRandomization(scale_lower=0.5, scale_upper=2.0, freejoint_first=False),
+            ksim.JointZeroPositionRandomization(scale_lower=-0.05, scale_upper=0.05, freejoint_first=False),
+            ksim.ArmatureRandomization(scale_lower=1.0, scale_upper=1.05, freejoint_first=False),
+            ksim.MassMultiplicationRandomization.from_body_name(physics_model, "KC_C_104R_PitchHardstopDriven"),
+            ksim.JointDampingRandomization(scale_lower=0.95, scale_upper=1.05, freejoint_first=False),
         ]
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
@@ -312,8 +313,8 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
-            ksim.JointPositionObservation(freejoint_first=False),
-            ksim.JointVelocityObservation(freejoint_first=False),
+            ksim.JointPositionObservation(freejoint_first=False, noise=0.01, noise_type="gaussian"),
+            ksim.JointVelocityObservation(freejoint_first=False, noise=0.1, noise_type="gaussian"),
             ksim.ActuatorForceObservation(),
             ksim.ActuatorAccelerationObservation(freejoint_first=False),
         ]
@@ -353,7 +354,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 norm="l2",
                 scale=1.0,
                 sensitivity=1.0,
-                threshold=0.0001, # with l2 norm, this is 1cm
+                threshold=0.0001,  # with l2 norm, this is 1cm
                 time_bonus_scale=0.1,
                 command_name="cartesian_body_target_command",
             ),
@@ -366,8 +367,9 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 scale=0.1,
                 sensitivity=1.0,
             ),
-            # ksim.ActuatorForcePenalty(scale=-0.001, norm="l2"),
-            # ksim.ActuatorJerkPenalty(scale=-0.001, ctrl_dt=self.config.ctrl_dt, norm="l2"),
+            ksim.ActuatorForcePenalty(scale=-0.0001, norm="l1"),
+            ksim.ActionSmoothnessPenalty(scale=-0.0001, norm="l2"),
+            ksim.ActuatorJerkPenalty(scale=-0.0001, ctrl_dt=self.config.ctrl_dt, norm="l2"),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -564,6 +566,7 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
+            entropy_coef=0.05,
             rollout_length_seconds=4.0,
             save_every_n_steps=25,
             export_for_inference=True,
