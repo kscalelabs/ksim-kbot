@@ -324,7 +324,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 positive_x=True,  # only sample in the positive x direction
                 positive_y=False,
                 positive_z=False,
-                switch_prob=self.config.ctrl_dt / 1,  # will last 1 seconds in expectation
+                switch_prob=self.config.ctrl_dt / 2,  # will last 2 seconds in expectation
                 vis_radius=0.05,
                 vis_color=(1.0, 0.0, 0.0, 0.8),
             ),
@@ -349,8 +349,8 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 norm="l2",
                 scale=1.0,
                 sensitivity=1.0,
-                threshold=0.0001,  # with l2 norm, this is 1cm
-                time_bonus_scale=0.1,
+                threshold=0.000025,  # with l2 norm, this is 0.5cm
+                time_bonus_scale=0.3,
                 command_name="cartesian_body_target_command",
             ),
             ksim.CartesianBodyTargetPenalty.create(
@@ -559,8 +559,8 @@ if __name__ == "__main__":
     KbotPseudoIKTask.launch(
         KbotPseudoIKTaskConfig(
             # Training parameters.
-            num_envs=2048,
-            batch_size=256,
+            num_envs=8192,
+            batch_size=1024,
             num_passes=10,
             epochs_per_log_step=1,
             # Logging parameters.
@@ -571,7 +571,7 @@ if __name__ == "__main__":
             max_action_latency=0.0,
             min_action_latency=0.0,
             entropy_coef=0.05,
-            rollout_length_seconds=4.0,
+            rollout_length_seconds=10.0,
             save_every_n_steps=25,
             export_for_inference=True,
             # Apparently rendering markers can sometimes cause segfaults.
