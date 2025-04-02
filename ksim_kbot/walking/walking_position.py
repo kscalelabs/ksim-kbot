@@ -151,7 +151,7 @@ class KbotCritic(eqx.Module):
 
     def __init__(self, key: PRNGKeyArray) -> None:
         self.mlp = eqx.nn.MLP(
-            in_size=NUM_INPUTS + 2 + 2 + 10 + 3 + 4+ 3 + 3 + 1,
+            in_size=NUM_INPUTS + 2 + 2 + 10 + 3 + 4 + 3 + 3 + 1,
             out_size=1,  # Always output a single critic value.
             width_size=256,
             depth=5,
