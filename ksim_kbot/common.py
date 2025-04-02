@@ -92,6 +92,22 @@ class FeetPositionObservation(ksim.Observation):
         return jnp.concatenate([foot_left_pos, foot_right_pos], axis=-1)
 
 
+@attrs.define(frozen=True)
+class TrueHeightObservation(ksim.Observation):
+    """Observation of the true height of the body."""
+
+    def observe(self, rollout_state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
+        return jnp.array([rollout_state.physics_state.data.qpos[2]])
+
+
+@attrs.define(frozen=True)
+class FeetAirTimeObservation(ksim.Observation):
+    """Observation of the feet air time."""
+
+    def observe(self, rollout_state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
+        return rollout_state.reward_carry["feet_air_time"]
+
+
 @attrs.define(frozen=True, kw_only=True)
 class GVecTermination(ksim.Termination):
     """Terminates the episode if the robot is facing down."""

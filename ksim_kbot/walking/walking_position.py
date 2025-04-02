@@ -19,7 +19,7 @@ from mujoco import mjx
 from ksim_kbot import common
 from ksim_kbot.walking.walking import KbotWalkingTask, KbotWalkingTaskConfig
 
-OBS_SIZE = 10 + 3 + 3 + 20 + 4  # = 36 position + velocity + imu_acc + imu_gyro + last_action
+OBS_SIZE = 10 + 3 + 3 + 20 + 4 + 3  # = 43 position + velocity + imu_acc + imu_gyro + last_action + phase
 CMD_SIZE = 2
 NUM_OUTPUTS = 10  # position + velocity
 
@@ -104,6 +104,7 @@ class KbotActor(eqx.Module):
         joint_vel_n: Array,
         imu_acc_3: Array,
         imu_gyro_3: Array,
+        projected_gravity_3: Array,
         lin_vel_cmd_2: Array,
         last_action_n: Array,
         phase_4: Array,
@@ -115,6 +116,7 @@ class KbotActor(eqx.Module):
                 joint_vel_n,
                 imu_acc_3,
                 imu_gyro_3,
+                projected_gravity_3,
                 lin_vel_cmd_2,
                 last_action_n,
                 phase_4,
@@ -149,7 +151,7 @@ class KbotCritic(eqx.Module):
 
     def __init__(self, key: PRNGKeyArray) -> None:
         self.mlp = eqx.nn.MLP(
-            in_size=NUM_INPUTS + 3 + 2 + 3 + 4 + 3 + 3 + 10,
+            in_size=NUM_INPUTS + 2 + 2 + 10 + 3 + 4+ 3 + 3 + 1,
             out_size=1,  # Always output a single critic value.
             width_size=256,
             depth=5,
@@ -167,12 +169,14 @@ class KbotCritic(eqx.Module):
         last_action_n: Array,
         projected_gravity_3: Array,
         feet_contact_2: Array,
+        feet_air_time_2: Array,
         actuator_force_n: Array,
         base_position_3: Array,
         base_orientation_4: Array,
         base_linear_velocity_3: Array,
         base_angular_velocity_3: Array,
         phase_4: Array,
+        true_height_1: Array,
         history_n: Array,
     ) -> Array:
         x_n = jnp.concatenate(
@@ -181,16 +185,19 @@ class KbotCritic(eqx.Module):
                 joint_vel_n,
                 imu_acc_3,
                 imu_gyro_3,
+                projected_gravity_3,
                 lin_vel_cmd_2,
                 last_action_n,
-                projected_gravity_3,
+                phase_4,
+                # critic
                 feet_contact_2,
+                feet_air_time_2,
                 actuator_force_n,
                 base_position_3,
                 base_orientation_4,
                 base_linear_velocity_3,
                 base_angular_velocity_3,
-                phase_4,
+                true_height_1,
                 # history_n,
             ],
             axis=-1,
@@ -415,9 +422,11 @@ class KbotWalkingPositionTask(KbotWalkingTask[Config], Generic[Config]):
                 foot_right_geom_name="KB_D_501R_R_LEG_FOOT_collision_box",
                 floor_threshold=0.04,
             ),
+            common.FeetAirTimeObservation(),
             common.PhaseObservation(),
             common.LastActionObservation(),
             common.ProjectedGravityObservation(noise=gvec_noise),
+            common.TrueHeightObservation(),
             common.HistoryObservation(),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="local_linvel_torso", noise=noise),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="global_linvel_torso", noise=noise),
@@ -546,12 +555,22 @@ class KbotWalkingPositionTask(KbotWalkingTask[Config], Generic[Config]):
         joint_vel_n = observations["joint_velocity_observation"]
         imu_acc_3 = observations["sensor_observation_imu_acc"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        projected_gravity_3 = observations["projected_gravity_observation"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         last_action_n = observations["last_action_observation"]
         phase_4 = observations["phase_observation"]
         history_n = observations["history_observation"]
+
         return model.actor(
-            joint_pos_n, joint_vel_n, imu_acc_3, imu_gyro_3, lin_vel_cmd_2, last_action_n, phase_4, history_n
+            joint_pos_n,
+            joint_vel_n,
+            imu_acc_3,
+            imu_gyro_3,
+            projected_gravity_3,
+            lin_vel_cmd_2,
+            last_action_n,
+            phase_4,
+            history_n,
         )
 
     def _run_critic(
@@ -566,13 +585,15 @@ class KbotWalkingPositionTask(KbotWalkingTask[Config], Generic[Config]):
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         last_action_n = observations["last_action_observation"]
-        phase_4 = observations["phase_observation"]
         projected_gravity_3 = observations["projected_gravity_observation"]
         feet_contact_2 = observations["feet_contact_observation"]
+        feet_air_time = observations["feet_air_time_observation"]
         base_position_3 = observations["base_position_observation"]
         base_orientation_4 = observations["base_orientation_observation"]
         base_linear_velocity_3 = observations["base_linear_velocity_observation"]
         base_angular_velocity_3 = observations["base_angular_velocity_observation"]
+        phase_4 = observations["phase_observation"]
+        true_height_1 = observations["true_height_observation"]
         actuator_force_n = observations["actuator_force_observation"]
         history_n = observations["history_observation"]
         return model.critic(
@@ -583,13 +604,16 @@ class KbotWalkingPositionTask(KbotWalkingTask[Config], Generic[Config]):
             lin_vel_cmd_2,
             last_action_n,
             projected_gravity_3,
+            phase_4,
+            # critic
             feet_contact_2,
+            feet_air_time,
             base_position_3,
             base_orientation_4,
             base_linear_velocity_3,
             base_angular_velocity_3,
-            phase_4,
             actuator_force_n,
+            true_height_1,
             history_n,
         )
 
