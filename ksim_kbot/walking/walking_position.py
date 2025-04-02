@@ -34,6 +34,7 @@ from ksim_kbot.common import (
     OrientationPenalty,
     ProjectedGravityObservation,
     ResetDefaultJointPosition,
+    TerminationPenalty,
 )
 from ksim_kbot.walking.walking import KbotWalkingTask, KbotWalkingTaskConfig
 
@@ -394,9 +395,9 @@ class KbotWalkingPositionTask(KbotWalkingTask[Config], Generic[Config]):
             ksim.CenterOfMassVelocityObservation(),
             ksim.FeetContactObservation.create(
                 physics_model=physics_model,
-                foot_left_geom_name="KB_D_501L_L_LEG_FOOT_collision_box",
-                foot_right_geom_name="KB_D_501R_R_LEG_FOOT_collision_box",
-                floor_geom_name="floor",
+                foot_left_geom_names="KB_D_501L_L_LEG_FOOT_collision_box",
+                foot_right_geom_names="KB_D_501R_R_LEG_FOOT_collision_box",
+                floor_geom_names="floor",
             ),
             # Bring back ksim.FeetPositionObservation
             FeetPositionObservation.create(
@@ -449,10 +450,10 @@ class KbotWalkingPositionTask(KbotWalkingTask[Config], Generic[Config]):
                     -0.195,
                 ),
             ),
-            ksim.TerminationPenalty(scale=-1.0),
+            TerminationPenalty(scale=-1.0),
             OrientationPenalty(scale=-1.0),
             HipDeviationPenalty.create(
-                physics_model,
+                physics_model=physics_model,
                 hip_names=(
                     "dof_right_hip_roll_03",
                     "dof_right_hip_yaw_03",
@@ -476,7 +477,7 @@ class KbotWalkingPositionTask(KbotWalkingTask[Config], Generic[Config]):
                 scale=-0.25,
             ),
             KneeDeviationPenalty.create(
-                physics_model,
+                physics_model=physics_model,
                 knee_names=("dof_left_knee_04", "dof_right_knee_04"),
                 joint_targets=(
                     # right leg

@@ -88,7 +88,7 @@ class FeetPositionObservation(ksim.Observation):
 class GVecTermination(ksim.Termination):
     """Terminates the episode if the robot is facing down."""
 
-    sensor_idx_range: tuple[int, int] = attrs.field()
+    sensor_idx_range: tuple[int, int | None] = attrs.field()
     min_z: float = attrs.field(default=0.0)
 
     def __call__(self, state: ksim.PhysicsData) -> Array:
@@ -385,3 +385,13 @@ class KneeDeviationPenalty(ksim.Reward):
             joint_targets=joint_targets,
             scale=scale,
         )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class TerminationPenalty(ksim.Reward):
+    """Penalty for termination."""
+
+    scale: float = attrs.field(default=-1.0)
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        return trajectory.done

@@ -36,6 +36,7 @@ from ksim_kbot.common import (
     OrientationPenalty,
     ProjectedGravityObservation,
     ResetDefaultJointPosition,
+    TerminationPenalty,
 )
 from ksim_kbot.standing.standing import KbotStandingTask, KbotStandingTaskConfig
 
@@ -217,6 +218,8 @@ Config = TypeVar("Config", bound=KbotWalkingTaskConfig)
 
 
 class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
+    config: Config
+
     def get_optimizer(self) -> optax.GradientTransformation:
         """Builds the optimizer.
 
@@ -402,9 +405,9 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             ksim.CenterOfMassVelocityObservation(),
             ksim.FeetContactObservation.create(
                 physics_model=physics_model,
-                foot_left_geom_name="KB_D_501L_L_LEG_FOOT_collision_box",
-                foot_right_geom_name="KB_D_501R_R_LEG_FOOT_collision_box",
-                floor_geom_name="floor",
+                foot_left_geom_names="KB_D_501L_L_LEG_FOOT_collision_box",
+                foot_right_geom_names="KB_D_501R_R_LEG_FOOT_collision_box",
+                floor_geom_names="floor",
             ),
             # Bring back ksim.FeetPositionObservation
             FeetPositionObservation.create(
@@ -457,7 +460,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                     -0.195,
                 ),
             ),
-            ksim.TerminationPenalty(scale=-1.0),
+            TerminationPenalty(scale=-1.0),
             OrientationPenalty(scale=-1.0),
             HipDeviationPenalty.create(
                 physics_model,
@@ -511,7 +514,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             # ksim.HealthyReward(scale=0.25),
         ]
         if self.config.use_gait_rewards:
-            gait_rewards = [
+            gait_rewards: list[ksim.Reward] = [
                 FeetSlipPenalty(scale=-0.25),
                 FeetAirTimeReward(scale=2.0),
                 FeetPhaseReward(scale=1.0),
@@ -639,6 +642,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         model: KbotModel,
         carry: Array,
         physics_model: ksim.PhysicsModel,
+        physics_data: ksim.PhysicsData,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
