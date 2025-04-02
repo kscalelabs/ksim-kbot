@@ -420,7 +420,7 @@ class KbotWalkingPositionTask(KbotWalkingTask[Config], Generic[Config]):
                 physics_model=physics_model,
                 foot_left_geom_name="KB_D_501L_L_LEG_FOOT_collision_box",
                 foot_right_geom_name="KB_D_501R_R_LEG_FOOT_collision_box",
-                floor_threshold=0.04,
+                floor_threshold=0.00,
             ),
             common.FeetAirTimeObservation(),
             common.PhaseObservation(),
@@ -514,7 +514,7 @@ class KbotWalkingPositionTask(KbotWalkingTask[Config], Generic[Config]):
                 ),
                 scale=-0.1,
             ),
-            common.LinearVelocityTrackingReward(scale=1.5),
+            common.LinearVelocityTrackingReward(scale=1.25),
             common.AngularVelocityTrackingReward(scale=0.5),
             common.AngularVelocityXYPenalty(scale=-0.15),
             # TODO: Add this back in.

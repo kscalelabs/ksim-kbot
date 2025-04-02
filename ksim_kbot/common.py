@@ -392,8 +392,9 @@ class HipDeviationPenalty(ksim.Reward):
     joint_targets: tuple[float, ...] = attrs.field()
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        # NOTE - fix that
         diff = (
-            trajectory.qpos[..., jnp.array(self.hip_indices)]
+            trajectory.qpos[..., jnp.array(self.hip_indices) + 7]
             - jnp.array(self.joint_targets)[jnp.array(self.hip_indices)]
         )
         return xax.get_norm(diff, self.norm).sum(axis=-1)
@@ -426,7 +427,7 @@ class KneeDeviationPenalty(ksim.Reward):
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         diff = (
-            trajectory.qpos[..., jnp.array(self.knee_indices)]
+            trajectory.qpos[..., jnp.array(self.knee_indices) + 7]
             - jnp.array(self.joint_targets)[jnp.array(self.knee_indices)]
         )
         return xax.get_norm(diff, self.norm).sum(axis=-1)
