@@ -334,7 +334,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 command_name="quat_command",
                 switch_prob=self.config.ctrl_dt / 1,  # will last 1 seconds in expectation
                 vis_size=0.02,
-                null_prob=0.5,
+                null_prob=1.0,
                 vis_magnitude=0.5,
                 vis_color=(0.0, 0.0, 1.0, 0.5),
             ),
@@ -353,6 +353,14 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 time_bonus_scale=0.1,
                 command_name="cartesian_body_target_command",
             ),
+            ksim.CartesianBodyTargetPenalty.create(
+                model=physics_model,
+                command_name="cartesian_body_target_command",
+                tracked_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
+                base_body_name="floating_base_link",
+                norm="l2",
+                scale=-100.0,
+            ),
             ksim.GlobalBodyQuaternionReward.create(
                 model=physics_model,
                 command_name="quat_command",
@@ -364,6 +372,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             ),
             ksim.ActuatorForcePenalty(scale=-0.0001, norm="l1"),
             ksim.ActionSmoothnessPenalty(scale=-0.0001, norm="l2"),
+            ksim.JointVelocityPenalty(scale=-0.0001, freejoint_first=False, norm="l2"),
             ksim.ActuatorJerkPenalty(scale=-0.0001, ctrl_dt=self.config.ctrl_dt, norm="l2"),
         ]
 
