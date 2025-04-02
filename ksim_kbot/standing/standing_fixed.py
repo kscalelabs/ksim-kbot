@@ -350,16 +350,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ),
             ksim.JointVelocityObservation(noise=0.5),
             ksim.ActuatorForceObservation(),
-            ksim.SensorObservation.create(
-                physics_model=physics_model,
-                sensor_name="imu_acc",
-                noise=0.5,
-            ),
-            ksim.SensorObservation.create(
-                physics_model=physics_model,
-                sensor_name="imu_gyro",
-                noise=0.2,
-            ),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_acc", noise=0.5),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_gyro", noise=0.2),
             ksim.BasePositionObservation(noise=0.0),
             ksim.BaseOrientationObservation(noise=0.0),
             ksim.BaseLinearVelocityObservation(noise=0.0),
