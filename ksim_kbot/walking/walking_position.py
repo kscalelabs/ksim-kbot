@@ -525,8 +525,8 @@ class KbotWalkingPositionTask(KbotWalkingTask[Config], Generic[Config]):
         if self.config.use_gait_rewards:
             gait_rewards = [
                 common.FeetSlipPenalty(scale=-0.25),
-                common.FeetAirTimeReward(scale=2.0),
-                common.FeetPhaseReward(max_foot_height=0.12, scale=1.0),
+                # common.FeetAirTimeReward(scale=2.0),
+                common.FeetPhaseReward(max_foot_height=0.12, scale=2.0),
                 # Verify the logic
                 # common.PlaygroundFeetPhaseReward(max_foot_height=0.12, scale=1.0),
             ]
@@ -648,12 +648,12 @@ if __name__ == "__main__":
             learning_rate=1e-4,
             clip_param=0.3,
             max_grad_norm=1.0,
+            reward_clip_min=0.0,
+            reward_clip_max=1000.0,
             use_mit_actuators=False,
             export_for_inference=True,
             use_gait_rewards=True,
             domain_randomize=False,
-            light_domain_randomize=True,
-            reward_clip_min=0.0,
-            reward_clip_max=1000.0,
+            light_domain_randomize=True
         ),
     )

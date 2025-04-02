@@ -242,6 +242,7 @@ class FeetPhaseReward(ksim.Reward):
     scale: float = 1.0
     feet_pos_obs_name: str = attrs.field(default="feet_position_observation")
     max_foot_height: float = 0.12
+    foot_default_height: float = 0.04
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         if self.feet_pos_obs_name not in trajectory.obs:
@@ -251,6 +252,7 @@ class FeetPhaseReward(ksim.Reward):
 
         foot_z = jnp.array([foot_pos[..., 2], foot_pos[..., 5]]).T
         ideal_z = self.gait_phase(phase, swing_height=self.max_foot_height)
+        ideal_z = ideal_z + self.foot_default_height
 
         error = jnp.sum(jnp.square(foot_z - ideal_z), axis=-1)
         reward = jnp.exp(-error / 0.01)
@@ -289,6 +291,7 @@ class PlaygroundFeetPhaseReward(ksim.Reward):
     scale: float = 1.0
     feet_pos_obs_name: str = attrs.field(default="feet_position_observation")
     max_foot_height: float = 0.12
+    foot_default_height: float = 0.04
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         if self.feet_pos_obs_name not in trajectory.obs:
@@ -298,6 +301,7 @@ class PlaygroundFeetPhaseReward(ksim.Reward):
 
         foot_z = jnp.array([foot_pos[..., 2], foot_pos[..., 5]]).T
         ideal_z = self.gait_phase(phase, swing_height=self.max_foot_height)
+        ideal_z = ideal_z + self.foot_default_height
 
         error = jnp.sum(jnp.square(foot_z - ideal_z), axis=-1)
         reward = jnp.exp(-error / 0.01)
