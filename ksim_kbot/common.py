@@ -52,6 +52,13 @@ class LastActionObservation(ksim.Observation):
 
 
 @attrs.define(frozen=True)
+class PhaseObservation(ksim.Observation):
+    def observe(self, rollout_state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
+        phase = rollout_state.reward_carry["phase"]
+        return jnp.concatenate([jnp.cos(phase), jnp.sin(phase)], axis=-1)
+
+
+@attrs.define(frozen=True)
 class FeetPositionObservation(ksim.Observation):
     foot_left: int = attrs.field()
     foot_right: int = attrs.field()
@@ -211,6 +218,8 @@ class FeetAirTimeReward(ksim.Reward):
         return jnp.sum(air_time, axis=-1)
 
 
+
+
 @attrs.define(frozen=True, kw_only=True)
 class FeetPhaseReward(ksim.Reward):
     """Reward for tracking the desired foot height."""
@@ -245,19 +254,27 @@ class FeetPhaseReward(ksim.Reward):
         https://github.com/google-deepmind/mujoco_playground/blob/main/mujoco_playground/_src/gait.py#L33
         """
 
-        def _cubic_bezier_interpolation(
-            y_start: Array | float, y_end: Array | float, x: Array | float
-        ) -> Array | float:
-            """Cubic Bezier interpolation for the gait phase."""
+        def cubic_bezier_interpolation(y_start, y_end, x):
             y_diff = y_end - y_start
             bezier = x**3 + 3 * (x**2 * (1 - x))
             return y_start + y_diff * bezier
 
-        x = (phi + jnp.pi) / (2 * jnp.pi)
-        x = jnp.clip(x, 0, 1)
-        stance = _cubic_bezier_interpolation(0, swing_height, 2 * x)
-        swing = _cubic_bezier_interpolation(swing_height, 0, 2 * x - 1)
-        return jnp.where(x <= 0.5, stance, swing)
+        stance_phase = phi > 0
+        swing_phase = ~stance_phase  # phi <= 0
+
+        # Calculate s for all elements
+        s = (phi + jnp.pi) / jnp.pi
+        s = jnp.clip(s, 0, 1)
+
+        # Calculate potential Z values for all elements
+        z_rising = cubic_bezier_interpolation(0.0, swing_height, 2.0 * s)
+        z_falling = cubic_bezier_interpolation(swing_height, 0.0, 2.0 * s - 1.0)
+        potential_swing_z = jnp.where(s <= 0.5, z_rising, z_falling)
+
+        # Calculate the final Z value using where based on swing phase
+        final_z = jnp.where(swing_phase, potential_swing_z, 0.0)
+
+        return final_z
 
 
 @attrs.define(frozen=True, kw_only=True)
