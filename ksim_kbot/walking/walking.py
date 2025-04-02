@@ -358,15 +358,15 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ksim.BaseAngularVelocityObservation(noise=0.0),
             ksim.CenterOfMassVelocityObservation(),
             ksim.FeetContactObservation.create(
-                physics_model,
-                "KB_D_501L_L_LEG_FOOT_collision_box",
-                "KB_D_501R_R_LEG_FOOT_collision_box",
-                "floor",
+                physics_model=physics_model,
+                foot_left_geom_name="KB_D_501L_L_LEG_FOOT_collision_box",
+                foot_right_geom_name="KB_D_501R_R_LEG_FOOT_collision_box",
+                floor_geom_name="floor",
             ),
             ksim.FeetPositionObservation.create(
-                physics_model,
-                "KB_D_501L_L_LEG_FOOT_collision_box",
-                "KB_D_501R_R_LEG_FOOT_collision_box",
+                physics_model=physics_model,
+                foot_left_body_name="KB_D_501L_L_LEG_FOOT_collision_box",
+                foot_right_body_name="KB_D_501R_R_LEG_FOOT_collision_box",
             ),
             LastActionObservation(noise=0.0),
             ProjectedGravityObservation(noise=0.0),
@@ -406,8 +406,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                     -0.195,
                 ),
             ),
-            ksim.TerminationPenalty(scale=-100.0),
-            ksim.HealthyReward(scale=0.25),
+            # ksim.TerminationPenalty(scale=-100.0),
+            # ksim.HealthyReward(scale=0.25),
             HipDeviationPenalty.create(
                 physics_model,
                 hip_names=(
