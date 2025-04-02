@@ -408,8 +408,8 @@ class KbotGetupTask(KbotStandingTask[Config], Generic[Config]):
             JointPositionObservation(noise=0.0),
             ksim.JointVelocityObservation(noise=0.0),
             ksim.ActuatorForceObservation(),
-            ksim.SensorObservation.create(physics_model, "imu_acc", noise=0.0),
-            ksim.SensorObservation.create(physics_model, "imu_gyro", noise=0.0),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_acc", noise=0.0),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_gyro", noise=0.0),
             LastActionObservation(noise=0.0),
             HistoryObservation(),
         ]
