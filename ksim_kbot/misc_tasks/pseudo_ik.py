@@ -334,8 +334,9 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 command_name="quat_command",
                 switch_prob=self.config.ctrl_dt / 1,  # will last 1 seconds in expectation
                 vis_size=0.02,
+                null_prob=0.5,
                 vis_magnitude=0.5,
-                vis_color=(1.0, 0.0, 0.0, 0.5),
+                vis_color=(0.0, 0.0, 1.0, 0.5),
             ),
         ]
 
