@@ -346,13 +346,15 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.CartesianBodyTargetReward.create(
+            ksim.ContinuousCartesianBodyTargetReward.create(
                 model=physics_model,
                 tracked_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
                 base_body_name="floating_base_link",
                 norm="l2",
                 scale=1.0,
                 sensitivity=1.0,
+                threshold=0.0001, # with l2 norm, this is 1cm
+                time_bonus_scale=0.1,
                 command_name="cartesian_body_target_command",
             ),
             ksim.GlobalBodyQuaternionReward.create(
