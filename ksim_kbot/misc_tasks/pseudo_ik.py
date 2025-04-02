@@ -1,26 +1,25 @@
 """Pseudo-Inverse Kinematics task for the default humanoid."""
 
 import asyncio
-from dataclasses import dataclass
 import os
+import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Generic, Literal, TypeVar
-import uuid
 
 import distrax
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import ksim
 import mujoco
 import optax
 import xax
-from xax.nn.export import export
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
-from mujoco import mjx
-
-import ksim
 from ksim.utils.mujoco import remove_joints_except
+from mujoco import mjx
+from xax.nn.export import export
 
 NoiseType = Literal["none", "uniform", "gaussian"]
 
@@ -63,7 +62,6 @@ class KbotActor(eqx.Module):
         var_scale: float,
         mean_scale: float,
     ) -> None:
-
         self.mlp = eqx.nn.MLP(
             in_size=NUM_INPUTS,
             out_size=NUM_OUTPUTS * 2,
@@ -97,7 +95,6 @@ class KbotActor(eqx.Module):
         return self.call_flat_obs(obs_n)
 
     def call_flat_obs(self, obs_n: Array) -> distrax.Normal:
-
         prediction_n = self.mlp(obs_n)
         mean_n = prediction_n[..., :NUM_OUTPUTS]
         std_n = prediction_n[..., NUM_OUTPUTS:]
@@ -529,7 +526,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         input_shapes = [(NUM_INPUTS,)]
 
         tf_path = (
-            ckpt_path.parent / f"tf_model"
+            ckpt_path.parent / "tf_model"
             if self.config.only_save_most_recent
             else ckpt_path.parent / f"tf_model_{state.num_steps}"
         )
