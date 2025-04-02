@@ -13,6 +13,7 @@ import xax
 from jaxtyping import Array, PRNGKeyArray
 from ksim.utils.mujoco import get_geom_data_idx_from_name, get_qpos_data_idxs_by_name, get_sensor_data_idxs_by_name
 from mujoco import mjx
+from ksim_kbot.utils import cubic_bezier_interpolation
 
 
 @attrs.define(frozen=True)
@@ -207,8 +208,8 @@ class FeetAirTimeReward(ksim.Reward):
     """Reward for feet air time."""
 
     scale: float = 1.0
-    threshold_min: float = 0.1
-    threshold_max: float = 0.4
+    threshold_min: float = 0.2
+    threshold_max: float = 0.5
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         first_contact = trajectory.reward_carry["first_contact"]  # type: ignore[attr-defined]
@@ -216,8 +217,6 @@ class FeetAirTimeReward(ksim.Reward):
         air_time = (air_time - self.threshold_min) * first_contact
         air_time = jnp.clip(air_time, max=self.threshold_max - self.threshold_min)
         return jnp.sum(air_time, axis=-1)
-
-
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -247,17 +246,7 @@ class FeetPhaseReward(ksim.Reward):
         phi: Array | float,
         swing_height: Array | float = 0.08,
     ) -> Array:
-        """Interpolation logic for the gait phase.
-
-        Original implementation:
-        https://arxiv.org/pdf/2201.00206
-        https://github.com/google-deepmind/mujoco_playground/blob/main/mujoco_playground/_src/gait.py#L33
-        """
-
-        def cubic_bezier_interpolation(y_start, y_end, x):
-            y_diff = y_end - y_start
-            bezier = x**3 + 3 * (x**2 * (1 - x))
-            return y_start + y_diff * bezier
+        """Interpolation logic for the gait phase with clear separation."""
 
         stance_phase = phi > 0
         swing_phase = ~stance_phase  # phi <= 0
@@ -276,6 +265,46 @@ class FeetPhaseReward(ksim.Reward):
 
         return final_z
 
+
+@attrs.define(frozen=True, kw_only=True)
+class PlaygroundFeetPhaseReward(ksim.Reward):
+    """Reward for tracking the desired foot height."""
+
+    scale: float = 1.0
+    feet_pos_obs_name: str = attrs.field(default="feet_position_observation")
+    max_foot_height: float = 0.12
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        if self.feet_pos_obs_name not in trajectory.obs:
+            raise ValueError(f"Observation {self.feet_pos_obs_name} not found; add it as an observation in your task.")
+        foot_pos = trajectory.obs[self.feet_pos_obs_name]
+        phase = trajectory.reward_carry["phase"]  # type: ignore[attr-defined]
+
+        foot_z = jnp.array([foot_pos[..., 2], foot_pos[..., 5]]).T
+        ideal_z = self.gait_phase(phase, swing_height=self.max_foot_height)
+
+        error = jnp.sum(jnp.square(foot_z - ideal_z), axis=-1)
+        reward = jnp.exp(-error / 0.01)
+
+        return reward
+
+    def gait_phase(
+        self,
+        phi: Array | float,
+        swing_height: Array | float = 0.08,
+    ) -> Array:
+        """Interpolation logic for the gait phase (trotting).
+
+        Original implementation:
+        https://arxiv.org/pdf/2201.00206
+        https://github.com/google-deepmind/mujoco_playground/blob/main/mujoco_playground/_src/gait.py#L33
+        """
+        x = (phi + jnp.pi) / (2 * jnp.pi)
+        x = jnp.clip(x, 0, 1)
+        stance = cubic_bezier_interpolation(0, swing_height, 2 * x)
+        swing = cubic_bezier_interpolation(swing_height, 0, 2 * x - 1)
+        return jnp.where(x <= 0.5, stance, swing)
+        
 
 @attrs.define(frozen=True, kw_only=True)
 class OrientationPenalty(ksim.Reward):

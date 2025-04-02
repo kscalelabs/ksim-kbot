@@ -219,6 +219,8 @@ class KbotWalkingPositionTaskConfig(KbotWalkingTaskConfig):
 
     use_gait_rewards: bool = xax.field(value=False)
 
+    light_domain_randomize: bool = xax.field(value=False)
+
 
 Config = TypeVar("Config", bound=KbotWalkingTaskConfig)
 
@@ -283,6 +285,19 @@ class KbotWalkingPositionTask(KbotWalkingTask[Config], Generic[Config]):
                 #     floor_body_name="floor",
                 # ),
             ]
+        elif self.config.light_domain_randomize:
+            return [
+                ksim.StaticFrictionRandomization(scale_lower=0.95, scale_upper=1.05),
+                # ksim.JointZeroPositionRandomization(scale_lower=-0.005, scale_upper=0.005),
+                ksim.ArmatureRandomization(scale_lower=0.99, scale_upper=1.01),
+                ksim.MassMultiplicationRandomization.from_body_name(
+                    physics_model,
+                    "Torso_Side_Right",
+                    scale_lower=0.98,
+                    scale_upper=1.02,
+                ),
+                ksim.JointDampingRandomization(scale_lower=0.99, scale_upper=1.01),
+            ]
         else:
             return []
 
@@ -341,6 +356,15 @@ class KbotWalkingPositionTask(KbotWalkingTask[Config], Generic[Config]):
             base_angular_velocity_noise = 0.0
             base_angular_velocity_noise = 0.0
             noise = 0.0
+        elif self.config.light_domain_randomize:
+            imu_acc_noise = 0.0
+            imu_gyro_noise = 0.0
+            gvec_noise = 0.0
+            base_position_noise = 0.0
+            base_orientation_noise = 0.0
+            base_linear_velocity_noise = 0.0
+            base_angular_velocity_noise = 0.0
+            noise = 0.01
         else:
             imu_acc_noise = 0.0
             imu_gyro_noise = 0.0
@@ -367,7 +391,7 @@ class KbotWalkingPositionTask(KbotWalkingTask[Config], Generic[Config]):
                     0.441,
                     -0.195,
                 ),
-                noise=0.01,
+                noise=noise,
             ),
             ksim.JointVelocityObservation(noise=imu_gyro_noise),
             ksim.ActuatorForceObservation(),
@@ -420,7 +444,7 @@ class KbotWalkingPositionTask(KbotWalkingTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards = [
             common.JointDeviationPenalty(
-                scale=-0.1,
+                scale=-0.05,
                 joint_targets=(
                     # right leg
                     -0.23,
@@ -460,7 +484,7 @@ class KbotWalkingPositionTask(KbotWalkingTask[Config], Generic[Config]):
                     0.441,
                     -0.195,
                 ),
-                scale=-0.25,
+                scale=-0.1,
             ),
             common.KneeDeviationPenalty.create(
                 physics_model=physics_model,
@@ -481,8 +505,8 @@ class KbotWalkingPositionTask(KbotWalkingTask[Config], Generic[Config]):
                 ),
                 scale=-0.1,
             ),
-            common.LinearVelocityTrackingReward(scale=1.0),
-            common.AngularVelocityTrackingReward(scale=0.75),
+            common.LinearVelocityTrackingReward(scale=1.5),
+            common.AngularVelocityTrackingReward(scale=0.5),
             common.AngularVelocityXYPenalty(scale=-0.15),
             # TODO: Add this back in.
             # AvoidLimitsReward(scale=0.1),
@@ -493,7 +517,9 @@ class KbotWalkingPositionTask(KbotWalkingTask[Config], Generic[Config]):
             gait_rewards = [
                 common.FeetSlipPenalty(scale=-0.25),
                 common.FeetAirTimeReward(scale=2.0),
-                common.FeetPhaseReward(scale=1.0),
+                common.FeetPhaseReward(max_foot_height=0.12, scale=1.0),
+                # Verify the logic
+                # common.PlaygroundFeetPhaseReward(max_foot_height=0.12, scale=1.0),
             ]
             rewards += gait_rewards
 
@@ -600,7 +626,10 @@ if __name__ == "__main__":
             max_grad_norm=1.0,
             use_mit_actuators=False,
             export_for_inference=True,
-            domain_randomize=False,
             use_gait_rewards=True,
+            domain_randomize=False,
+            light_domain_randomize=True,
+            reward_clip_min=0.0,
+            reward_clip_max=1000.0,
         ),
     )
