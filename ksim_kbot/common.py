@@ -17,9 +17,7 @@ from mujoco import mjx
 
 @attrs.define(frozen=True)
 class HistoryObservation(ksim.Observation):
-    def observe(self, state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
-        if not isinstance(state.carry, Array):
-            raise ValueError("Carry is not a history array")
+    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
         return state.carry
 
 
@@ -28,8 +26,8 @@ class JointPositionObservation(ksim.Observation):
     default_targets: tuple[float, ...] = attrs.field()
     noise: float = attrs.field(default=0.0)
 
-    def observe(self, rollout_state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
-        qpos = rollout_state.physics_state.data.qpos[7:]  # (N,)
+    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
+        qpos = state.physics_state.data.qpos[7:]  # (N,)
         diff = qpos - jnp.array(self.default_targets)
         return diff
 
@@ -38,7 +36,7 @@ class JointPositionObservation(ksim.Observation):
 class ProjectedGravityObservation(ksim.Observation):
     noise: float = attrs.field(default=0.0)
 
-    def observe(self, state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
         gvec = xax.get_projected_gravity_vector_from_quat(state.physics_state.data.qpos[3:7])
         return gvec
 
@@ -47,8 +45,8 @@ class ProjectedGravityObservation(ksim.Observation):
 class LastActionObservation(ksim.Observation):
     noise: float = attrs.field(default=0.0)
 
-    def observe(self, rollout_state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
-        return rollout_state.physics_state.most_recent_action
+    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
+        return state.physics_state.most_recent_action
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -57,7 +55,7 @@ class ResetDefaultJointPosition(ksim.Reset):
 
     default_targets: tuple[float, ...] = attrs.field()
 
-    def __call__(self, data: ksim.PhysicsData, rng: PRNGKeyArray) -> ksim.PhysicsData:
+    def __call__(self, data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> ksim.PhysicsData:
         qpos = data.qpos
         match type(data):
             case mujoco.MjData:

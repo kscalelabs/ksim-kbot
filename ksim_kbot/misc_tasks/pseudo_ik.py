@@ -65,7 +65,7 @@ class KbotActor(eqx.Module):
             width_size=64,
             depth=5,
             key=key,
-            activation=jax.nn.relu,
+            activation=jax.nn.elu,
         )
         self.min_std = min_std
         self.max_std = max_std
@@ -96,8 +96,7 @@ class KbotActor(eqx.Module):
         mean_n = prediction_n[..., :NUM_OUTPUTS]
         std_n = prediction_n[..., NUM_OUTPUTS:]
 
-        # Scale the mean.
-        mean_n = jnp.tanh(mean_n) * self.mean_scale
+        mean_n = mean_n * self.mean_scale
 
         # Softplus and clip to ensure positive standard deviations.
         std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
@@ -270,10 +269,12 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             return ksim.MITPositionVelocityActuators(
                 physics_model,
                 metadata,
-                pos_action_noise=0.1,
-                vel_action_noise=0.1,
-                pos_action_noise_type="gaussian",
-                vel_action_noise_type="gaussian",
+                # pos_action_noise=0.1,
+                # vel_action_noise=0.1,
+                # pos_action_noise_type="gaussian",
+                # vel_action_noise_type="gaussian",
+                torque_noise=0.2,
+                torque_noise_type="gaussian",
                 ctrl_clip=[
                     # right arm
                     MAX_TORQUE["03"],
@@ -290,7 +291,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
     def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
         return [
             ksim.StaticFrictionRandomization(scale_lower=0.5, scale_upper=2.0, freejoint_first=False),
-            ksim.JointZeroPositionRandomization(scale_lower=-0.05, scale_upper=0.05, freejoint_first=False),
+            ksim.JointZeroPositionRandomization(scale_lower=-0.01, scale_upper=0.01, freejoint_first=False),
             ksim.ArmatureRandomization(scale_lower=1.0, scale_upper=1.05, freejoint_first=False),
             ksim.MassMultiplicationRandomization.from_body_name(physics_model, "KC_C_104R_PitchHardstopDriven"),
             ksim.JointDampingRandomization(scale_lower=0.95, scale_upper=1.05, freejoint_first=False),
@@ -321,7 +322,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 pivot_name="KC_C_104R_PitchHardstopDriven",
                 base_name="floating_base_link",
                 sample_sphere_radius=0.5,
-                positive_x=True,  # only sample in the positive x direction
+                positive_x=False, # forward + backward
                 positive_y=False,
                 positive_z=False,
                 switch_prob=self.config.ctrl_dt / 2,  # will last 2 seconds in expectation
@@ -347,19 +348,12 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 tracked_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
                 base_body_name="floating_base_link",
                 norm="l2",
-                scale=1.0,
+                scale=2.5,
                 sensitivity=1.0,
-                threshold=0.000025,  # with l2 norm, this is 0.5cm
-                time_bonus_scale=0.3,
+                threshold=0.0001,  # with l2 norm, this is 1cm
+                time_bonus_scale=0.1,
+                time_sensitivity=0.05,
                 command_name="cartesian_body_target_command",
-            ),
-            ksim.CartesianBodyTargetPenalty.create(
-                model=physics_model,
-                command_name="cartesian_body_target_command",
-                tracked_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
-                base_body_name="floating_base_link",
-                norm="l2",
-                scale=-100.0,
             ),
             ksim.GlobalBodyQuaternionReward.create(
                 model=physics_model,
@@ -370,9 +364,19 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 scale=0.1,
                 sensitivity=1.0,
             ),
-            ksim.ActuatorForcePenalty(scale=-0.0001, norm="l1"),
-            ksim.ActionSmoothnessPenalty(scale=-0.0001, norm="l2"),
-            ksim.JointVelocityPenalty(scale=-0.0001, freejoint_first=False, norm="l2"),
+            ksim.CartesianBodyTargetVectorReward.create(
+                model=physics_model,
+                command_name="cartesian_body_target_command",
+                tracked_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
+                base_body_name="floating_base_link",
+                scale=0.3,
+                normalize_velocity=True,
+                distance_threshold=0.1,
+                dt=self.config.dt,
+            ),
+            ksim.ActuatorForcePenalty(scale=-0.00001, norm="l1"),
+            ksim.ActionSmoothnessPenalty(scale=-0.001, norm="l2"),
+            ksim.JointVelocityPenalty(scale=-0.001, freejoint_first=False, norm="l2"),
             ksim.ActuatorJerkPenalty(scale=-0.0001, ctrl_dt=self.config.ctrl_dt, norm="l2"),
         ]
 
@@ -494,6 +498,9 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
 
         return action_n, None, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
 
+    def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
+        return ksim.ConstantCurriculum(level=0.0)
+
     def make_export_model(self, model: KbotModel, stochastic: bool = False, batched: bool = False) -> Callable:
         """Makes a callable inference function that directly takes a flattened input vector and returns an action.
 
@@ -559,8 +566,8 @@ if __name__ == "__main__":
     KbotPseudoIKTask.launch(
         KbotPseudoIKTaskConfig(
             # Training parameters.
-            num_envs=8192,
-            batch_size=1024,
+            num_envs=4096,
+            batch_size=512,
             num_passes=10,
             epochs_per_log_step=1,
             # Logging parameters.

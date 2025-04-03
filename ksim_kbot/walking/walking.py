@@ -121,7 +121,7 @@ class KbotActor(eqx.Module):
         std_n = prediction_n[..., NUM_OUTPUTS:]
 
         # Scale the mean.
-        mean_n = jnp.tanh(mean_n) * self.mean_scale
+        # mean_n = jnp.tanh(mean_n) * self.mean_scale
 
         # Softplus and clip to ensure positive standard deviations.
         std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
@@ -198,7 +198,7 @@ class KbotModel(eqx.Module):
         self.critic = KbotCritic(key)
 
 
-class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
+class KbotWalkingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     def get_optimizer(self) -> optax.GradientTransformation:
         """Builds the optimizer.
 
@@ -215,6 +215,9 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         )
 
         return optimizer
+
+    def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
+        return ksim.ConstantCurriculum(level=0.0)
 
     def get_mujoco_model(self) -> mujoco.MjModel:
         mjcf_path = (Path(self.config.robot_urdf_path) / "scene_fixed.mjcf").resolve().as_posix()
@@ -365,8 +368,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ),
             ksim.FeetPositionObservation.create(
                 physics_model=physics_model,
-                foot_left_body_name="KB_D_501L_L_LEG_FOOT_collision_box",
-                foot_right_body_name="KB_D_501R_R_LEG_FOOT_collision_box",
+                foot_left_body_name="KB_D_501L_L_LEG_FOOT",
+                foot_right_body_name="KB_D_501R_R_LEG_FOOT",
             ),
             LastActionObservation(noise=0.0),
             ProjectedGravityObservation(noise=0.0),
@@ -406,8 +409,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                     -0.195,
                 ),
             ),
-            # ksim.TerminationPenalty(scale=-100.0),
-            # ksim.HealthyReward(scale=0.25),
+            ksim.StayAliveReward(scale=20.0),
             HipDeviationPenalty.create(
                 physics_model,
                 hip_names=(
@@ -480,8 +482,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     ) -> distrax.Normal:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
-        imu_acc_3 = observations["imu_acc_obs"]
-        imu_gyro_3 = observations["imu_gyro_obs"]
+        imu_acc_3 = observations["sensor_observation_imu_acc"]
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         last_action_n = observations["last_action_observation"]
         history_n = observations["history_observation"]
@@ -495,8 +497,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     ) -> Array:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
-        imu_acc_3 = observations["imu_acc_obs"]
-        imu_gyro_3 = observations["imu_gyro_obs"]
+        imu_acc_3 = observations["sensor_observation_imu_acc"]
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         last_action_n = observations["last_action_observation"]
         projected_gravity_3 = observations["projected_gravity_observation"]
@@ -580,6 +582,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         model: KbotModel,
         carry: Array,
         physics_model: ksim.PhysicsModel,
+        physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
@@ -593,8 +596,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
 
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
-        imu_acc_3 = observations["imu_acc_obs"]
-        imu_gyro_3 = observations["imu_gyro_obs"]
+        imu_acc_3 = observations["sensor_observation_imu_acc"]
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         last_action_n = observations["last_action_observation"]
         history_n = jnp.concatenate(
@@ -630,7 +633,7 @@ if __name__ == "__main__":
     #  run_environment=True \
     #  run_environment_num_seconds=1 \
     #  run_environment_save_path=videos/test.mp4
-    KbotStandingTask.launch(
+    KbotWalkingTask.launch(
         KbotStandingTaskConfig(
             num_envs=1024,
             batch_size=512,
