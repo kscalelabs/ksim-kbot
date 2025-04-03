@@ -493,7 +493,7 @@ class KbotWalkingHistoryPositionTask(KbotWalkingTask[Config], Generic[Config]):
                     0.441,
                     -0.195,
                 ),
-                scale=-0.2,
+                scale=-0.25,
             ),
             common.KneeDeviationPenalty.create(
                 physics_model=physics_model,
@@ -524,9 +524,13 @@ class KbotWalkingHistoryPositionTask(KbotWalkingTask[Config], Generic[Config]):
         ]
         if self.config.use_gait_rewards:
             gait_rewards = [
-                common.FeetSlipPenalty(scale=-0.5),
-                # common.FeetAirTimeReward(scale=2.0),
-                common.BasicFeetAirTimeReward(scale=2.0),
+                common.FeetSlipPenalty(scale=-0.25),
+                common.FeetAirTimeReward(
+                    scale=2.0,
+                    threshold_min=0.2,
+                    threshold_max=0.5,
+                ),
+                # common.BasicFeetAirTimeReward(scale=2.0),
                 # common.FeetPhaseReward(max_foot_height=0.12, scale=1.0),
                 common.PlaygroundFeetPhaseReward(max_foot_height=0.1, scale=1.0),
             ]
