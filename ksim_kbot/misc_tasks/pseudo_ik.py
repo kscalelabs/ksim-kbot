@@ -220,7 +220,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         return optimizer
 
     def get_mujoco_model(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
-        mjcf_path = (Path(self.config.robot_urdf_path) / "robot_scene.mjcf").resolve().as_posix()
+        mjcf_path = (Path(self.config.robot_urdf_path) / "robot_scene_collisions_simplified.mjcf").resolve().as_posix()
         mj_model_joint_removed = remove_joints_except(
             mjcf_path,
             [
@@ -312,6 +312,18 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.JointVelocityObservation(freejoint_first=False, noise=0.1, noise_type="gaussian"),
             ksim.ActuatorForceObservation(),
             ksim.ActuatorAccelerationObservation(freejoint_first=False),
+            ksim.ContactObservation.create(
+                custom_observation_name="contact",
+                physics_model=physics_model,
+                geom_names=[
+                    "right_upper_arm_collision",
+                    "left_upper_arm_collision",
+                    "right_forearm_collision",
+                    "left_forearm_collision",
+                    "torso_collision",
+                    "legs_collision",
+                ],
+            ),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
@@ -322,7 +334,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 pivot_name="KC_C_104R_PitchHardstopDriven",
                 base_name="floating_base_link",
                 sample_sphere_radius=0.5,
-                positive_x=False,  # forward + backward
+                positive_x=True,  # forward + backward
                 positive_y=False,
                 positive_z=False,
                 switch_prob=self.config.ctrl_dt / 2,  # will last 2 seconds in expectation
@@ -373,7 +385,8 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 normalize_velocity=True,
                 distance_threshold=0.1,
                 dt=self.config.dt,
-            ),
+            ),  
+            ksim.GeomContactPenalty(observation_name="contact", scale=-1.0),
             ksim.ActuatorForcePenalty(scale=-0.00001, norm="l1"),
             ksim.ActionSmoothnessPenalty(scale=-0.001, norm="l2"),
             ksim.JointVelocityPenalty(scale=-0.001, freejoint_first=False, norm="l2"),
@@ -438,46 +451,44 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             raise ValueError("No aux outputs found in trajectories")
         return trajectories.aux_outputs.log_probs
 
-    def get_on_policy_values(
+    def get_on_policy_variables(
         self,
         model: KbotModel,
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
-    ) -> Array:
+    ) -> ksim.PPOVariables:
         if not isinstance(trajectories.aux_outputs, AuxOutputs):
             raise ValueError("No aux outputs found in trajectories")
-        return trajectories.aux_outputs.values
 
-    def get_log_probs(
+        return ksim.PPOVariables(
+            log_probs_tn=trajectories.aux_outputs.log_probs,
+            values_t=trajectories.aux_outputs.values,
+        )
+
+    def get_off_policy_variables(
         self,
         model: KbotModel,
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
-    ) -> tuple[Array, Array]:
+    ) -> ksim.PPOVariables:
         # Vectorize over both batch and time dimensions.
-        par_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0))
-        action_dist_btn = par_fn(model, trajectories.obs, trajectories.command)
+        par_actor_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0))
+        action_dist_tn = par_actor_fn(model, trajectories.obs, trajectories.command)
+
+        par_critic_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
+        values_t1 = par_critic_fn(model, trajectories.obs, trajectories.command)
 
         # Compute the log probabilities of the trajectory's actions according
         # to the current policy, along with the entropy of the distribution.
-        action_btn = trajectories.action / model.actor.mean_scale
-        log_probs_btn = action_dist_btn.log_prob(action_btn)
-        entropy_btn = action_dist_btn.entropy()
+        action_tn = trajectories.action / model.actor.mean_scale
+        log_probs_tn = action_dist_tn.log_prob(action_tn)
+        entropy_tn = action_dist_tn.entropy()
 
-        return log_probs_btn, entropy_btn
-
-    def get_values(
-        self,
-        model: KbotModel,
-        trajectories: ksim.Trajectory,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        # Vectorize over both batch and time dimensions.
-        par_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
-        values_bt1 = par_fn(model, trajectories.obs, trajectories.command)
-
-        # Remove the last dimension.
-        return values_bt1.squeeze(-1)
+        return ksim.PPOVariables(
+            log_probs_tn=log_probs_tn,
+            values_t=values_t1,
+            entropy_tn=entropy_tn,
+        )
 
     def sample_action(
         self,
@@ -566,8 +577,8 @@ if __name__ == "__main__":
     KbotPseudoIKTask.launch(
         KbotPseudoIKTaskConfig(
             # Training parameters.
-            num_envs=4096,
-            batch_size=512,
+            num_envs=2048,
+            batch_size=256,
             num_passes=10,
             epochs_per_log_step=1,
             # Logging parameters.
