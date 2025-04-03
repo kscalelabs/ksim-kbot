@@ -439,7 +439,7 @@ class KbotWalkingHistoryPositionTask(KbotWalkingTask[Config], Generic[Config]):
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
             ksim.LinearVelocityCommand(
-                x_range=(0.2, 0.2),
+                x_range=(0.5, 0.5),
                 y_range=(0.0, 0.0),
                 x_zero_prob=0.0,
                 y_zero_prob=1.0,
@@ -493,7 +493,7 @@ class KbotWalkingHistoryPositionTask(KbotWalkingTask[Config], Generic[Config]):
                     0.441,
                     -0.195,
                 ),
-                scale=-0.1,
+                scale=-0.2,
             ),
             common.KneeDeviationPenalty.create(
                 physics_model=physics_model,
@@ -524,11 +524,11 @@ class KbotWalkingHistoryPositionTask(KbotWalkingTask[Config], Generic[Config]):
         ]
         if self.config.use_gait_rewards:
             gait_rewards = [
-                common.FeetSlipPenalty(scale=-0.25),
+                common.FeetSlipPenalty(scale=-0.5),
                 # common.FeetAirTimeReward(scale=2.0),
                 common.BasicFeetAirTimeReward(scale=2.0),
                 # common.FeetPhaseReward(max_foot_height=0.12, scale=1.0),
-                common.PlaygroundFeetPhaseReward(max_foot_height=0.12, scale=1.0),
+                common.PlaygroundFeetPhaseReward(max_foot_height=0.1, scale=1.0),
             ]
             rewards += gait_rewards
 
@@ -597,7 +597,6 @@ class KbotWalkingHistoryPositionTask(KbotWalkingTask[Config], Generic[Config]):
         true_height_1 = observations["true_height_observation"]
         actuator_force_n = observations["actuator_force_observation"]
         history_n = observations["history_observation"]
-        feet_position_2 = observations["feet_position_observation"]
 
         return model.critic(
             joint_pos_n,
@@ -683,7 +682,7 @@ if __name__ == "__main__":
     #  run_environment_save_path=videos/test.mp4
     KbotWalkingHistoryPositionTask.launch(
         KbotWalkingHistoryPositionTaskConfig(
-            num_envs=1024,
+            num_envs=8192,
             batch_size=512,
             num_passes=10,
             epochs_per_log_step=1,
@@ -692,10 +691,11 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
-            valid_every_n_steps=25,
+            valid_every_n_steps=5,
             valid_first_n_steps=0,
             save_every_n_steps=25,
-            rollout_length_seconds=5.0,
+            rollout_length_seconds=1.25,
+            log_full_trajectory_every_n_steps=2,
             # PPO parameters
             gamma=0.97,
             lam=0.95,
