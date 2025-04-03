@@ -19,24 +19,25 @@ from mujoco import mjx
 from ksim_kbot import common
 from ksim_kbot.walking.walking import KbotWalkingTask, KbotWalkingTaskConfig
 
+# from ksim.normalization import Normalizer, PassThrough, Standardize
+# def get_obs_normalizer(self, dummy_obs: FrozenDict[str, Array]) -> Normalizer:
+#     return Standardize(dummy_obs, alpha=1.0)
+
+# def get_cmd_normalizer(self, dummy_cmd: FrozenDict[str, Array]) -> Normalizer:
+#     return PassThrough()
+
+
 OBS_SIZE = (
     10 + 10 + 3 + 3 + 3 + 10 + 4
 )  # = 43 position_10 + joint_velocity_10 + imu_acc_3 + imu_gyro_3 + projected_gravity_3 + last_action_10 + phase_4
 CMD_SIZE = 2
 NUM_OUTPUTS = 10  # position
 
-SINGLE_STEP_HISTORY_SIZE = NUM_OUTPUTS + OBS_SIZE + CMD_SIZE
+SINGLE_STEP_HISTORY_SIZE = OBS_SIZE + CMD_SIZE
 
-HISTORY_LENGTH = 0
+HISTORY_LENGTH = 5
 
 NUM_INPUTS = (OBS_SIZE + CMD_SIZE) + SINGLE_STEP_HISTORY_SIZE * HISTORY_LENGTH
-
-MAX_TORQUE = {
-    "00": 1.0,
-    "02": 30.0,
-    "03": 60.0,
-    "04": 100.0,
-}
 
 
 class ScaledTorqueActuators(ksim.Actuators):
@@ -122,7 +123,7 @@ class KbotActor(eqx.Module):
                 lin_vel_cmd_2,
                 last_action_n,
                 phase_4,
-                # history_n,
+                history_n,
             ],
             axis=-1,
         )  # (NUM_INPUTS)
@@ -200,7 +201,7 @@ class KbotCritic(eqx.Module):
                 base_linear_velocity_3,
                 base_angular_velocity_3,
                 true_height_1,
-                # history_n,
+                history_n,
             ],
             axis=-1,
         )  # (NUM_INPUTS)
@@ -223,7 +224,7 @@ class KbotModel(eqx.Module):
 
 
 @dataclass
-class KbotWalkingPositionTaskConfig(KbotWalkingTaskConfig):
+class KbotWalkingHistoryPositionTaskConfig(KbotWalkingTaskConfig):
     """Config for the K-Bot walking task."""
 
     use_gait_rewards: bool = xax.field(value=False)
@@ -237,7 +238,7 @@ class KbotWalkingPositionTaskConfig(KbotWalkingTaskConfig):
 Config = TypeVar("Config", bound=KbotWalkingTaskConfig)
 
 
-class KbotWalkingPositionTask(KbotWalkingTask[Config], Generic[Config]):
+class KbotWalkingHistoryPositionTask(KbotWalkingTask[Config], Generic[Config]):
     def get_mujoco_model(self) -> mujoco.MjModel:
         mjcf_path = (Path(self.config.robot_urdf_path) / "scene_fixed_position.mjcf").resolve().as_posix()
         mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
@@ -530,10 +531,10 @@ class KbotWalkingPositionTask(KbotWalkingTask[Config], Generic[Config]):
         if self.config.use_gait_rewards:
             gait_rewards = [
                 common.FeetSlipPenalty(scale=-0.25),
-                # common.FeetAirTimeReward(scale=2.0),
-                common.FeetPhaseReward(max_foot_height=0.12, scale=2.0),
+                common.FeetAirTimeReward(scale=2.0),
+                common.FeetPhaseReward(max_foot_height=0.12, scale=1.0),
                 # Verify the logic
-                # common.PlaygroundFeetPhaseReward(max_foot_height=0.12, scale=1.0),
+                common.PlaygroundFeetPhaseReward(max_foot_height=0.12, scale=1.0),
             ]
             rewards += gait_rewards
 
@@ -622,19 +623,70 @@ class KbotWalkingPositionTask(KbotWalkingTask[Config], Generic[Config]):
             history_n,
         )
 
+    def sample_action(
+        self,
+        model: KbotModel,
+        carry: Array,
+        physics_model: ksim.PhysicsModel,
+        physics_state: ksim.PhysicsState,
+        observations: xax.FrozenDict[str, Array],
+        commands: xax.FrozenDict[str, Array],
+        rng: PRNGKeyArray,
+    ) -> tuple[Array, Array, AuxOutputs]:
+        action_dist_n = self._run_actor(model, observations, commands)
+        action_n = action_dist_n.sample(seed=rng)
+        action_log_prob_n = action_dist_n.log_prob(action_n)
+
+        critic_n = self._run_critic(model, observations, commands)
+        value_n = critic_n.squeeze(-1)
+
+        joint_pos_n = observations["joint_position_observation"]
+        joint_vel_n = observations["joint_velocity_observation"]
+        imu_acc_3 = observations["sensor_observation_imu_acc"]
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        projected_gravity_3 = observations["projected_gravity_observation"]
+        lin_vel_cmd_2 = commands["linear_velocity_command"]
+        last_action_n = observations["last_action_observation"]
+        phase_4 = observations["phase_observation"]
+
+        history_n = jnp.concatenate(
+            [
+                joint_pos_n,
+                joint_vel_n,
+                imu_acc_3,
+                imu_gyro_3,
+                projected_gravity_3,
+                lin_vel_cmd_2,
+                last_action_n,
+                phase_4,
+            ],
+            axis=-1,
+        )
+
+        if HISTORY_LENGTH > 0:
+            # Roll the history by shifting the existing history and adding the new data
+            carry_reshaped = carry.reshape(HISTORY_LENGTH, SINGLE_STEP_HISTORY_SIZE)
+            shifted_history = jnp.roll(carry_reshaped, shift=-1, axis=0)
+            new_history = shifted_history.at[HISTORY_LENGTH - 1].set(history_n)
+            history_n = new_history.reshape(-1)
+        else:
+            history_n = jnp.zeros(0)
+
+        return action_n, history_n, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
+
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    # python -m ksim_kbot.walking.walking_postion num_envs=1 batch_size=1 rollout_length_seconds=1.0
+    # python -m ksim_kbot.walking.walking_posirion num_envs=1 batch_size=1 rollout_length_seconds=1.0
     # To visualize the environment, use the following command:
     # python -m ksim_kbot.walking.walking_position \
     #  run_environment=True \
     #  run_environment_num_seconds=1 \
     #  run_environment_save_path=videos/test.mp4
-    KbotWalkingPositionTask.launch(
-        KbotWalkingPositionTaskConfig(
+    KbotWalkingHistoryPositionTask.launch(
+        KbotWalkingHistoryPositionTaskConfig(
             num_envs=1024,
-            batch_size=256,
+            batch_size=512,
             num_passes=10,
             epochs_per_log_step=1,
             # Simulation parameters.
@@ -653,12 +705,15 @@ if __name__ == "__main__":
             learning_rate=1e-4,
             clip_param=0.3,
             max_grad_norm=1.0,
-            reward_clip_min=0.0,
-            reward_clip_max=1000.0,
+            # Task parameters
             use_mit_actuators=False,
             export_for_inference=True,
             use_gait_rewards=True,
             domain_randomize=False,
-            light_domain_randomize=True
+            light_domain_randomize=True,
+            gait_freq_lower=1.25,
+            gait_freq_upper=1.25,
+            reward_clip_min=0.0,
+            reward_clip_max=1000.0,
         ),
     )
