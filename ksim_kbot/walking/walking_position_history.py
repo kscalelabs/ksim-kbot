@@ -19,13 +19,6 @@ from mujoco import mjx
 from ksim_kbot import common
 from ksim_kbot.walking.walking import KbotWalkingTask, KbotWalkingTaskConfig
 
-# from ksim.normalization import Normalizer, PassThrough, Standardize
-# def get_obs_normalizer(self, dummy_obs: FrozenDict[str, Array]) -> Normalizer:
-#     return Standardize(dummy_obs, alpha=1.0)
-
-# def get_cmd_normalizer(self, dummy_cmd: FrozenDict[str, Array]) -> Normalizer:
-#     return PassThrough()
-
 
 OBS_SIZE = (
     10 + 10 + 3 + 3 + 3 + 10 + 4
@@ -154,7 +147,7 @@ class KbotCritic(eqx.Module):
 
     def __init__(self, key: PRNGKeyArray) -> None:
         self.mlp = eqx.nn.MLP(
-            in_size=NUM_INPUTS + 2 + 2 + 10 + 3 + 4 + 3 + 3 + 1,
+            in_size=NUM_INPUTS + 2 + 2 + 10 + 3 + 4 + 3 + 3 + 1 + 6,
             out_size=1,  # Always output a single critic value.
             width_size=256,
             depth=5,
@@ -173,6 +166,7 @@ class KbotCritic(eqx.Module):
         projected_gravity_3: Array,
         feet_contact_2: Array,
         feet_air_time_2: Array,
+        feet_position_6: Array,
         actuator_force_n: Array,
         base_position_3: Array,
         base_orientation_4: Array,
@@ -195,6 +189,7 @@ class KbotCritic(eqx.Module):
                 # critic
                 feet_contact_2,
                 feet_air_time_2,
+                feet_position_6,
                 actuator_force_n,
                 base_position_3,
                 base_orientation_4,
@@ -424,8 +419,8 @@ class KbotWalkingHistoryPositionTask(KbotWalkingTask[Config], Generic[Config]):
             # Bring back ksim.FeetPositionObservation
             common.FeetPositionObservation.create(
                 physics_model=physics_model,
-                foot_left_geom_name="KB_D_501L_L_LEG_FOOT_collision_box",
-                foot_right_geom_name="KB_D_501R_R_LEG_FOOT_collision_box",
+                foot_left_site_name="left_foot",
+                foot_right_site_name="right_foot",
                 floor_threshold=0.00,
             ),
             common.FeetAirTimeObservation(),
@@ -593,7 +588,8 @@ class KbotWalkingHistoryPositionTask(KbotWalkingTask[Config], Generic[Config]):
         last_action_n = observations["last_action_observation"]
         projected_gravity_3 = observations["projected_gravity_observation"]
         feet_contact_2 = observations["feet_contact_observation"]
-        feet_air_time = observations["feet_air_time_observation"]
+        feet_air_time_2 = observations["feet_air_time_observation"]
+        feet_position_6 = observations["feet_position_observation"]
         base_position_3 = observations["base_position_observation"]
         base_orientation_4 = observations["base_orientation_observation"]
         base_linear_velocity_3 = observations["base_linear_velocity_observation"]
@@ -602,23 +598,26 @@ class KbotWalkingHistoryPositionTask(KbotWalkingTask[Config], Generic[Config]):
         true_height_1 = observations["true_height_observation"]
         actuator_force_n = observations["actuator_force_observation"]
         history_n = observations["history_observation"]
+        feet_position_2 = observations["feet_position_observation"]
+
         return model.critic(
             joint_pos_n,
             joint_vel_n,
             imu_acc_3,
             imu_gyro_3,
+            projected_gravity_3,
             lin_vel_cmd_2,
             last_action_n,
-            projected_gravity_3,
             phase_4,
             # critic
             feet_contact_2,
-            feet_air_time,
+            feet_air_time_2,
+            feet_position_6,
+            actuator_force_n,
             base_position_3,
             base_orientation_4,
             base_linear_velocity_3,
             base_angular_velocity_3,
-            actuator_force_n,
             true_height_1,
             history_n,
         )
