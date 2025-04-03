@@ -322,7 +322,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 pivot_name="KC_C_104R_PitchHardstopDriven",
                 base_name="floating_base_link",
                 sample_sphere_radius=0.5,
-                positive_x=False, # forward + backward
+                positive_x=False,  # forward + backward
                 positive_y=False,
                 positive_z=False,
                 switch_prob=self.config.ctrl_dt / 2,  # will last 2 seconds in expectation

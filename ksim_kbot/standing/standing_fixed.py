@@ -412,8 +412,10 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             DHHealthyReward(scale=0.5),
             ksim.ActuatorForcePenalty(scale=-0.01),
             ksim.BaseHeightReward(scale=1.0, height_target=0.9),
-            ksim.LinearVelocityTrackingPenalty(command_name="linear_velocity_step_command", scale=-0.05),
-            ksim.AngularVelocityTrackingPenalty(command_name="angular_velocity_step_command", scale=-0.05),
+            ksim.LinearVelocityTrackingReward(command_name="linear_velocity_step_command", scale=-0.05, index="x"),
+            ksim.LinearVelocityTrackingReward(command_name="linear_velocity_step_command", scale=-0.05, index="y"),
+            ksim.AngularVelocityTrackingReward(command_name="angular_velocity_step_command", scale=-0.05, index="x"),
+            ksim.AngularVelocityTrackingReward(command_name="angular_velocity_step_command", scale=-0.05, index="y"),
             FeetSlipPenalty(scale=-0.25),
         ]
 

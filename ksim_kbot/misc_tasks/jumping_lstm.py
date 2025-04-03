@@ -54,8 +54,10 @@ class KbotJumpingLSTMTask(KbotStandingLSTMTask[KbotJumpingLSTMTaskConfig]):
             UpwardReward(scale=0.5),
             StationaryPenalty(scale=-0.1),
             ksim.ActuatorForcePenalty(scale=-0.01),
-            ksim.LinearVelocityZPenalty(scale=-0.01),
-            ksim.AngularVelocityXYPenalty(scale=-0.01),
+            ksim.LinearVelocityPenalty(scale=-0.01, index="x"),
+            ksim.LinearVelocityPenalty(scale=-0.01, index="y"),
+            ksim.AngularVelocityPenalty(scale=-0.01, index="x"),
+            ksim.AngularVelocityPenalty(scale=-0.01, index="y"),
         ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
