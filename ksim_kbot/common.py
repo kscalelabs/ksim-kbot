@@ -12,12 +12,12 @@ import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray
 from ksim.utils.mujoco import (
-    get_geom_data_idx_from_name,
     get_qpos_data_idxs_by_name,
     get_sensor_data_idxs_by_name,
     get_site_data_idx_from_name,
 )
 from mujoco import mjx
+
 from ksim_kbot.utils import cubic_bezier_interpolation
 
 
@@ -241,6 +241,19 @@ class FeetAirTimeReward(ksim.Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class BasicFeetAirTimeReward(ksim.Reward):
+    """Reward for feet air time."""
+
+    scale: float = 1.0
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        first_contact = trajectory.reward_carry["first_contact"]  # type: ignore[attr-defined]
+        air_time = trajectory.reward_carry["feet_air_time"]  # type: ignore[attr-defined]
+        air_time = air_time * first_contact
+        return jnp.sum(air_time, axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
 class FeetPhaseReward(ksim.Reward):
     """Reward for tracking the desired foot height."""
 
@@ -270,7 +283,6 @@ class FeetPhaseReward(ksim.Reward):
         swing_height: Array | float = 0.08,
     ) -> Array:
         """Interpolation logic for the gait phase with clear separation."""
-
         stance_phase = phi > 0
         swing_phase = ~stance_phase  # phi <= 0
 
@@ -329,7 +341,7 @@ class PlaygroundFeetPhaseReward(ksim.Reward):
         stance = cubic_bezier_interpolation(0, swing_height, 2 * x)
         swing = cubic_bezier_interpolation(swing_height, 0, 2 * x - 1)
         return jnp.where(x <= 0.5, stance, swing)
-        
+
 
 @attrs.define(frozen=True, kw_only=True)
 class OrientationPenalty(ksim.Reward):
@@ -467,119 +479,3 @@ class TerminationPenalty(ksim.Reward):
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         return trajectory.done
-
-
-@attrs.define(frozen=True, kw_only=True)
-class BasicFeetAirTimeReward(ksim.Reward):
-    """Reward for feet air time."""
-
-    scale: float = 1.0
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        first_contact = trajectory.reward_carry["first_contact"]  # type: ignore[attr-defined]
-        air_time = trajectory.reward_carry["feet_air_time"]  # type: ignore[attr-defined]
-        air_time = (air_time) * first_contact
-
-        return jnp.sum(air_time, axis=-1)
-
-# TODO
-def get_phase_signal(self, time_curr: float | Array, cycle_time: float | Array = 0.72) -> Array:
-    """Calculate the phase signal as a sine and cosine pair for a given time.
-
-    Args:
-        time_curr (float | ArrayType): The current time or an array of time values.
-
-    Returns:
-        ArrayType: A numpy array containing the sine and cosine of the phase, with dtype float32.
-    """
-    phase_signal = jnp.array(
-        [
-            jnp.sin(2 * jnp.pi * time_curr / cycle_time),
-            jnp.cos(2 * jnp.pi * time_curr / cycle_time),
-        ],
-        dtype=jnp.float32,
-    )
-    return phase_signal
-
-
-@attrs.define(frozen=True, kw_only=True)
-class FeetDistanceReward(ksim.Reward):
-    """Reward for the distance between the feet.
-    
-    Penalizes positions where the feet are too close or too far apart on the y-axis.
-
-    Containing the rotation quaternion of the torso.
-    """
-
-    min_feet_y_dist: float = attrs.field(default=0.0)
-    max_feet_y_dist: float = attrs.field(default=0.0)
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        foot_pos = trajectory.obs[self.feet_pos_obs_name]
-        rotation_torso = trajectory.physics_state.data.qpos[3:7]
-        feet_vec = self._rotate_vec(
-            foot_pos[..., :3] - foot_pos[..., 3:],
-            self._quat_inv(rotation_torso),
-        )
-        feet_dist = jnp.abs(feet_vec[1])
-        d_min = jnp.clip(feet_dist - self.min_feet_y_dist, max=0.0)
-        d_max = jnp.clip(feet_dist - self.max_feet_y_dist, min=0.0)
-        reward = (jnp.exp(-jnp.abs(d_min) * 100) + jnp.exp(-jnp.abs(d_max) * 100)) / 2
-        return reward
-
-    def _rotate_vec(vector: Array, quat: Array):
-        """Rotate a vector using a quaternion.
-
-        Args:
-            vector (ArrayType): The vector to be rotated.
-            quat (ArrayType): The quaternion representing the rotation.
-
-        Returns:
-            ArrayType: The rotated vector.
-        """
-        v = jnp.array([0.0] + list(vector))
-        q_inv = self._quat_inv(quat)
-        v_rotated = self._quat_mult(self._quat_mult(quat, v), q_inv)
-        return v_rotated[1:]
-
-    def _quat_inv(quat: Array, order: str = "wxyz") -> Array:
-        """Calculates the inverse of a quaternion.
-
-        Args:
-            quat (ArrayType): A quaternion represented as an array of four elements.
-            order (str, optional): The order of the quaternion components. Either "wxyz" or "xyzw". Defaults to "wxyz".
-
-        Returns:
-            ArrayType: The inverse of the input quaternion.
-        """
-        if order == "xyzw":
-            x, y, z, w = quat
-        else:   
-            w, x, y, z = quat
-
-        norm = w**2 + x**2 + y**2 + z**2
-        return jnp.array([w, -x, -y, -z]) / jnp.sqrt(norm)
-
-    def _quat_mult(q1: Array, q2: Array, order: str = "wxyz") -> Array:
-        """Multiplies two quaternions and returns the resulting quaternion.
-
-        Args:
-            q1 (ArrayType): The first quaternion, represented as an array of four elements.
-            q2 (ArrayType): The second quaternion, represented as an array of four elements.
-            order (str, optional): The order of quaternion components, either "wxyz" or "xyzw". Defaults to "wxyz".
-
-        Returns:
-            ArrayType: The resulting quaternion from the multiplication, in the specified order.
-        """
-        if order == "wxyz":
-            w1, x1, y1, z1 = q1
-            w2, x2, y2, z2 = q2
-        else:
-            x1, y1, z1, w1 = q1
-            x2, y2, z2, w2 = q2
-
-        w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
-        x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
-        y = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
-        z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
-        return jnp.array([w, x, y, z])

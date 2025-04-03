@@ -18,26 +18,7 @@ from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
-from ksim_kbot.common import (
-    AngularVelocityTrackingReward,
-    AngularVelocityXYPenalty,
-    FeetAirTimeReward,
-    FeetPhaseReward,
-    FeetPositionObservation,
-    FeetSlipPenalty,
-    GVecTermination,
-    HipDeviationPenalty,
-    HistoryObservation,
-    JointDeviationPenalty,
-    JointPositionObservation,
-    KneeDeviationPenalty,
-    LastActionObservation,
-    LinearVelocityTrackingReward,
-    OrientationPenalty,
-    ProjectedGravityObservation,
-    ResetDefaultJointPosition,
-    TerminationPenalty,
-)
+from ksim_kbot import common
 from ksim_kbot.standing.standing import KbotStandingTask, KbotStandingTaskConfig
 
 OBS_SIZE = 10 * 2 + 3 + 3 + 20  # = 36 position + velocity + imu_acc + imu_gyro + last_action
@@ -317,7 +298,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             ksim.RandomBaseVelocityXYReset(scale=scale),
             ksim.RandomJointPositionReset(scale=scale),
             ksim.RandomJointVelocityReset(scale=scale),
-            ResetDefaultJointPosition(
+            common.ResetDefaultJointPosition(
                 default_targets=(
                     0.0,
                     0.0,
@@ -377,7 +358,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             noise = 0.0
 
         return [
-            JointPositionObservation(
+            common.JointPositionObservation(
                 default_targets=(
                     # right leg
                     -0.23,
@@ -410,15 +391,15 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 floor_geom_names="floor",
             ),
             # Bring back ksim.FeetPositionObservation
-            FeetPositionObservation.create(
+            common.FeetPositionObservation.create(
                 physics_model=physics_model,
                 foot_left_geom_name="KB_D_501L_L_LEG_FOOT_collision_box",
                 foot_right_geom_name="KB_D_501R_R_LEG_FOOT_collision_box",
                 floor_threshold=0.00,
             ),
-            LastActionObservation(),
-            ProjectedGravityObservation(noise=gvec_noise),
-            HistoryObservation(),
+            common.LastActionObservation(),
+            common.ProjectedGravityObservation(noise=gvec_noise),
+            common.HistoryObservation(),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="local_linvel_torso", noise=noise),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="global_linvel_torso", noise=noise),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="global_angvel_torso", noise=noise),
@@ -443,7 +424,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards = [
-            JointDeviationPenalty(
+            common.JointDeviationPenalty(
                 scale=-0.1,
                 joint_targets=(
                     # right leg
@@ -460,9 +441,9 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                     -0.195,
                 ),
             ),
-            TerminationPenalty(scale=-1.0),
-            OrientationPenalty(scale=-1.0),
-            HipDeviationPenalty.create(
+            common.TerminationPenalty(scale=-1.0),
+            common.OrientationPenalty(scale=-1.0),
+            common.HipDeviationPenalty.create(
                 physics_model,
                 hip_names=(
                     "dof_right_hip_roll_03",
@@ -486,7 +467,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 ),
                 scale=-0.25,
             ),
-            KneeDeviationPenalty.create(
+            common.KneeDeviationPenalty.create(
                 physics_model,
                 knee_names=("dof_left_knee_04", "dof_right_knee_04"),
                 joint_targets=(
@@ -505,9 +486,9 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 ),
                 scale=-0.1,
             ),
-            LinearVelocityTrackingReward(scale=1.0),
-            AngularVelocityTrackingReward(scale=0.75),
-            AngularVelocityXYPenalty(scale=-0.15),
+            common.LinearVelocityTrackingReward(scale=1.0),
+            common.AngularVelocityTrackingReward(scale=0.75),
+            common.AngularVelocityXYPenalty(scale=-0.15),
             # TODO: Add this back in.
             # AvoidLimitsReward(scale=0.1),
             # Either termination or healthy reward.
@@ -515,9 +496,9 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         ]
         if self.config.use_gait_rewards:
             gait_rewards: list[ksim.Reward] = [
-                FeetSlipPenalty(scale=-0.25),
-                FeetAirTimeReward(scale=2.0),
-                FeetPhaseReward(scale=1.0),
+                common.FeetSlipPenalty(scale=-0.25),
+                common.FeetAirTimeReward(scale=2.0),
+                common.FeetPhaseReward(scale=1.0),
             ]
             rewards += gait_rewards
 

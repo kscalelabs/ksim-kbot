@@ -19,7 +19,6 @@ from mujoco import mjx
 from ksim_kbot import common
 from ksim_kbot.walking.walking import KbotWalkingTask, KbotWalkingTaskConfig
 
-
 OBS_SIZE = (
     10 + 10 + 3 + 3 + 3 + 10 + 4
 )  # = 43 position_10 + joint_velocity_10 + imu_acc_3 + imu_gyro_3 + projected_gravity_3 + last_action_10 + phase_4
@@ -526,9 +525,9 @@ class KbotWalkingHistoryPositionTask(KbotWalkingTask[Config], Generic[Config]):
         if self.config.use_gait_rewards:
             gait_rewards = [
                 common.FeetSlipPenalty(scale=-0.25),
-                common.FeetAirTimeReward(scale=2.0),
-                common.FeetPhaseReward(max_foot_height=0.12, scale=1.0),
-                # Verify the logic
+                # common.FeetAirTimeReward(scale=2.0),
+                common.BasicFeetAirTimeReward(scale=2.0),
+                # common.FeetPhaseReward(max_foot_height=0.12, scale=1.0),
                 common.PlaygroundFeetPhaseReward(max_foot_height=0.12, scale=1.0),
             ]
             rewards += gait_rewards

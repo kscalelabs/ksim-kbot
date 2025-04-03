@@ -31,13 +31,6 @@ HISTORY_LENGTH = 0
 
 NUM_INPUTS = (OBS_SIZE + CMD_SIZE) + SINGLE_STEP_HISTORY_SIZE * HISTORY_LENGTH
 
-MAX_TORQUE = {
-    "00": 1.0,
-    "02": 30.0,
-    "03": 60.0,
-    "04": 100.0,
-}
-
 
 class ScaledTorqueActuators(ksim.Actuators):
     """Direct torque control."""
@@ -659,6 +652,6 @@ if __name__ == "__main__":
             export_for_inference=True,
             use_gait_rewards=True,
             domain_randomize=False,
-            light_domain_randomize=True
+            light_domain_randomize=True,
         ),
     )
