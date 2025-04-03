@@ -236,6 +236,8 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         temp_path = (
             (Path(self.config.robot_urdf_path) / f"robot_scene_joint_removed_{uuid.uuid4()}.mjcf").resolve().as_posix()
         )
+
+
         with open(temp_path, "w") as f:
             f.write(mj_model_joint_removed)
 
@@ -330,7 +332,6 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         return [
             ksim.CartesianBodyTargetCommand.create(
                 model=physics_model,
-                command_name="cartesian_body_target_command",
                 pivot_name="KC_C_104R_PitchHardstopDriven",
                 base_name="floating_base_link",
                 sample_sphere_radius=0.5,
@@ -344,7 +345,6 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.GlobalBodyQuaternionCommand.create(
                 model=physics_model,
                 base_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
-                command_name="quat_command",
                 switch_prob=self.config.ctrl_dt / 1,  # will last 1 seconds in expectation
                 vis_size=0.02,
                 null_prob=1.0,
@@ -365,11 +365,11 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 threshold=0.0001,  # with l2 norm, this is 1cm
                 time_bonus_scale=0.1,
                 time_sensitivity=0.05,
-                command_name="cartesian_body_target_command",
+                command_name="cartesian_body_target_command_KC_C_104R_PitchHardstopDriven",
             ),
             ksim.GlobalBodyQuaternionReward.create(
                 model=physics_model,
-                command_name="quat_command",
+                command_name="global_body_quaternion_command_KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
                 tracked_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
                 base_body_name="floating_base_link",
                 norm="l2",
@@ -378,15 +378,23 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             ),
             ksim.CartesianBodyTargetVectorReward.create(
                 model=physics_model,
-                command_name="cartesian_body_target_command",
+                command_name="cartesian_body_target_command_KC_C_104R_PitchHardstopDriven",
                 tracked_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
                 base_body_name="floating_base_link",
-                scale=0.3,
+                scale=0.4,
                 normalize_velocity=True,
                 distance_threshold=0.1,
                 dt=self.config.dt,
-            ),  
-            ksim.GeomContactPenalty(observation_name="contact", scale=-1.0),
+            ),
+            ksim.CartesianBodyTargetPenalty.create(
+                model=physics_model,
+                command_name="cartesian_body_target_command_KC_C_104R_PitchHardstopDriven",
+                tracked_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
+                base_body_name="floating_base_link",
+                norm="l2",
+                scale=-3.0,
+            ),
+            ksim.GeomContactPenalty(observation_name="contact", scale=-10.0),
             ksim.ActuatorForcePenalty(scale=-0.00001, norm="l1"),
             ksim.ActionSmoothnessPenalty(scale=-0.001, norm="l2"),
             ksim.JointVelocityPenalty(scale=-0.001, freejoint_first=False, norm="l2"),
@@ -413,8 +421,8 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
     ) -> distrax.Normal:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"] / 50.0
-        xyz_target_3 = commands["cartesian_body_target_command"]
-        quat_target_4 = commands["quat_command"]
+        xyz_target_3 = commands["cartesian_body_target_command_KC_C_104R_PitchHardstopDriven"]
+        quat_target_4 = commands["global_body_quaternion_command_KB_C_501X_Right_Bayonet_Adapter_Hard_Stop"]
         return model.actor(
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
@@ -431,8 +439,8 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         joint_pos_n = observations["joint_position_observation"]  # 26
         joint_vel_n = observations["joint_velocity_observation"] / 100.0  # 27
         actuator_force_n = observations["actuator_force_observation"]  # 27
-        xyz_target_3 = commands["cartesian_body_target_command"]  # 3
-        quat_target_4 = commands["quat_command"]  # 4
+        xyz_target_3 = commands["cartesian_body_target_command_KC_C_104R_PitchHardstopDriven"]  # 3
+        quat_target_4 = commands["global_body_quaternion_command_KB_C_501X_Right_Bayonet_Adapter_Hard_Stop"]  # 4
         return model.critic(
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
