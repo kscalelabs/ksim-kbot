@@ -2,6 +2,7 @@
 """Defines simple task for training a getup policy for K-Bot."""
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Generic, TypeVar
 
 import attrs
@@ -13,6 +14,7 @@ import ksim
 import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray
+from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
 from ksim_kbot.standing.standing import KbotStandingTask, KbotStandingTaskConfig
@@ -348,7 +350,7 @@ class KbotModel(eqx.Module):
 @dataclass
 class KbotGetupTaskConfig(KbotStandingTaskConfig):
     robot_urdf_path: str = xax.field(
-        value="ksim_kbot/kscale-assets/kbot-v2-lw-full/",
+        value="ksim_kbot/kscale-assets/kbot-v2-lw-feet/",
         help="The path to the assets directory for the robot.",
     )
 
@@ -357,6 +359,18 @@ Config = TypeVar("Config", bound=KbotGetupTaskConfig)
 
 
 class KbotGetupTask(KbotStandingTask[Config], Generic[Config]):
+    def get_mujoco_model(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
+        mjcf_path = (Path(self.config.robot_urdf_path) / "robot_scene_collisions_simplified.mjcf").resolve().as_posix()
+        mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
+
+        mj_model.opt.timestep = jnp.array(self.config.dt)
+        mj_model.opt.iterations = 6
+        mj_model.opt.ls_iterations = 6
+        mj_model.opt.disableflags = mjx.DisableBit.EULERDAMP
+        mj_model.opt.solver = mjx.SolverType.CG
+
+        return mj_model
+
     def get_model(self, key: PRNGKeyArray) -> KbotModel:
         return KbotModel(key)
 

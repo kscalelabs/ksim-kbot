@@ -15,17 +15,19 @@ import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
+from ksim.curriculum import ConstantCurriculum, Curriculum
+from ksim.task.ppo import PPOVariables
 from mujoco import mjx
 
 from ksim_kbot.common import (
     DHControlPenalty,
     DHHealthyReward,
-    HistoryObservation,
     JointDeviationPenalty,
     JointPositionObservation,
     LastActionObservation,
     ProjectedGravityObservation,
     ResetDefaultJointPosition,
+    # HistoryObservation,
 )
 
 OBS_SIZE = 20 * 2 + 3 + 40  # = 46 position + velocity + projected_gravity + last_action
@@ -91,16 +93,20 @@ class KbotActor(eqx.Module):
         joint_pos_n: Array,
         joint_vel_n: Array,
         projected_gravity_3: Array,
-        lin_vel_cmd_2: Array,
+        lin_vel_cmd_x: Array,
+        lin_vel_cmd_y: Array,
+        ang_vel_cmd_z: Array,
         last_action_n: Array,
-        history_n: Array,
+        # history_n: Array,
     ) -> distrax.Normal:
         x_n = jnp.concatenate(
             [
                 joint_pos_n,
                 joint_vel_n,
                 projected_gravity_3,
-                lin_vel_cmd_2,
+                lin_vel_cmd_x,
+                lin_vel_cmd_y,
+                ang_vel_cmd_z,
                 last_action_n,
                 # history_n,
             ],
@@ -267,6 +273,41 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             raise ValueError("Joint metadata is not available")
         return metadata.joint_name_to_metadata
 
+    def get_on_policy_variables(
+        self, model: KbotModel, trajectories: ksim.Trajectory, rng: PRNGKeyArray
+    ) -> PPOVariables:
+        """Gets PPO variables using the policy that generated the trajectory."""
+        if trajectories.aux_outputs is None:
+            raise ValueError("No aux outputs found in trajectories")
+        if not isinstance(trajectories.aux_outputs, AuxOutputs):
+            raise TypeError(f"Expected AuxOutputs, got {type(trajectories.aux_outputs)}")
+        if not hasattr(trajectories.aux_outputs, "log_probs") or not hasattr(trajectories.aux_outputs, "values"):
+            raise AttributeError("AuxOutputs object missing required attributes 'log_probs' or 'values'")
+        return PPOVariables(
+            log_probs_tn=trajectories.aux_outputs.log_probs,
+            values_t=trajectories.aux_outputs.values,
+        )
+
+    def get_off_policy_variables(
+        self, model: KbotModel, trajectories: ksim.Trajectory, rng: PRNGKeyArray
+    ) -> PPOVariables:
+        """Gets PPO variables using the current (potentially updated) policy."""
+        # Recalculate log_probs with the current model
+        par_actor_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0))
+        action_dist_btn = par_actor_fn(model, trajectories.obs, trajectories.command)
+        log_probs_tn = action_dist_btn.log_prob(trajectories.action)
+        # Recalculate values with the current model
+        par_critic_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
+        values_bt1 = par_critic_fn(model, trajectories.obs, trajectories.command)
+        values_t = values_bt1.squeeze(-1)
+        # Optionally compute entropy here if needed for entropy bonus
+        # entropy_tn = action_dist_btn.entropy()
+        return PPOVariables(
+            log_probs_tn=log_probs_tn,
+            values_t=values_t,
+            # entropy_tn=entropy_tn, # Uncomment if using entropy bonus
+        )
+
     def get_actuators(
         self,
         physics_model: ksim.PhysicsModel,
@@ -387,6 +428,11 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         else:
             return []
 
+    def get_curriculum(self, physics_model: ksim.PhysicsModel) -> Curriculum:
+        """Returns the curriculum for the task."""
+        # Using a constant curriculum (max difficulty) as a default
+        return ConstantCurriculum(level=1.0)
+
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
             JointPositionObservation(
@@ -421,26 +467,27 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ksim.JointVelocityObservation(noise=0.5),
             ksim.ActuatorForceObservation(),
             ProjectedGravityObservation(noise=0.0),
-            # ksim.SensorObservation.create(physics_model, "imu_acc", noise=0.5),
-            # ksim.SensorObservation.create(physics_model, "imu_gyro", noise=0.2),
+            ksim.SensorObservation.create(
+                physics_model=physics_model,
+                sensor_name="imu_acc",
+                noise=0.5,
+            ),
+            ksim.SensorObservation.create(
+                physics_model=physics_model,
+                sensor_name="imu_gyro",
+                noise=0.2,
+            ),
             LastActionObservation(noise=0.0),
-            HistoryObservation(),
+            # NOTE: bring it back
+            # HistoryObservation(),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
+        switch_prob = self.config.ctrl_dt / 5
         return [
-            ksim.LinearVelocityStepCommand(
-                x_range=(0.0, 0.0),
-                y_range=(0.0, 0.0),
-                x_fwd_prob=0.8,
-                y_fwd_prob=0.5,
-                x_zero_prob=0.2,
-                y_zero_prob=0.8,
-            ),
-            ksim.AngularVelocityStepCommand(
-                scale=0.0,
-                zero_prob=1.0,
-            ),
+            ksim.LinearVelocityCommand(index="x", range=(-1.0, 2.5), zero_prob=0.1, switch_prob=switch_prob),
+            ksim.LinearVelocityCommand(index="y", range=(-0.3, 0.3), zero_prob=0.9, switch_prob=switch_prob),
+            ksim.AngularVelocityCommand(index="z", scale=0.2, zero_prob=0.9, switch_prob=switch_prob),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
@@ -478,10 +525,9 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             DHHealthyReward(scale=0.5),
             ksim.ActuatorForcePenalty(scale=-0.01),
             ksim.BaseHeightReward(scale=1.0, height_target=0.9),
-            ksim.LinearVelocityTrackingPenalty(command_name="linear_velocity_step_command", scale=-0.05),
-            ksim.AngularVelocityTrackingPenalty(command_name="angular_velocity_step_command", scale=-0.05),
-            # FeetSlipPenalty(scale=-0.01),
-            # ksim.ActionSmoothnessPenalty(scale=-0.01),
+            ksim.LinearVelocityTrackingReward(index="x", command_name="linear_velocity_command_x", scale=1.0),
+            ksim.LinearVelocityTrackingReward(index="y", command_name="linear_velocity_command_y", scale=0.1),
+            ksim.AngularVelocityTrackingReward(index="z", command_name="angular_velocity_command_z", scale=0.01),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -505,10 +551,21 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
         projected_gravity_3 = observations["projected_gravity_observation"]
-        lin_vel_cmd_2 = commands["linear_velocity_step_command"]
+        lin_vel_cmd_x = commands["linear_velocity_command_x"]
+        lin_vel_cmd_y = commands["linear_velocity_command_y"]
+        ang_vel_cmd_z = commands["angular_velocity_command_z"]
         last_action_n = observations["last_action_observation"]
-        history_n = observations["history_observation"]
-        return model.actor(joint_pos_n, joint_vel_n, projected_gravity_3, lin_vel_cmd_2, last_action_n, history_n)
+        # history_n = observations["history_observation"]
+        return model.actor(
+            joint_pos_n,
+            joint_vel_n,
+            projected_gravity_3,
+            lin_vel_cmd_x,
+            lin_vel_cmd_y,
+            ang_vel_cmd_z,
+            last_action_n,
+            # history_n,
+        )
 
     def _run_critic(
         self,
@@ -519,10 +576,21 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
         projected_gravity_3 = observations["projected_gravity_observation"]
-        lin_vel_cmd_2 = commands["linear_velocity_step_command"]
+        lin_vel_cmd_x = commands["linear_velocity_command_x"]
+        lin_vel_cmd_y = commands["linear_velocity_command_y"]
+        ang_vel_cmd_z = commands["angular_velocity_command_z"]
         last_action_n = observations["last_action_observation"]
-        history_n = observations["history_observation"]
-        return model.critic(joint_pos_n, joint_vel_n, projected_gravity_3, lin_vel_cmd_2, last_action_n, history_n)
+        # history_n = observations["history_observation"]
+        return model.critic(
+            joint_pos_n,
+            joint_vel_n,
+            projected_gravity_3,
+            lin_vel_cmd_x,
+            lin_vel_cmd_y,
+            ang_vel_cmd_z,
+            last_action_n,
+            # history_n,
+        )
 
     def get_on_policy_log_probs(
         self,
@@ -595,14 +663,18 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
         projected_gravity_3 = observations["projected_gravity_observation"]
-        lin_vel_cmd_2 = commands["linear_velocity_step_command"]
+        lin_vel_cmd_x = commands["linear_velocity_command_x"]
+        lin_vel_cmd_y = commands["linear_velocity_command_y"]
+        ang_vel_cmd_z = commands["angular_velocity_command_z"]
         last_action_n = observations["last_action_observation"]
         history_n = jnp.concatenate(
             [
                 joint_pos_n,
                 joint_vel_n,
                 projected_gravity_3,
-                lin_vel_cmd_2,
+                lin_vel_cmd_x,
+                lin_vel_cmd_y,
+                ang_vel_cmd_z,
                 last_action_n,
                 action_n,
             ],

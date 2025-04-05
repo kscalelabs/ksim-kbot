@@ -15,11 +15,36 @@ from ksim.utils.mujoco import get_geom_data_idx_from_name, get_qpos_data_idxs_by
 from mujoco import mjx
 
 
+class ScaledTorqueActuators(ksim.Actuators):
+    """Direct torque control."""
+
+    def __init__(
+        self,
+        default_targets: Array,
+        action_scale: float = 0.5,
+        noise: float = 0.0,
+        noise_type: ksim.actuators.NoiseType = "none",
+    ) -> None:
+        super().__init__()
+
+        self._action_scale = action_scale
+        self.noise = noise
+        self.noise_type = noise_type
+        self.default_targets = default_targets
+
+    def get_ctrl(self, action: Array, physics_data: ksim.PhysicsData, rng: PRNGKeyArray) -> Array:
+        """Use the scaled action as the torque."""
+        action = self.default_targets + action * self._action_scale
+        return self.add_noise(self.noise, self.noise_type, action, rng)
+
+
 @attrs.define(frozen=True)
 class HistoryObservation(ksim.Observation):
-    def observe(self, state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
+        breakpoint()
         if not isinstance(state.carry, Array):
             raise ValueError("Carry is not a history array")
+
         return state.carry
 
 
@@ -28,8 +53,8 @@ class JointPositionObservation(ksim.Observation):
     default_targets: tuple[float, ...] = attrs.field()
     noise: float = attrs.field(default=0.0)
 
-    def observe(self, rollout_state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
-        qpos = rollout_state.physics_state.data.qpos[7:]  # (N,)
+    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
+        qpos = state.physics_state.data.qpos[7:]  # (N,)
         diff = qpos - jnp.array(self.default_targets)
         return diff
 
@@ -38,7 +63,7 @@ class JointPositionObservation(ksim.Observation):
 class ProjectedGravityObservation(ksim.Observation):
     noise: float = attrs.field(default=0.0)
 
-    def observe(self, state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
         gvec = xax.get_projected_gravity_vector_from_quat(state.physics_state.data.qpos[3:7])
         return gvec
 
@@ -47,8 +72,8 @@ class ProjectedGravityObservation(ksim.Observation):
 class LastActionObservation(ksim.Observation):
     noise: float = attrs.field(default=0.0)
 
-    def observe(self, rollout_state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
-        return rollout_state.physics_state.most_recent_action
+    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
+        return state.physics_state.most_recent_action
 
 
 @attrs.define(frozen=True)
@@ -74,11 +99,9 @@ class FeetPositionObservation(ksim.Observation):
             floor_threshold=floor_threshold,
         )
 
-    def observe(self, rollout_state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
-        foot_left_pos = rollout_state.physics_state.data.geom_xpos[self.foot_left] + jnp.array(
-            [0.0, 0.0, self.floor_threshold]
-        )
-        foot_right_pos = rollout_state.physics_state.data.geom_xpos[self.foot_right] + jnp.array(
+    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
+        foot_left_pos = state.physics_state.data.geom_xpos[self.foot_left] + jnp.array([0.0, 0.0, self.floor_threshold])
+        foot_right_pos = state.physics_state.data.geom_xpos[self.foot_right] + jnp.array(
             [0.0, 0.0, self.floor_threshold]
         )
         return jnp.concatenate([foot_left_pos, foot_right_pos], axis=-1)
@@ -107,7 +130,7 @@ class ResetDefaultJointPosition(ksim.Reset):
 
     default_targets: tuple[float, ...] = attrs.field()
 
-    def __call__(self, data: ksim.PhysicsData, rng: PRNGKeyArray) -> ksim.PhysicsData:
+    def __call__(self, data: ksim.PhysicsData, curriculum: ksim.Curriculum, rng: PRNGKeyArray) -> ksim.PhysicsData:
         qpos = data.qpos
         match type(data):
             case mujoco.MjData:
