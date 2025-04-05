@@ -30,8 +30,8 @@ from ksim_kbot.common import (
     # HistoryObservation,
 )
 
-OBS_SIZE = 20 * 2 + 3 + 40  # = 46 position + velocity + projected_gravity + last_action
-CMD_SIZE = 2
+OBS_SIZE = 20 * 2  + 3 + 40  # = 83 position + projected_gravity + last_action
+CMD_SIZE = 3
 NUM_OUTPUTS = 20 * 2  # position + velocity
 
 SINGLE_STEP_HISTORY_SIZE = NUM_OUTPUTS + OBS_SIZE + CMD_SIZE
@@ -112,7 +112,6 @@ class KbotActor(eqx.Module):
             ],
             axis=-1,
         )  # (NUM_INPUTS)
-
         return self.call_flat_obs(x_n)
 
     def call_flat_obs(
@@ -152,16 +151,20 @@ class KbotCritic(eqx.Module):
         joint_pos_n: Array,
         joint_vel_n: Array,
         projected_gravity_3: Array,
-        lin_vel_cmd_2: Array,
+        lin_vel_cmd_x: Array,
+        lin_vel_cmd_y: Array,
+        ang_vel_cmd_z: Array,
         last_action_n: Array,
-        history_n: Array,
+        # history_n: Array,
     ) -> Array:
         x_n = jnp.concatenate(
             [
                 joint_pos_n,
                 joint_vel_n,
                 projected_gravity_3,
-                lin_vel_cmd_2,
+                lin_vel_cmd_x,
+                lin_vel_cmd_y,
+                ang_vel_cmd_z,
                 last_action_n,
                 # history_n,
             ],
@@ -360,13 +363,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                 ksim.JointZeroPositionRandomization(scale_lower=-0.05, scale_upper=0.05),
                 ksim.ArmatureRandomization(scale_lower=1.0, scale_upper=1.05),
                 ksim.MassMultiplicationRandomization.from_body_name(physics_model, "Torso_Side_Right"),
-                ksim.JointDampingRandomization(scale_lower=0.95, scale_upper=1.05),
-                # ksim.FloorFrictionRandomization.from_body_name(
-                #     model=physics_model,
-                #     scale_lower=0.2,
-                #     scale_upper=0.6,
-                #     floor_body_name="floor",
-                # ),
+                ksim.JointDampingRandomization(scale_lower=0.95, scale_upper=1.05)
             ]
         else:
             return []
@@ -676,7 +673,6 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                 lin_vel_cmd_y,
                 ang_vel_cmd_z,
                 last_action_n,
-                action_n,
             ],
             axis=-1,
         )
