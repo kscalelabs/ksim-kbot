@@ -11,7 +11,7 @@ import ksim
 import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray
-from ksim.utils.mujoco import get_geom_data_idx_from_name, get_qpos_data_idxs_by_name, get_sensor_data_idxs_by_name
+from ksim.utils.mujoco import get_qpos_data_idxs_by_name, get_sensor_data_idxs_by_name, get_site_data_idx_from_name
 from mujoco import mjx
 
 
@@ -36,16 +36,6 @@ class ScaledTorqueActuators(ksim.Actuators):
         """Use the scaled action as the torque."""
         action = self.default_targets + action * self._action_scale
         return self.add_noise(self.noise, self.noise_type, action, rng)
-
-
-@attrs.define(frozen=True)
-class HistoryObservation(ksim.Observation):
-    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
-        breakpoint()
-        if not isinstance(state.carry, Array):
-            raise ValueError("Carry is not a history array")
-
-        return state.carry
 
 
 @attrs.define(frozen=True)
@@ -77,6 +67,14 @@ class LastActionObservation(ksim.Observation):
 
 
 @attrs.define(frozen=True)
+class TrueHeightObservation(ksim.Observation):
+    """Observation of the true height of the body."""
+
+    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
+        return jnp.atleast_1d(state.physics_state.data.qpos[2])
+
+
+@attrs.define(frozen=True)
 class FeetPositionObservation(ksim.Observation):
     foot_left: int = attrs.field()
     foot_right: int = attrs.field()
@@ -87,21 +85,23 @@ class FeetPositionObservation(ksim.Observation):
         cls,
         *,
         physics_model: ksim.PhysicsModel,
-        foot_left_geom_name: str,
-        foot_right_geom_name: str,
+        foot_left_site_name: str,
+        foot_right_site_name: str,
         floor_threshold: float = 0.0,
     ) -> Self:
-        foot_left_idx = get_geom_data_idx_from_name(physics_model, foot_left_geom_name)
-        foot_right_idx = get_geom_data_idx_from_name(physics_model, foot_right_geom_name)
+        foot_left_idx = get_site_data_idx_from_name(physics_model, foot_left_site_name)
+        foot_right_idx = get_site_data_idx_from_name(physics_model, foot_right_site_name)
         return cls(
             foot_left=foot_left_idx,
             foot_right=foot_right_idx,
             floor_threshold=floor_threshold,
         )
 
-    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
-        foot_left_pos = state.physics_state.data.geom_xpos[self.foot_left] + jnp.array([0.0, 0.0, self.floor_threshold])
-        foot_right_pos = state.physics_state.data.geom_xpos[self.foot_right] + jnp.array(
+    def observe(self, rollout_state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
+        foot_left_pos = rollout_state.physics_state.data.site_xpos[self.foot_left] + jnp.array(
+            [0.0, 0.0, self.floor_threshold]
+        )
+        foot_right_pos = rollout_state.physics_state.data.site_xpos[self.foot_right] + jnp.array(
             [0.0, 0.0, self.floor_threshold]
         )
         return jnp.concatenate([foot_left_pos, foot_right_pos], axis=-1)
@@ -114,7 +114,7 @@ class GVecTermination(ksim.Termination):
     sensor_idx_range: tuple[int, int | None] = attrs.field()
     min_z: float = attrs.field(default=0.0)
 
-    def __call__(self, state: ksim.PhysicsData) -> Array:
+    def __call__(self, state: ksim.PhysicsData, curriculum_level: Array) -> Array:
         start, end = self.sensor_idx_range
         return state.sensordata[start:end][-1] < self.min_z
 
@@ -416,5 +416,5 @@ class TerminationPenalty(ksim.Reward):
 
     scale: float = attrs.field(default=-1.0)
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+    def __call__(self, trajectory: ksim.Trajectory, curriculum_level: Array) -> Array:
         return trajectory.done

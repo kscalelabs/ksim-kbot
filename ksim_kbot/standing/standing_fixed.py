@@ -326,7 +326,6 @@ class KbotStandingFixedTask(KbotStandingTask[KbotStandingFixedTaskConfig], Gener
                 foot_right_body_name="KB_D_501R_R_LEG_FOOT",
             ),
             common.LastActionObservation(noise=0.0),
-            # HistoryObservation(),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:

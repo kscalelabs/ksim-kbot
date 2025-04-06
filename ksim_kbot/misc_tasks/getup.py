@@ -116,14 +116,6 @@ class HeightOrientationObservation(ksim.Observation):
 
 
 @attrs.define(frozen=True)
-class HistoryObservation(ksim.Observation):
-    def observe(self, state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
-        if not isinstance(state.carry, Array):
-            raise ValueError("Carry is not a history array")
-        return state.carry
-
-
-@attrs.define(frozen=True)
 class JointPositionObservation(ksim.Observation):
     noise: float = attrs.field(default=0.0)
     default_targets: tuple[float, ...] = attrs.field(
@@ -425,7 +417,6 @@ class KbotGetupTask(KbotStandingTask[Config], Generic[Config]):
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_acc", noise=0.0),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_gyro", noise=0.0),
             LastActionObservation(noise=0.0),
-            HistoryObservation(),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
