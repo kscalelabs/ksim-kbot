@@ -11,16 +11,15 @@ import jax
 import jax.numpy as jnp
 import ksim
 import mujoco
-import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
 from ksim_kbot import common
-from ksim_kbot.standing.standing import KbotStandingTask, KbotStandingTaskConfig
+from ksim_kbot.standing.standing import MAX_TORQUE, KbotStandingTask, KbotStandingTaskConfig
 
 OBS_SIZE = 10 * 2 + 3 + 3 + 3 + 20  # = 38 position + velocity + imu_acc + imu_gyro + last_action
-CMD_SIZE = 2
+CMD_SIZE = 3
 NUM_OUTPUTS = 10 * 2  # position + velocity
 
 SINGLE_STEP_HISTORY_SIZE = NUM_OUTPUTS + OBS_SIZE + CMD_SIZE
@@ -28,13 +27,6 @@ SINGLE_STEP_HISTORY_SIZE = NUM_OUTPUTS + OBS_SIZE + CMD_SIZE
 HISTORY_LENGTH = 0
 
 NUM_INPUTS = (OBS_SIZE + CMD_SIZE) + SINGLE_STEP_HISTORY_SIZE * HISTORY_LENGTH
-
-MAX_TORQUE = {
-    "00": 1.0,
-    "02": 17.0,
-    "03": 40.0,
-    "04": 60.0,
-}
 
 
 @jax.tree_util.register_dataclass
@@ -81,9 +73,12 @@ class KbotActor(eqx.Module):
         joint_vel_n: Array,
         imu_acc_3: Array,
         imu_gyro_3: Array,
-        lin_vel_cmd_2: Array,
+        projected_gravity_3: Array,
+        lin_vel_cmd_x: Array,
+        lin_vel_cmd_y: Array,
+        ang_vel_cmd_z: Array,
         last_action_n: Array,
-        history_n: Array,
+        # history_n: Array,
     ) -> distrax.Normal:
         x_n = jnp.concatenate(
             [
@@ -91,12 +86,15 @@ class KbotActor(eqx.Module):
                 joint_vel_n,
                 imu_acc_3,
                 imu_gyro_3,
-                lin_vel_cmd_2,
+                projected_gravity_3,
+                lin_vel_cmd_x,
+                lin_vel_cmd_y,
+                ang_vel_cmd_z,
                 last_action_n,
                 # history_n,
             ],
             axis=-1,
-        )  # (NUM_INPUTS)
+        )
 
         return self.call_flat_obs(x_n)
 
@@ -138,16 +136,19 @@ class KbotCritic(eqx.Module):
         joint_vel_n: Array,
         imu_acc_3: Array,
         imu_gyro_3: Array,
-        lin_vel_cmd_2: Array,
-        last_action_n: Array,
         projected_gravity_3: Array,
-        feet_contact_2: Array,
-        actuator_force_n: Array,
-        base_position_3: Array,
-        base_orientation_4: Array,
-        base_linear_velocity_3: Array,
-        base_angular_velocity_3: Array,
-        history_n: Array,
+        lin_vel_cmd_x: Array,
+        lin_vel_cmd_y: Array,
+        ang_vel_cmd_z: Array,
+        last_action_n: Array,
+        # NOTE - bring this back in
+        # feet_contact_2: Array,
+        # actuator_force_n: Array,
+        # base_position_3: Array,
+        # base_orientation_4: Array,
+        # base_linear_velocity_3: Array,
+        # base_angular_velocity_3: Array,
+        # history_n: Array,
     ) -> Array:
         x_n = jnp.concatenate(
             [
@@ -155,19 +156,21 @@ class KbotCritic(eqx.Module):
                 joint_vel_n,
                 imu_acc_3,
                 imu_gyro_3,
-                lin_vel_cmd_2,
-                last_action_n,
                 projected_gravity_3,
-                feet_contact_2,
-                actuator_force_n,
-                base_position_3,
-                base_orientation_4,
-                base_linear_velocity_3,
-                base_angular_velocity_3,
+                lin_vel_cmd_x,
+                lin_vel_cmd_y,
+                ang_vel_cmd_z,
+                last_action_n,
+                # feet_contact_2,
+                # actuator_force_n,
+                # base_position_3,
+                # base_orientation_4,
+                # base_linear_velocity_3,
+                # base_angular_velocity_3,
                 # history_n,
             ],
             axis=-1,
-        )  # (NUM_INPUTS)
+        )
         return self.mlp(x_n)
 
 
@@ -261,7 +264,7 @@ class KbotStandingFixedTask(KbotStandingTask[KbotStandingFixedTaskConfig], Gener
                 default_targets=(
                     0.0,
                     0.0,
-                    0.91,
+                    0.9,
                     1.0,
                     0.0,
                     0.0,
@@ -360,53 +363,6 @@ class KbotStandingFixedTask(KbotStandingTask[KbotStandingFixedTaskConfig], Gener
 
     def get_initial_carry(self, rng: PRNGKeyArray) -> Array:
         return jnp.zeros(HISTORY_LENGTH * SINGLE_STEP_HISTORY_SIZE)
-
-    def sample_action(
-        self,
-        model: KbotModel,
-        carry: Array,
-        physics_model: ksim.PhysicsModel,
-        physics_state: ksim.PhysicsState,
-        observations: xax.FrozenDict[str, Array],
-        commands: xax.FrozenDict[str, Array],
-        rng: PRNGKeyArray,
-    ) -> tuple[Array, Array, AuxOutputs]:
-        action_dist_n = self._run_actor(model, observations, commands)
-        action_n = action_dist_n.sample(seed=rng)
-        action_log_prob_n = action_dist_n.log_prob(action_n)
-
-        critic_n = self._run_critic(model, observations, commands)
-        value_n = critic_n.squeeze(-1)
-
-        joint_pos_n = observations["joint_position_observation"]
-        joint_vel_n = observations["joint_velocity_observation"]
-        imu_acc_3 = observations["imu_acc_obs"]
-        imu_gyro_3 = observations["imu_gyro_obs"]
-        lin_vel_cmd_2 = commands["linear_velocity_step_command"]
-        last_action_n = observations["last_action_observation"]
-        history_n = jnp.concatenate(
-            [
-                joint_pos_n,
-                joint_vel_n,
-                imu_acc_3,
-                imu_gyro_3,
-                lin_vel_cmd_2,
-                last_action_n,
-                action_n,
-            ],
-            axis=-1,
-        )
-
-        if HISTORY_LENGTH > 0:
-            # Roll the history by shifting the existing history and adding the new data
-            carry_reshaped = carry.reshape(HISTORY_LENGTH, SINGLE_STEP_HISTORY_SIZE)
-            shifted_history = jnp.roll(carry_reshaped, shift=-1, axis=0)
-            new_history = shifted_history.at[HISTORY_LENGTH - 1].set(history_n)
-            history_n = new_history.reshape(-1)
-        else:
-            history_n = jnp.zeros(0)
-
-        return action_n, history_n, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
 
 
 if __name__ == "__main__":

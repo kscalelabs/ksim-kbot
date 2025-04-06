@@ -32,9 +32,9 @@ NUM_INPUTS = (OBS_SIZE + CMD_SIZE) + SINGLE_STEP_HISTORY_SIZE * HISTORY_LENGTH
 
 MAX_TORQUE = {
     "00": 1.0,
-    "02": 14.0,
-    "03": 40.0,
-    "04": 60.0,
+    "02": 17.0,
+    "03": 60.0,
+    "04": 80.0,
 }
 
 Config = TypeVar("Config", bound="KbotStandingTaskConfig")
@@ -167,7 +167,7 @@ class KbotCritic(eqx.Module):
                 # history_n,
             ],
             axis=-1,
-        )  # (NUM_INPUTS)
+        )
         return self.mlp(x_n)
 
 
@@ -343,7 +343,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                 default_targets=(
                     0.0,
                     0.0,
-                    1.0,
+                    0.9,
                     # quat
                     1.0,
                     0.0,
@@ -381,13 +381,13 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         if self.config.domain_randomize:
             return [
                 ksim.PushEvent(
-                    x_force=1.0,
-                    y_force=1.0,
+                    x_force=2.0,
+                    y_force=2.0,
                     z_force=0.0,
                     x_angular_force=0.0,
                     y_angular_force=0.0,
                     z_angular_force=0.0,
-                    interval_range=(0.25, 0.75),
+                    interval_range=(4.0, 7.0),
                 ),
             ]
         else:
@@ -503,11 +503,12 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         return KbotModel(key)
 
     def get_initial_carry(self, rng: PRNGKeyArray) -> Array:
-        return jnp.zeros(HISTORY_LENGTH * SINGLE_STEP_HISTORY_SIZE)
+        # return jnp.zeros(HISTORY_LENGTH * SINGLE_STEP_HISTORY_SIZE)
+        return None
 
     def _run_actor(
         self,
-        model: KbotModel,
+        model: KbotActor,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
     ) -> distrax.Normal:
@@ -536,7 +537,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
 
     def _run_critic(
         self,
-        model: KbotModel,
+        model: KbotCritic,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
     ) -> Array:
@@ -592,7 +593,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> tuple[Array, Array, AuxOutputs]:
-        action_dist_n = self._run_actor(model, observations, commands)
+        action_dist_n = self._run_actor(model.actor, observations, commands)
         action_j = action_dist_n.sample(seed=rng)
 
         joint_pos_n = observations["joint_position_observation"]
@@ -628,7 +629,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         else:
             history_n = jnp.zeros(0)
 
-        return ksim.Action(action=action_j, carry=history_n, aux_outputs=None)
+        return ksim.Action(action=action_j, carry=None, aux_outputs=None)
 
 
 if __name__ == "__main__":
