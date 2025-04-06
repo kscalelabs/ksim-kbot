@@ -352,7 +352,7 @@ if __name__ == "__main__":
             bvh_scaling_factor=1 / 135,
             mj_base_name="Torso_Side_Right",
             reference_base_name="CC_Base_Pelvis",
-            visualize_reference_gait=False,
+            visualize_reference_gait=True,
             use_mit_actuators=True,
         ),
     )
