@@ -220,6 +220,20 @@ class KbotStandingFixedTask(KbotStandingTask[KbotStandingFixedTaskConfig], Gener
             return ksim.MITPositionVelocityActuators(
                 physics_model,
                 metadata,
+                default_targets=[
+                    # right leg
+                    -0.23,
+                    0.0,
+                    0.0,
+                    -0.441,
+                    0.195,
+                    # left leg
+                    0.23,
+                    0.0,
+                    0.0,
+                    0.441,
+                    -0.195,
+                ],
                 pos_action_noise=0.1,
                 vel_action_noise=0.1,
                 pos_action_noise_type="gaussian",
