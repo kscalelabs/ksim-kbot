@@ -22,17 +22,12 @@ from ksim.utils.mujoco import remove_joints_except
 from mujoco import mjx
 from xax.nn.export import export
 
+from ksim_kbot.standing.standing import MAX_TORQUE
+
 NUM_JOINTS = 5  # disabling all DoFs except for the right arm.
 
 NUM_INPUTS = NUM_JOINTS + NUM_JOINTS + 3 + 4
 NUM_OUTPUTS = NUM_JOINTS * 2
-
-MAX_TORQUE = {
-    "00": 1.0,
-    "02": 14.0,
-    "03": 40.0,
-    "04": 60.0,
-}
 
 
 @jax.tree_util.register_dataclass

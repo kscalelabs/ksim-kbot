@@ -1,6 +1,6 @@
 """Common rewards for K-Bot 2.
 
-If some logic will become more general, we can move them to ksim or xax.
+If some logic will become more general, we can move it to ksim or xax.
 """
 
 from typing import Self
@@ -217,7 +217,7 @@ class TerminationPenalty(ksim.Reward):
         return trajectory.done
 
 
-# Gate stateful rewardw for reference
+# Gate stateful rewards for reference
 
 
 @attrs.define(frozen=True, kw_only=True)

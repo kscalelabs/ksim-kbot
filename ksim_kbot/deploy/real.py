@@ -214,7 +214,7 @@ async def main(model_path: str, ip: str, episode_length: int) -> None:
     logger.info("Episode finished!")
 
 
-# python -m ksim_kbot.deplot.real --model_path /path/to/model
+# python -m ksim_kbot.deploy.real --model_path /path/to/model
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_path", type=str, required=True)

@@ -18,7 +18,7 @@ from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
 from ksim_kbot import common
-from ksim_kbot.standing.standing import KbotStandingTask, KbotStandingTaskConfig
+from ksim_kbot.standing.standing import MAX_TORQUE, KbotStandingTask, KbotStandingTaskConfig
 
 OBS_SIZE = 20 * 2 + 2 + 3 + 3 + 3 + 40  # = position + velocity + imu_acc + imu_gyro + projected_gravity + last_action
 CMD_SIZE = 3
@@ -29,20 +29,6 @@ SINGLE_STEP_HISTORY_SIZE = NUM_OUTPUTS + OBS_SIZE + CMD_SIZE
 HISTORY_LENGTH = 0
 
 NUM_INPUTS = (OBS_SIZE + CMD_SIZE) + SINGLE_STEP_HISTORY_SIZE * HISTORY_LENGTH
-
-MAX_TORQUE = {
-    "00": 1.0,
-    "02": 17.0,
-    "03": 60.0,
-    "04": 80.0,
-}
-
-
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class AuxOutputs:
-    log_probs: Array
-    values: Array
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -612,7 +598,7 @@ class KbotGetupTask(KbotStandingTask[Config], Generic[Config]):
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
-            EnergyTermination(energy_termination_threshold=100.0),
+            EnergyTermination(energy_termination_threshold=700.0),
         ]
 
     def get_model(self, key: PRNGKeyArray) -> KbotModel:
