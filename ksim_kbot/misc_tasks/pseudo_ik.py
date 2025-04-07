@@ -23,9 +23,8 @@ from ksim.utils.mujoco import remove_joints_except
 from mujoco import mjx
 from xax.nn.export import export
 
-from ksim_kbot.standing.standing import MAX_TORQUE
-
 import ksim_kbot.common
+from ksim_kbot.standing.standing import MAX_TORQUE
 
 NUM_JOINTS = 5  # disabling all DoFs except for the right arm.
 

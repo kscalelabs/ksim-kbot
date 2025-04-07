@@ -355,7 +355,7 @@ class HipDeviationPenalty(ksim.Reward):
         scale: float = -1.0,
     ) -> Self:
         """Create a sensor observation from a physics model."""
-        mappings = get_qpos_data_idxs_by_name(physics_model)
+        mappings = ksim.get_qpos_data_idxs_by_name(physics_model)
         hip_indices = tuple([int(mappings[name][0]) - 7 for name in hip_names])
         return cls(
             hip_indices=hip_indices,
@@ -388,7 +388,7 @@ class KneeDeviationPenalty(ksim.Reward):
         scale: float = -1.0,
     ) -> Self:
         """Create a sensor observation from a physics model."""
-        mappings = get_qpos_data_idxs_by_name(physics_model)
+        mappings = ksim.get_qpos_data_idxs_by_name(physics_model)
         knee_indices = tuple([int(mappings[name][0]) - 7 for name in knee_names])
         return cls(
             knee_indices=knee_indices,
