@@ -533,42 +533,40 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            rewards.JointDeviationPenalty(
-                scale=-0.02,
-                joint_targets=(
-                    # right arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # left arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # right leg
-                    -0.23,
-                    0.0,
-                    0.0,
-                    -0.441,
-                    0.195,
-                    # left leg
-                    0.23,
-                    0.0,
-                    0.0,
-                    0.441,
-                    -0.195,
-                ),
-            ),
-            ksim.BaseHeightRangeReward(z_lower=0.6, z_upper=1.4, dropoff=10.0, scale=0.01),
+            rewards.XYPositionPenalty(target_x=0.0, target_y=0.0, scale=-0.1),
+            ksim.ActionSmoothnessPenalty(scale=-0.001),
+            # rewards.JointDeviationPenalty(
+            #     scale=-0.02,
+            #     joint_targets=(
+            #         # right arm
+            #         0.0,
+            #         0.0,
+            #         0.0,
+            #         0.0,
+            #         0.0,
+            #         # left arm
+            #         0.0,
+            #         0.0,
+            #         0.0,
+            #         0.0,
+            #         0.0,
+            #         # right leg
+            #         -0.23,
+            #         0.0,
+            #         0.0,
+            #         -0.441,
+            #         0.195,
+            #         # left leg
+            #         0.23,
+            #         0.0,
+            #         0.0,
+            #         0.441,
+            #         -0.195,
+            #     ),
+            # ),
+            ksim.BaseHeightRangeReward(z_lower=0.7, z_upper=1.5, dropoff=10.0, scale=1.0),
             ksim.StayAliveReward(scale=1.0),
-            ksim.ActuatorForcePenalty(scale=-0.005),
-            ksim.LinearVelocityTrackingReward(index="x", command_name="linear_velocity_command_x", scale=0.1),
-            ksim.LinearVelocityTrackingReward(index="y", command_name="linear_velocity_command_y", scale=0.1),
-            ksim.AngularVelocityTrackingReward(index="z", command_name="angular_velocity_command_z", scale=0.1),
-            rewards.FeetSlipPenalty(scale=-0.25),
+            rewards.FeetSlipPenalty(scale=-0.05),
             # common.TerminationPenalty(scale=-5.0),
         ]
 
@@ -769,7 +767,7 @@ if __name__ == "__main__":
             max_grad_norm=0.5,
             use_mit_actuators=True,
             log_full_trajectory_every_n_steps=5,
-            save_every_n_steps=25,
+            save_every_n_steps=2,
             export_for_inference=True,
             domain_randomize=True,
         ),

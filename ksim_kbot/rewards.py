@@ -217,6 +217,21 @@ class TerminationPenalty(ksim.Reward):
         return trajectory.done
 
 
+@attrs.define(frozen=True, kw_only=True)
+class XYPositionPenalty(ksim.Reward):
+    """Penalty for deviation from a target (x, y) position."""
+
+    target_x: float = attrs.field()
+    target_y: float = attrs.field()
+    norm: xax.NormType = attrs.field(default="l2")
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        current_pos = trajectory.qpos[..., :2]
+        target_pos = jnp.array([self.target_x, self.target_y])
+        diff = current_pos - target_pos
+        return xax.get_norm(diff, self.norm).sum(axis=-1)
+
+
 # Gate stateful rewards for reference
 
 
