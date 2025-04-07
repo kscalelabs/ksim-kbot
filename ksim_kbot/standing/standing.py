@@ -298,7 +298,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         if self.config.use_mit_actuators:
             if metadata is None:
                 raise ValueError("Metadata is required for MIT actuators")
-            return ksim.MITPositionVelocityActuators(
+            return common.ScaledMITPositionVelocityActuators(
                 physics_model,
                 metadata,
                 default_targets=[

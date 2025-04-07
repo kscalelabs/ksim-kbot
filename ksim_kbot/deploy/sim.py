@@ -263,7 +263,7 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
 
 
 # (optionally) start the KOS-Sim server before running this script
-# `kos-sim kbot2-feet`
+# `kos-sim kbot-v2-feet`
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
