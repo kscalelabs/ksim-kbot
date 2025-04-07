@@ -80,7 +80,7 @@ class KbotActor(eqx.Module):
 
     def forward(
         self,
-        timestep_phase: Array,
+        timestep_phase_2: Array,
         joint_pos_n: Array,
         joint_vel_n: Array,
         imu_acc_3: Array,
@@ -94,7 +94,7 @@ class KbotActor(eqx.Module):
     ) -> distrax.Normal:
         x_n = jnp.concatenate(
             [
-                timestep_phase,
+                timestep_phase_2,
                 joint_pos_n,
                 joint_vel_n,
                 imu_acc_3,
@@ -144,7 +144,7 @@ class KbotCritic(eqx.Module):
 
     def forward(
         self,
-        timestep_1: Array,
+        timestep_phase_2: Array,
         joint_pos_n: Array,
         joint_vel_n: Array,
         imu_acc_3: Array,
@@ -158,7 +158,7 @@ class KbotCritic(eqx.Module):
     ) -> Array:
         x_n = jnp.concatenate(
             [
-                timestep_1,
+                timestep_phase_2,
                 joint_pos_n,
                 joint_vel_n,
                 imu_acc_3,
@@ -560,7 +560,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                     -0.195,
                 ),
             ),
-            ksim.BaseHeightRangeReward(z_lower=0.6, z_upper=1.4, dropoff=10.0, scale=1.0),
+            ksim.BaseHeightRangeReward(z_lower=0.6, z_upper=1.4, dropoff=10.0, scale=0.01),
             ksim.StayAliveReward(scale=1.0),
             # common.TerminationPenalty(scale=-5.0),
             ksim.ActuatorForcePenalty(scale=-0.005),
@@ -593,11 +593,11 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
         carry: Array,
     ) -> distrax.Normal:
-        timestep_phase = observations["timestep_phase_observation"]  # 1
+        timestep_phase_2 = observations["timestep_phase_observation"]
         joint_pos_n = observations["joint_position_observation"]
-        joint_vel_n = observations["joint_velocity_observation"]
-        imu_acc_3 = observations["sensor_observation_imu_acc"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        joint_vel_n = observations["joint_velocity_observation"] / 10.0
+        imu_acc_3 = observations["sensor_observation_imu_acc"] / 50.0
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"] / 3.0
         projected_gravity_3 = observations["projected_gravity_observation"]
         lin_vel_cmd_x = commands["linear_velocity_command_x"]
         lin_vel_cmd_y = commands["linear_velocity_command_y"]
@@ -605,7 +605,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         last_action_n = observations["last_action_observation"]
         history_n = carry
         return model.forward(
-            timestep_phase=timestep_phase,
+            timestep_phase_2=timestep_phase_2,
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
             imu_acc_3=imu_acc_3,
@@ -625,11 +625,11 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
         carry: Array,
     ) -> Array:
-        timestep_phase = observations["timestep_phase_observation"]  # 1
+        timestep_phase_2 = observations["timestep_phase_observation"]
         joint_pos_n = observations["joint_position_observation"]
-        joint_vel_n = observations["joint_velocity_observation"]
-        imu_acc_3 = observations["sensor_observation_imu_acc"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        joint_vel_n = observations["joint_velocity_observation"] / 10.0
+        imu_acc_3 = observations["sensor_observation_imu_acc"] / 50.0
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"] / 3.0
         projected_gravity_3 = observations["projected_gravity_observation"]
         lin_vel_cmd_x = commands["linear_velocity_command_x"]
         lin_vel_cmd_y = commands["linear_velocity_command_y"]
@@ -637,7 +637,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         last_action_n = observations["last_action_observation"]
         history_n = carry
         return model.forward(
-            timestep_phase=timestep_phase,
+            timestep_phase_2=timestep_phase_2,
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
             imu_acc_3=imu_acc_3,
@@ -684,11 +684,11 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         action_dist_n = self._run_actor(model.actor, observations, commands, actor_carry)
         action_j = action_dist_n.sample(seed=rng)
 
-        timestep_phase = observations["timestep_phase_observation"]  # 1
+        timestep_phase_2 = observations["timestep_phase_observation"]
         joint_pos_n = observations["joint_position_observation"]
-        joint_vel_n = observations["joint_velocity_observation"]
-        imu_acc_3 = observations["sensor_observation_imu_acc"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        joint_vel_n = observations["joint_velocity_observation"] / 10.0
+        imu_acc_3 = observations["sensor_observation_imu_acc"] / 50.0
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"] / 3.0
         projected_gravity_3 = observations["projected_gravity_observation"]
         lin_vel_cmd_x = commands["linear_velocity_command_x"]
         lin_vel_cmd_y = commands["linear_velocity_command_y"]
@@ -696,7 +696,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         last_action_n = observations["last_action_observation"]
         history_n = jnp.concatenate(
             [
-                timestep_phase,
+                timestep_phase_2,
                 joint_pos_n,
                 joint_vel_n,
                 imu_acc_3,
@@ -733,7 +733,7 @@ if __name__ == "__main__":
     #  run_environment_save_path=videos/test.mp4
     KbotStandingTask.launch(
         KbotStandingTaskConfig(
-            num_envs=8192,
+            num_envs=4096,
             batch_size=512,
             num_passes=10,
             epochs_per_log_step=1,
@@ -742,8 +742,7 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
-            rollout_length_seconds=1.25,
-            log_full_trajectory_every_n_steps=3,
+            rollout_length_seconds=2.5,
             # PPO parameters
             action_scale=0.5,
             gamma=0.97,
@@ -753,6 +752,8 @@ if __name__ == "__main__":
             clip_param=0.3,
             max_grad_norm=0.5,
             use_mit_actuators=True,
+            log_full_trajectory_every_n_steps=5,
+            save_every_n_steps=25,
             export_for_inference=True,
             domain_randomize=True,
         ),

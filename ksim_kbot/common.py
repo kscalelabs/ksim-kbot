@@ -105,11 +105,9 @@ class FeetPositionObservation(ksim.Observation):
             floor_threshold=floor_threshold,
         )
 
-    def observe(self, rollout_state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
-        foot_left_pos = rollout_state.physics_state.data.site_xpos[self.foot_left] + jnp.array(
-            [0.0, 0.0, self.floor_threshold]
-        )
-        foot_right_pos = rollout_state.physics_state.data.site_xpos[self.foot_right] + jnp.array(
+    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
+        foot_left_pos = state.physics_state.data.site_xpos[self.foot_left] + jnp.array([0.0, 0.0, self.floor_threshold])
+        foot_right_pos = state.physics_state.data.site_xpos[self.foot_right] + jnp.array(
             [0.0, 0.0, self.floor_threshold]
         )
         return jnp.concatenate([foot_left_pos, foot_right_pos], axis=-1)
