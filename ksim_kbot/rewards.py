@@ -81,7 +81,7 @@ class OrientationPenalty(ksim.Reward):
     """Penalty for the orientation of the robot."""
 
     norm: xax.NormType = attrs.field(default="l2")
-    obs_name: str = attrs.field(default="sensor_observation_upvector_torso")
+    obs_name: str = attrs.field(default="sensor_observation_upvector_origin")
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         return xax.get_norm(trajectory.obs[self.obs_name][..., :2], self.norm).sum(axis=-1)
@@ -92,16 +92,19 @@ class LinearVelocityTrackingReward(ksim.Reward):
     """Reward for tracking the linear velocity."""
 
     error_scale: float = attrs.field(default=0.25)
-    linvel_obs_name: str = attrs.field(default="sensor_observation_local_linvel_torso")
-    command_name: str = attrs.field(default="linear_velocity_command")
+    linvel_obs_name: str = attrs.field(default="sensor_observation_local_linvel_origin")
+    command_name_x: str = attrs.field(default="linear_velocity_command_x")
+    command_name_y: str = attrs.field(default="linear_velocity_command_y")
     norm: xax.NormType = attrs.field(default="l2")
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         if self.linvel_obs_name not in trajectory.obs:
             raise ValueError(f"Observation {self.linvel_obs_name} not found; add it as an observation in your task.")
-        lin_vel_error = xax.get_norm(
-            trajectory.command[self.command_name][..., :2] - trajectory.obs[self.linvel_obs_name][..., :2], self.norm
-        ).sum(axis=-1)
+
+        command = jnp.concatenate(
+            [trajectory.command[self.command_name_x], trajectory.command[self.command_name_y]], axis=-1
+        )
+        lin_vel_error = xax.get_norm(command - trajectory.obs[self.linvel_obs_name][..., :2], self.norm).sum(axis=-1)
         return jnp.exp(-lin_vel_error / self.error_scale)
 
 
@@ -110,15 +113,16 @@ class AngularVelocityTrackingReward(ksim.Reward):
     """Reward for tracking the angular velocity."""
 
     error_scale: float = attrs.field(default=0.25)
-    angvel_obs_name: str = attrs.field(default="sensor_observation_gyro_torso")
-    command_name: str = attrs.field(default="angular_velocity_command")
+    angvel_obs_name: str = attrs.field(default="sensor_observation_gyro_origin")
+    command_name: str = attrs.field(default="angular_velocity_command_z")
     norm: xax.NormType = attrs.field(default="l2")
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         if self.angvel_obs_name not in trajectory.obs:
             raise ValueError(f"Observation {self.angvel_obs_name} not found; add it as an observation in your task.")
+
         ang_vel_error = jnp.square(
-            trajectory.command[self.command_name][..., 2] - trajectory.obs[self.angvel_obs_name][..., 2]
+            trajectory.command[self.command_name].flatten() - trajectory.obs[self.angvel_obs_name][..., 2]
         )
         return jnp.exp(-ang_vel_error / self.error_scale)
 
@@ -128,7 +132,7 @@ class AngularVelocityXYPenalty(ksim.Reward):
     """Penalty for the angular velocity."""
 
     norm: xax.NormType = attrs.field(default="l2")
-    angvel_obs_name: str = attrs.field(default="sensor_observation_global_angvel_torso")
+    angvel_obs_name: str = attrs.field(default="sensor_observation_global_angvel_origin")
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         if self.angvel_obs_name not in trajectory.obs:
