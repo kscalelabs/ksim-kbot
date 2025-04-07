@@ -398,7 +398,7 @@ class KbotPseudoIKRNNTask(KbotPseudoIKTask[Config], Generic[Config]):
 
         export(
             model_fn,
-            input_shapes,  # type: ignore [arg-type]
+            input_shapes,
             tf_path,
         )
 
