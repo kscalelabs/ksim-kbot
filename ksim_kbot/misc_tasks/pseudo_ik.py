@@ -372,7 +372,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.ActuatorForceObservation(),
             ksim.ActuatorAccelerationObservation(freejoint_first=False),
             ksim.ContactObservation.create(
-                custom_observation_name="contact",
+                contact_group="arms",
                 physics_model=physics_model,
                 geom_names=[
                     "right_upper_arm_collision",
@@ -395,11 +395,11 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.CartesianBodyTargetCommand.create(
                 model=physics_model,
                 # pivot_name="KC_C_104R_PitchHardstopDriven",
-                pivot_point=(0.3, -0.1, 0.0),
+                pivot_point=(0.25, -0.1, 0.0),
                 base_name="floating_base_link",
                 curriculum_scale=2.0,
                 sample_sphere_radius=0.1,
-                positive_x=True,  # forward + backward
+                positive_x=False,  # forward + backward
                 positive_y=False,
                 positive_z=False,
                 switch_prob=self.config.ctrl_dt / 2,  # will last 2 seconds in expectation
@@ -428,7 +428,6 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 sensitivity=1.0,
                 threshold=0.0001,  # with l2 xax norm, this is 1cm
                 time_bonus_scale=0.3,
-                time_sensitivity=0.05,
                 command_name="cartesian_body_target_command_floating_base_link",
             ),
             ksim.GlobalBodyQuaternionReward.create(
@@ -467,7 +466,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 norm="l2",
                 scale=-6.0,
             ),
-            ksim.GeomContactPenalty(observation_name="contact", scale=-1.0),
+            ksim.ObservationMeanPenalty(observation_name="contact_observation_arms", scale=-1.0),
             ksim.ActuatorForcePenalty(scale=-0.00001, norm="l1"),
             ksim.ActionSmoothnessPenalty(scale=-0.02, norm="l2"),
             ksim.JointVelocityPenalty(scale=-0.001, freejoint_first=False, norm="l2"),
