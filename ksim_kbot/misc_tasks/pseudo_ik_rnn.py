@@ -2,17 +2,17 @@
 """Defines simple task for training a walking policy for the default humanoid using an RNN actor."""
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Generic, TypeVar
 
 import distrax
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import xax
-from xax.nn.export import export
-from jaxtyping import Array, PRNGKeyArray
-from pathlib import Path
 import ksim
+import xax
+from jaxtyping import Array, PRNGKeyArray
+from xax.nn.export import export
 
 from .pseudo_ik import (
     NUM_INPUTS,
@@ -382,7 +382,13 @@ class KbotPseudoIKRNNTask(KbotPseudoIKTask[Config], Generic[Config]):
 
         model_fn = self.make_export_model(model, stochastic=False, batched=True)
 
-        input_shapes = [(RNN_NUM_INPUTS,), (self.config.depth, self.config.hidden_size,)]
+        input_shapes = [
+            (RNN_NUM_INPUTS,),
+            (
+                self.config.depth,
+                self.config.hidden_size,
+            ),
+        ]
 
         tf_path = (
             ckpt_path.parent / "tf_model"
@@ -397,6 +403,7 @@ class KbotPseudoIKRNNTask(KbotPseudoIKTask[Config], Generic[Config]):
         )
 
         return state
+
 
 if __name__ == "__main__":
     # To run training, use the following command:

@@ -21,6 +21,7 @@ from kscale.web.gen.api import JointMetadataOutput
 from ksim.utils.mujoco import remove_joints_except
 from mujoco import mjx
 from xax.nn.export import export
+
 import ksim_kbot.common
 
 NUM_JOINTS = 5  # disabling all DoFs except for the right arm.
@@ -286,7 +287,6 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             (Path(self.config.robot_urdf_path) / f"robot_scene_joint_removed_{uuid.uuid4()}.mjcf").resolve().as_posix()
         )
 
-
         with open(temp_path, "w") as f:
             f.write(mj_model_joint_removed)
 
@@ -318,7 +318,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             if metadata is None:
                 raise ValueError("Metadata is required for MIT actuators")
             return ksim.MITPositionVelocityActuators(
-            # return ksim.MITPositionActuators(
+                # return ksim.MITPositionActuators(
                 physics_model,
                 metadata,
                 # pos_action_noise=0.1,
@@ -535,7 +535,6 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         carry: None,
         rng: PRNGKeyArray,
     ) -> tuple[ksim.PPOVariables, None]:
-        
         action_dist_n = self._run_actor(model, trajectories.obs, trajectories.command)
         log_probs_n = action_dist_n.log_prob(trajectories.action / model.actor.mean_scale)
         entropy_n = action_dist_n.entropy()
