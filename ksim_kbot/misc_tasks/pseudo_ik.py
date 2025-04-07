@@ -188,7 +188,7 @@ class KbotModel(eqx.Module):
     def __init__(self, key: PRNGKeyArray, *, hidden_size: int, depth: int) -> None:
         self.actor = KbotActor(
             key,
-            min_std=0.01,
+            min_std=0.001,
             max_std=1.0,
             var_scale=1.0,
             mean_scale=1.0,
@@ -242,7 +242,7 @@ class KbotPseudoIKTaskConfig(ksim.PPOConfig):
         help="The depth of the models.",
     )
     hidden_size: int = xax.field(
-        value=128,
+        value=256,
         help="The hidden size of the models.",
     )
 
@@ -354,7 +354,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
         return [
-            ksim.RandomJointPositionReset(),
+            ksim.RandomJointPositionReset(scale=1.0),
             # ksim_kbot.common.ResetDefaultJointPosition(
             #     default_targets=(0.0,
             #                     0.0,
@@ -394,9 +394,11 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         return [
             ksim.CartesianBodyTargetCommand.create(
                 model=physics_model,
-                pivot_name="KC_C_104R_PitchHardstopDriven",
+                # pivot_name="KC_C_104R_PitchHardstopDriven",
+                pivot_point=(0.3, -0.1, 0.0),
                 base_name="floating_base_link",
-                sample_sphere_radius=0.5,
+                curriculum_scale=2.0,
+                sample_sphere_radius=0.1,
                 positive_x=True,  # forward + backward
                 positive_y=False,
                 positive_z=False,
@@ -427,7 +429,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 threshold=0.0001,  # with l2 xax norm, this is 1cm
                 time_bonus_scale=0.3,
                 time_sensitivity=0.05,
-                command_name="cartesian_body_target_command_KC_C_104R_PitchHardstopDriven",
+                command_name="cartesian_body_target_command_floating_base_link",
             ),
             ksim.GlobalBodyQuaternionReward.create(
                 model=physics_model,
@@ -449,7 +451,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             # ),
             ksim.CartesianBodyTargetVectorReward.create(
                 model=physics_model,
-                command_name="cartesian_body_target_command_KC_C_104R_PitchHardstopDriven",
+                command_name="cartesian_body_target_command_floating_base_link",
                 tracked_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
                 base_body_name="floating_base_link",
                 scale=3.0,
@@ -459,7 +461,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             ),
             ksim.CartesianBodyTargetPenalty.create(
                 model=physics_model,
-                command_name="cartesian_body_target_command_KC_C_104R_PitchHardstopDriven",
+                command_name="cartesian_body_target_command_floating_base_link",
                 tracked_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
                 base_body_name="floating_base_link",
                 norm="l2",
@@ -467,9 +469,9 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             ),
             ksim.GeomContactPenalty(observation_name="contact", scale=-1.0),
             ksim.ActuatorForcePenalty(scale=-0.00001, norm="l1"),
-            ksim.ActionSmoothnessPenalty(scale=-0.002, norm="l2"),
+            ksim.ActionSmoothnessPenalty(scale=-0.02, norm="l2"),
             ksim.JointVelocityPenalty(scale=-0.001, freejoint_first=False, norm="l2"),
-            ksim.ActuatorJerkPenalty(scale=-0.0001, ctrl_dt=self.config.ctrl_dt, norm="l2"),
+            ksim.ActuatorJerkPenalty(scale=-0.001, ctrl_dt=self.config.ctrl_dt, norm="l2"),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -492,7 +494,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
     ) -> distrax.Normal:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"] / 50.0
-        xyz_target_3 = commands["cartesian_body_target_command_KC_C_104R_PitchHardstopDriven"]
+        xyz_target_3 = commands["cartesian_body_target_command_floating_base_link"]
         quat_target_4 = commands["global_body_quaternion_command_KB_C_501X_Right_Bayonet_Adapter_Hard_Stop"]
         prev_action_n = observations["last_action_observation"]
         return model.actor(
@@ -512,7 +514,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         joint_pos_n = observations["joint_position_observation"]  # 26
         joint_vel_n = observations["joint_velocity_observation"] / 100.0  # 27
         actuator_force_n = observations["actuator_force_observation"]  # 27
-        xyz_target_3 = commands["cartesian_body_target_command_KC_C_104R_PitchHardstopDriven"]  # 3
+        xyz_target_3 = commands["cartesian_body_target_command_floating_base_link"]  # 3
         quat_target_4 = commands["global_body_quaternion_command_KB_C_501X_Right_Bayonet_Adapter_Hard_Stop"]  # 4
         end_effector_pos_3 = observations["cartesian_body_position_observation_KC_C_104R_PitchHardstopDriven"]  # 3
         prev_action_n = observations["last_action_observation"]  # 5
@@ -569,7 +571,13 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         return ksim.Action(action=action_n, aux_outputs=AuxOutputs(log_probs=action_log_prob_n, values=value_n))
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
-        return ksim.ConstantCurriculum(level=0.0)
+        return ksim.RewardLevelCurriculum(
+            reward_name="continuous_cartesian_body_target_reward",
+            increase_threshold=0.1,
+            decrease_threshold=0.08,
+            min_level_steps=10,
+            num_levels=10,
+        )
 
     def make_export_model(self, model: KbotModel, stochastic: bool = False, batched: bool = False) -> Callable:
         """Makes a callable inference function that directly takes a flattened input vector and returns an action.
@@ -645,9 +653,9 @@ if __name__ == "__main__":
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
-            max_action_latency=0.0,
+            max_action_latency=0.05,
             min_action_latency=0.0,
-            entropy_coef=0.05,
+            entropy_coef=0.005,
             learning_rate=3e-4,
             rollout_length_seconds=10.0,
             render_length_seconds=10.0,
