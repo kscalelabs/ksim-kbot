@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 """Pseudo-Inverse Kinematics task for the default humanoid."""
 
 import asyncio
@@ -21,6 +22,8 @@ from kscale.web.gen.api import JointMetadataOutput
 from ksim.utils.mujoco import remove_joints_except
 from mujoco import mjx
 from xax.nn.export import export
+
+from ksim_kbot.standing.standing import MAX_TORQUE
 
 import ksim_kbot.common
 
@@ -56,13 +59,6 @@ class CartesianBodyPositionObservation(ksim.Observation):
 
 NUM_OUTPUTS = NUM_JOINTS * 2
 NUM_INPUTS = NUM_JOINTS + NUM_JOINTS + 3 + 4 + NUM_OUTPUTS
-
-MAX_TORQUE = {
-    "00": 1.0,
-    "02": 14.0,
-    "03": 40.0,
-    "04": 60.0,
-}
 
 
 @jax.tree_util.register_dataclass
@@ -405,7 +401,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 switch_prob=self.config.ctrl_dt / 2,  # will last 2 seconds in expectation
                 vis_radius=0.05,
                 vis_color=(1.0, 0.0, 0.0, 0.8),
-            ),
+            ),  # type: ignore[call-arg]
             ksim.GlobalBodyQuaternionCommand.create(
                 model=physics_model,
                 base_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
@@ -414,7 +410,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 null_prob=1.0,
                 vis_magnitude=0.5,
                 vis_color=(0.0, 0.0, 1.0, 0.5),
-            ),
+            ),  # type: ignore[call-arg]
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
