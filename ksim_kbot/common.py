@@ -74,6 +74,14 @@ class TrueHeightObservation(ksim.Observation):
         return jnp.atleast_1d(state.physics_state.data.qpos[2])
 
 
+@attrs.define(frozen=True, kw_only=True)
+class TimestepPhaseObservation(ksim.Observation):
+    """Observation of the phase of the timestep."""
+
+    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
+        return jnp.array([jnp.cos(state.physics_state.data.time), jnp.sin(state.physics_state.data.time)])
+
+
 @attrs.define(frozen=True)
 class FeetPositionObservation(ksim.Observation):
     foot_left: int = attrs.field()

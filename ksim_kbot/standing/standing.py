@@ -20,7 +20,7 @@ from mujoco import mjx
 
 from ksim_kbot import common
 
-OBS_SIZE = 20 * 2 + 3 + 3 + 3 + 40  # = position + velocity + imu_acc + imu_gyro + projected_gravity + last_action
+OBS_SIZE = 20 * 2 + 2 + 3 + 3 + 3 + 40  # = position + velocity + imu_acc + imu_gyro + projected_gravity + last_action
 CMD_SIZE = 3
 NUM_OUTPUTS = 20 * 2  # position + velocity
 
@@ -80,6 +80,7 @@ class KbotActor(eqx.Module):
 
     def forward(
         self,
+        timestep_phase: Array,
         joint_pos_n: Array,
         joint_vel_n: Array,
         imu_acc_3: Array,
@@ -93,6 +94,7 @@ class KbotActor(eqx.Module):
     ) -> distrax.Normal:
         x_n = jnp.concatenate(
             [
+                timestep_phase,
                 joint_pos_n,
                 joint_vel_n,
                 imu_acc_3,
@@ -142,6 +144,7 @@ class KbotCritic(eqx.Module):
 
     def forward(
         self,
+        timestep_1: Array,
         joint_pos_n: Array,
         joint_vel_n: Array,
         imu_acc_3: Array,
@@ -155,6 +158,7 @@ class KbotCritic(eqx.Module):
     ) -> Array:
         x_n = jnp.concatenate(
             [
+                timestep_1,
                 joint_pos_n,
                 joint_vel_n,
                 imu_acc_3,
@@ -445,6 +449,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             base_angular_velocity_noise = 0.0
             base_angular_velocity_noise = 0.0
         return [
+            common.TimestepPhaseObservation(),
             common.JointPositionObservation(
                 default_targets=(
                     # right arm
@@ -527,7 +532,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             common.JointDeviationPenalty(
-                scale=-0.1,
+                scale=-0.02,
                 joint_targets=(
                     # right arm
                     0.0,
@@ -556,17 +561,15 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                 ),
             ),
             ksim.BaseHeightRangeReward(z_lower=0.6, z_upper=1.4, dropoff=10.0, scale=1.0),
-            # ksim.StayAliveReward(scale=1.0),
-            common.TerminationPenalty(scale=-2.0),
+            ksim.StayAliveReward(scale=1.0),
+            # common.TerminationPenalty(scale=-5.0),
             ksim.ActuatorForcePenalty(scale=-0.005),
-            ksim.LinearVelocityTrackingReward(scale=0.2),
-            ksim.AngularVelocityTrackingReward(scale=0.1),
+            ksim.LinearVelocityTrackingReward(index="x", command_name="linear_velocity_command_x", scale=0.1),
+            ksim.LinearVelocityTrackingReward(index="y", command_name="linear_velocity_command_y", scale=0.1),
+            ksim.AngularVelocityTrackingReward(index="z", command_name="angular_velocity_command_z", scale=0.1),
             # common.DHControlPenalty(scale=-0.05),
             # common.DHHealthyReward(scale=0.5),
             # ksim.BaseHeightReward(scale=1.0, height_target=0.9),
-            # ksim.LinearVelocityTrackingReward(index="x", command_name="linear_velocity_command_x", scale=1.0),
-            # ksim.LinearVelocityTrackingReward(index="y", command_name="linear_velocity_command_y", scale=0.1),
-            # ksim.AngularVelocityTrackingReward(index="z", command_name="angular_velocity_command_z", scale=0.01),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -590,6 +593,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
         carry: Array,
     ) -> distrax.Normal:
+        timestep_phase = observations["timestep_phase_observation"]  # 1
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
         imu_acc_3 = observations["sensor_observation_imu_acc"]
@@ -601,16 +605,17 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         last_action_n = observations["last_action_observation"]
         history_n = carry
         return model.forward(
-            joint_pos_n,
-            joint_vel_n,
-            imu_acc_3,
-            imu_gyro_3,
-            projected_gravity_3,
-            lin_vel_cmd_x,
-            lin_vel_cmd_y,
-            ang_vel_cmd_z,
-            last_action_n,
-            history_n,
+            timestep_phase=timestep_phase,
+            joint_pos_n=joint_pos_n,
+            joint_vel_n=joint_vel_n,
+            imu_acc_3=imu_acc_3,
+            imu_gyro_3=imu_gyro_3,
+            projected_gravity_3=projected_gravity_3,
+            lin_vel_cmd_x=lin_vel_cmd_x,
+            lin_vel_cmd_y=lin_vel_cmd_y,
+            ang_vel_cmd_z=ang_vel_cmd_z,
+            last_action_n=last_action_n,
+            history_n=history_n,
         )
 
     def _run_critic(
@@ -620,6 +625,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
         carry: Array,
     ) -> Array:
+        timestep_phase = observations["timestep_phase_observation"]  # 1
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
         imu_acc_3 = observations["sensor_observation_imu_acc"]
@@ -631,16 +637,17 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         last_action_n = observations["last_action_observation"]
         history_n = carry
         return model.forward(
-            joint_pos_n,
-            joint_vel_n,
-            imu_acc_3,
-            imu_gyro_3,
-            projected_gravity_3,
-            lin_vel_cmd_x,
-            lin_vel_cmd_y,
-            ang_vel_cmd_z,
-            last_action_n,
-            history_n,
+            timestep_phase=timestep_phase,
+            joint_pos_n=joint_pos_n,
+            joint_vel_n=joint_vel_n,
+            imu_acc_3=imu_acc_3,
+            imu_gyro_3=imu_gyro_3,
+            projected_gravity_3=projected_gravity_3,
+            lin_vel_cmd_x=lin_vel_cmd_x,
+            lin_vel_cmd_y=lin_vel_cmd_y,
+            ang_vel_cmd_z=ang_vel_cmd_z,
+            last_action_n=last_action_n,
+            history_n=history_n,
         )
 
     def get_ppo_variables(
@@ -677,6 +684,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         action_dist_n = self._run_actor(model.actor, observations, commands, actor_carry)
         action_j = action_dist_n.sample(seed=rng)
 
+        timestep_phase = observations["timestep_phase_observation"]  # 1
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
         imu_acc_3 = observations["sensor_observation_imu_acc"]
@@ -688,6 +696,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         last_action_n = observations["last_action_observation"]
         history_n = jnp.concatenate(
             [
+                timestep_phase,
                 joint_pos_n,
                 joint_vel_n,
                 imu_acc_3,
