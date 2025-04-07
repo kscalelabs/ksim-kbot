@@ -5,8 +5,9 @@ import os
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Generic, TypeVar
+from typing import Callable, Generic, Self, TypeVar
 
+import attrs
 import distrax
 import equinox as eqx
 import jax
@@ -20,11 +21,40 @@ from kscale.web.gen.api import JointMetadataOutput
 from ksim.utils.mujoco import remove_joints_except
 from mujoco import mjx
 from xax.nn.export import export
+import ksim_kbot.common
 
 NUM_JOINTS = 5  # disabling all DoFs except for the right arm.
 
-NUM_INPUTS = NUM_JOINTS + NUM_JOINTS + 3 + 4
+
+@attrs.define(frozen=True, kw_only=True)
+class CartesianBodyPositionObservation(ksim.Observation):
+    body_idx: int = attrs.field()
+    body_name: str = attrs.field()
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        physics_model: ksim.PhysicsModel,
+        body_name: str,
+        noise: float = 0.0,
+    ) -> Self:
+        body_idx = ksim.get_body_data_idx_from_name(physics_model, body_name)
+        return cls(
+            body_idx=body_idx,
+            body_name=body_name,
+            noise=noise,
+        )
+
+    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
+        return state.physics_state.data.xpos[self.body_idx]
+
+    def get_name(self) -> str:
+        return f"{super().get_name()}_{self.body_name}"
+
+
 NUM_OUTPUTS = NUM_JOINTS * 2
+NUM_INPUTS = NUM_JOINTS + NUM_JOINTS + 3 + 4 + NUM_OUTPUTS
 
 MAX_TORQUE = {
     "00": 1.0,
@@ -58,12 +88,14 @@ class KbotActor(eqx.Module):
         max_std: float,
         var_scale: float,
         mean_scale: float,
+        hidden_size: int,
+        depth: int,
     ) -> None:
         self.mlp = eqx.nn.MLP(
             in_size=NUM_INPUTS,
             out_size=NUM_OUTPUTS * 2,
-            width_size=64,
-            depth=5,
+            width_size=hidden_size,
+            depth=depth,
             key=key,
             activation=jax.nn.elu,
         )
@@ -78,6 +110,7 @@ class KbotActor(eqx.Module):
         joint_vel_n: Array,
         xyz_target_3: Array,
         quat_target_4: Array,
+        prev_action_n: Array,
     ) -> distrax.Normal:
         obs_n = jnp.concatenate(
             [
@@ -85,6 +118,7 @@ class KbotActor(eqx.Module):
                 joint_vel_n,  # NUM_JOINTS
                 xyz_target_3,  # 3
                 quat_target_4,  # 4
+                prev_action_n,  # NUM_OUTPUTS
             ],
             axis=-1,
         )
@@ -109,15 +143,15 @@ class KbotCritic(eqx.Module):
 
     mlp: eqx.nn.MLP
 
-    def __init__(self, key: PRNGKeyArray) -> None:
-        num_inputs = NUM_INPUTS + NUM_JOINTS
+    def __init__(self, key: PRNGKeyArray, *, hidden_size: int, depth: int) -> None:
+        num_inputs = NUM_INPUTS + NUM_JOINTS + 3
         num_outputs = 1
 
         self.mlp = eqx.nn.MLP(
             in_size=num_inputs,
             out_size=num_outputs,
-            width_size=64,
-            depth=5,
+            width_size=hidden_size,
+            depth=depth,
             key=key,
             activation=jax.nn.relu,
         )
@@ -129,6 +163,8 @@ class KbotCritic(eqx.Module):
         actuator_force_n: Array,
         xyz_target_3: Array,
         quat_target_4: Array,
+        end_effector_pos_3: Array,
+        prev_action_n: Array,
     ) -> Array:
         x_n = jnp.concatenate(
             [
@@ -137,6 +173,8 @@ class KbotCritic(eqx.Module):
                 actuator_force_n,  # NUM_JOINTS
                 xyz_target_3,  # 3
                 quat_target_4,  # 4
+                end_effector_pos_3,  # 3
+                prev_action_n,  # NUM_OUTPUTS
             ],
             axis=-1,
         )
@@ -147,15 +185,17 @@ class KbotModel(eqx.Module):
     actor: KbotActor
     critic: KbotCritic
 
-    def __init__(self, key: PRNGKeyArray) -> None:
+    def __init__(self, key: PRNGKeyArray, *, hidden_size: int, depth: int) -> None:
         self.actor = KbotActor(
             key,
             min_std=0.01,
             max_std=1.0,
             var_scale=1.0,
             mean_scale=1.0,
+            hidden_size=hidden_size,
+            depth=depth,
         )
-        self.critic = KbotCritic(key)
+        self.critic = KbotCritic(key, hidden_size=hidden_size, depth=depth)
 
 
 @dataclass
@@ -195,6 +235,15 @@ class KbotPseudoIKTaskConfig(ksim.PPOConfig):
     export_for_inference: bool = xax.field(
         value=False,
         help="Whether to export the model for inference.",
+    )
+
+    depth: int = xax.field(
+        value=5,
+        help="The depth of the models.",
+    )
+    hidden_size: int = xax.field(
+        value=128,
+        help="The hidden size of the models.",
     )
 
 
@@ -269,14 +318,15 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             if metadata is None:
                 raise ValueError("Metadata is required for MIT actuators")
             return ksim.MITPositionVelocityActuators(
+            # return ksim.MITPositionActuators(
                 physics_model,
                 metadata,
                 # pos_action_noise=0.1,
                 # vel_action_noise=0.1,
                 # pos_action_noise_type="gaussian",
                 # vel_action_noise_type="gaussian",
-                torque_noise=0.2,
-                torque_noise_type="gaussian",
+                # torque_noise=0.2,
+                # torque_noise_type="gaussian",
                 ctrl_clip=[
                     # right arm
                     MAX_TORQUE["03"],
@@ -293,7 +343,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
     def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
         return [
             ksim.StaticFrictionRandomization(scale_lower=0.5, scale_upper=2.0, freejoint_first=False),
-            ksim.JointZeroPositionRandomization(scale_lower=-0.01, scale_upper=0.01, freejoint_first=False),
+            # ksim.JointZeroPositionRandomization(scale_lower=-0.01, scale_upper=0.01, freejoint_first=False),
             ksim.ArmatureRandomization(scale_lower=1.0, scale_upper=1.05, freejoint_first=False),
             ksim.MassMultiplicationRandomization.from_body_name(physics_model, "KC_C_104R_PitchHardstopDriven"),
             ksim.JointDampingRandomization(scale_lower=0.95, scale_upper=1.05, freejoint_first=False),
@@ -305,7 +355,14 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
         return [
             ksim.RandomJointPositionReset(),
-            ksim.RandomJointVelocityReset(),
+            # ksim_kbot.common.ResetDefaultJointPosition(
+            #     default_targets=(0.0,
+            #                     0.0,
+            #                     0.0,
+            #                     1.57,
+            #                     0.0),
+            # ),
+            # ksim.RandomJointVelocityReset(),
         ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
@@ -326,6 +383,11 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                     "legs_collision",
                 ],
             ),
+            CartesianBodyPositionObservation.create(
+                physics_model=physics_model,
+                body_name="KC_C_104R_PitchHardstopDriven",
+            ),
+            ksim_kbot.common.LastActionObservation(noise=0.0),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
@@ -362,8 +424,8 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 norm="l2",
                 scale=2.5,
                 sensitivity=1.0,
-                threshold=0.0001,  # with l2 norm, this is 1cm
-                time_bonus_scale=0.1,
+                threshold=0.0001,  # with l2 xax norm, this is 1cm
+                time_bonus_scale=0.3,
                 time_sensitivity=0.05,
                 command_name="cartesian_body_target_command_KC_C_104R_PitchHardstopDriven",
             ),
@@ -376,12 +438,21 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 scale=0.1,
                 sensitivity=1.0,
             ),
+            # ksim_kbot.common.JointDeviationPenalty(
+            #     joint_targets=(0.0,
+            #                    0.0,
+            #                    0.0,
+            #                    1.57, # right elbow
+            #                    0.0),
+            #     scale=-0.05,
+            #     freejoint_first=False,
+            # ),
             ksim.CartesianBodyTargetVectorReward.create(
                 model=physics_model,
                 command_name="cartesian_body_target_command_KC_C_104R_PitchHardstopDriven",
                 tracked_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
                 base_body_name="floating_base_link",
-                scale=0.4,
+                scale=3.0,
                 normalize_velocity=True,
                 distance_threshold=0.1,
                 dt=self.config.dt,
@@ -392,11 +463,11 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 tracked_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
                 base_body_name="floating_base_link",
                 norm="l2",
-                scale=-3.0,
+                scale=-6.0,
             ),
-            ksim.GeomContactPenalty(observation_name="contact", scale=-10.0),
+            ksim.GeomContactPenalty(observation_name="contact", scale=-1.0),
             ksim.ActuatorForcePenalty(scale=-0.00001, norm="l1"),
-            ksim.ActionSmoothnessPenalty(scale=-0.001, norm="l2"),
+            ksim.ActionSmoothnessPenalty(scale=-0.002, norm="l2"),
             ksim.JointVelocityPenalty(scale=-0.001, freejoint_first=False, norm="l2"),
             ksim.ActuatorJerkPenalty(scale=-0.0001, ctrl_dt=self.config.ctrl_dt, norm="l2"),
         ]
@@ -408,7 +479,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         ]
 
     def get_model(self, key: PRNGKeyArray) -> KbotModel:
-        return KbotModel(key)
+        return KbotModel(key, hidden_size=self.config.hidden_size, depth=self.config.depth)
 
     def get_initial_carry(self, rng: PRNGKeyArray) -> None:
         return None
@@ -423,11 +494,13 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         joint_vel_n = observations["joint_velocity_observation"] / 50.0
         xyz_target_3 = commands["cartesian_body_target_command_KC_C_104R_PitchHardstopDriven"]
         quat_target_4 = commands["global_body_quaternion_command_KB_C_501X_Right_Bayonet_Adapter_Hard_Stop"]
+        prev_action_n = observations["last_action_observation"]
         return model.actor(
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
             xyz_target_3=xyz_target_3,
             quat_target_4=quat_target_4,
+            prev_action_n=prev_action_n,
         )
 
     def _run_critic(
@@ -441,62 +514,40 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         actuator_force_n = observations["actuator_force_observation"]  # 27
         xyz_target_3 = commands["cartesian_body_target_command_KC_C_104R_PitchHardstopDriven"]  # 3
         quat_target_4 = commands["global_body_quaternion_command_KB_C_501X_Right_Bayonet_Adapter_Hard_Stop"]  # 4
+        end_effector_pos_3 = observations["cartesian_body_position_observation_KC_C_104R_PitchHardstopDriven"]  # 3
+        prev_action_n = observations["last_action_observation"]  # 5
+
         return model.critic(
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
             actuator_force_n=actuator_force_n,
             xyz_target_3=xyz_target_3,
             quat_target_4=quat_target_4,
+            end_effector_pos_3=end_effector_pos_3,
+            prev_action_n=prev_action_n,
         )
 
-    def get_on_policy_log_probs(
+    def get_ppo_variables(
         self,
         model: KbotModel,
         trajectories: ksim.Trajectory,
+        carry: None,
         rng: PRNGKeyArray,
-    ) -> Array:
-        if not isinstance(trajectories.aux_outputs, AuxOutputs):
-            raise ValueError("No aux outputs found in trajectories")
-        return trajectories.aux_outputs.log_probs
+    ) -> tuple[ksim.PPOVariables, None]:
+        
+        action_dist_n = self._run_actor(model, trajectories.obs, trajectories.command)
+        log_probs_n = action_dist_n.log_prob(trajectories.action / model.actor.mean_scale)
+        entropy_n = action_dist_n.entropy()
 
-    def get_on_policy_variables(
-        self,
-        model: KbotModel,
-        trajectories: ksim.Trajectory,
-        rng: PRNGKeyArray,
-    ) -> ksim.PPOVariables:
-        if not isinstance(trajectories.aux_outputs, AuxOutputs):
-            raise ValueError("No aux outputs found in trajectories")
+        values_1 = self._run_critic(model, trajectories.obs, trajectories.command)
 
-        return ksim.PPOVariables(
-            log_probs_tn=trajectories.aux_outputs.log_probs,
-            values_t=trajectories.aux_outputs.values,
+        ppo_variables = ksim.PPOVariables(
+            log_probs=log_probs_n,
+            values=values_1.squeeze(-1),
+            entropy=entropy_n,
         )
 
-    def get_off_policy_variables(
-        self,
-        model: KbotModel,
-        trajectories: ksim.Trajectory,
-        rng: PRNGKeyArray,
-    ) -> ksim.PPOVariables:
-        # Vectorize over both batch and time dimensions.
-        par_actor_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0))
-        action_dist_tn = par_actor_fn(model, trajectories.obs, trajectories.command)
-
-        par_critic_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
-        values_t1 = par_critic_fn(model, trajectories.obs, trajectories.command)
-
-        # Compute the log probabilities of the trajectory's actions according
-        # to the current policy, along with the entropy of the distribution.
-        action_tn = trajectories.action / model.actor.mean_scale
-        log_probs_tn = action_dist_tn.log_prob(action_tn)
-        entropy_tn = action_dist_tn.entropy()
-
-        return ksim.PPOVariables(
-            log_probs_tn=log_probs_tn,
-            values_t=values_t1,
-            entropy_tn=entropy_tn,
-        )
+        return ppo_variables, None
 
     def sample_action(
         self,
@@ -507,7 +558,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, None, AuxOutputs]:
+    ) -> ksim.Action:
         action_dist_n = self._run_actor(model, observations, commands)
         action_n = action_dist_n.sample(seed=rng)
         action_log_prob_n = action_dist_n.log_prob(action_n)
@@ -515,7 +566,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         critic_n = self._run_critic(model, observations, commands)
         value_n = critic_n.squeeze(-1)
 
-        return action_n, None, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
+        return ksim.Action(action=action_n, aux_outputs=AuxOutputs(log_probs=action_log_prob_n, values=value_n))
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
         return ksim.ConstantCurriculum(level=0.0)
@@ -585,8 +636,8 @@ if __name__ == "__main__":
     KbotPseudoIKTask.launch(
         KbotPseudoIKTaskConfig(
             # Training parameters.
-            num_envs=2048,
-            batch_size=256,
+            num_envs=3000,
+            batch_size=300,
             num_passes=10,
             epochs_per_log_step=1,
             # Logging parameters.
@@ -597,7 +648,9 @@ if __name__ == "__main__":
             max_action_latency=0.0,
             min_action_latency=0.0,
             entropy_coef=0.05,
+            learning_rate=3e-4,
             rollout_length_seconds=10.0,
+            render_length_seconds=10.0,
             save_every_n_steps=25,
             export_for_inference=True,
             # Apparently rendering markers can sometimes cause segfaults.

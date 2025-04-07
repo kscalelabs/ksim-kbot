@@ -71,9 +71,13 @@ class JointDeviationPenalty(ksim.Reward):
 
     norm: xax.NormType = attrs.field(default="l2")
     joint_targets: tuple[float, ...] = attrs.field()
+    freejoint_first: bool = attrs.field(default=True)
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        diff = trajectory.qpos[..., 7:] - jnp.array(self.joint_targets)
+        if self.freejoint_first:
+            diff = trajectory.qpos[..., 7:] - jnp.array(self.joint_targets)
+        else:
+            diff = trajectory.qpos[..., :7] - jnp.array(self.joint_targets)
         return xax.get_norm(diff, self.norm).sum(axis=-1)
 
 
