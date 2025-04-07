@@ -16,8 +16,6 @@ import xax
 from bvhio.lib.hierarchy import Joint as BvhioJoint
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
-from ksim.curriculum import ConstantCurriculum, Curriculum
-from ksim.task.ppo import PPOVariables
 from ksim.types import PhysicsModel
 from ksim.utils.reference_gait import (
     ReferenceMapping,
@@ -28,10 +26,9 @@ from ksim.utils.reference_gait import (
 )
 from scipy.spatial.transform import Rotation as R
 
-from ksim_kbot.common import ScaledTorqueActuators
+from ksim_kbot import common
 from ksim_kbot.standing.standing import (
     MAX_TORQUE,
-    AuxOutputs,
     KbotModel,
     KbotStandingTask,
     KbotStandingTaskConfig,
@@ -41,15 +38,26 @@ HISTORY_LENGTH = 0
 SINGLE_STEP_HISTORY_SIZE = 0
 
 
-class NaiveVelocityReward(ksim.Reward):
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        return trajectory.qvel[..., 0].clip(max=5.0)
-
-
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
-class GaitMatchingAuxOutputs(AuxOutputs):
+class GaitMatchingAuxOutputs:
     tracked_pos: xax.FrozenDict[int, Array]
+
+
+HUMANOID_REFERENCE_MAPPINGS = (
+    ReferenceMapping("CC_Base_L_ThighTwist01", "RS03_5"),  # hip
+    ReferenceMapping("CC_Base_L_CalfTwist01", "KC_D_401L_L_Shin_Drive"),  # knee
+    ReferenceMapping("CC_Base_L_Foot", "KB_D_501L_L_LEG_FOOT"),  # foot
+    ReferenceMapping("CC_Base_L_UpperarmTwist01", "KC_C_104L_PitchHardstopDriven"),  # shoulder
+    ReferenceMapping("CC_Base_L_ForearmTwist01", "KC_C_202L"),  # elbow
+    ReferenceMapping("CC_Base_L_Hand", "KB_C_501X_Left_Bayonet_Adapter_Hard_Stop"),  # hand
+    ReferenceMapping("CC_Base_R_ThighTwist01", "RS03_4"),  # hip
+    ReferenceMapping("CC_Base_R_CalfTwist01", "KC_D_401R_R_Shin_Drive"),  # knee
+    ReferenceMapping("CC_Base_R_Foot", "KB_D_501R_R_LEG_FOOT"),  # foot
+    ReferenceMapping("CC_Base_R_UpperarmTwist01", "KC_C_104R_PitchHardstopDriven"),  # shoulder
+    ReferenceMapping("CC_Base_R_ForearmTwist01", "KC_C_202R"),  # elbow
+    ReferenceMapping("CC_Base_R_Hand", "KB_C_501X_Right_Bayonet_Adapter_Hard_Stop"),  # hand
+)
 
 
 @dataclass
@@ -80,22 +88,6 @@ class KbotDanceTaskConfig(KbotStandingTaskConfig):
     )
 
 
-HUMANOID_REFERENCE_MAPPINGS = (
-    ReferenceMapping("CC_Base_L_ThighTwist01", "RS03_5"),  # hip
-    ReferenceMapping("CC_Base_L_CalfTwist01", "KC_D_401L_L_Shin_Drive"),  # knee
-    ReferenceMapping("CC_Base_L_Foot", "KB_D_501L_L_LEG_FOOT"),  # foot
-    ReferenceMapping("CC_Base_L_UpperarmTwist01", "KC_C_104L_PitchHardstopDriven"),  # shoulder
-    ReferenceMapping("CC_Base_L_ForearmTwist01", "KC_C_202L"),  # elbow
-    ReferenceMapping("CC_Base_L_Hand", "KB_C_501X_Left_Bayonet_Adapter_Hard_Stop"),  # hand
-    ReferenceMapping("CC_Base_R_ThighTwist01", "RS03_4"),  # hip
-    ReferenceMapping("CC_Base_R_CalfTwist01", "KC_D_401R_R_Shin_Drive"),  # knee
-    ReferenceMapping("CC_Base_R_Foot", "KB_D_501R_R_LEG_FOOT"),  # foot
-    ReferenceMapping("CC_Base_R_UpperarmTwist01", "KC_C_104R_PitchHardstopDriven"),  # shoulder
-    ReferenceMapping("CC_Base_R_ForearmTwist01", "KC_C_202R"),  # elbow
-    ReferenceMapping("CC_Base_R_Hand", "KB_C_501X_Right_Bayonet_Adapter_Hard_Stop"),  # hand
-)
-
-
 Config = TypeVar("Config", bound=KbotDanceTaskConfig)
 
 
@@ -124,9 +116,16 @@ class MatchingReward(ksim.Reward):
 
 
 class KbotDanceTask(KbotStandingTask[Config], Generic[Config]):
-    def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
-        rewards = [MatchingReward(reference_gait=self.reference_gait, ctrl_dt=self.config.ctrl_dt, scale=0.1)]
+    config: Config
 
+    def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
+        rewards: list[ksim.Reward | MatchingReward] = [
+            MatchingReward(
+                reference_gait=self.reference_gait,
+                ctrl_dt=self.config.ctrl_dt,
+                scale=0.1,
+            ),
+        ]
         return rewards
 
     def get_actuators(
@@ -139,9 +138,37 @@ class KbotDanceTask(KbotStandingTask[Config], Generic[Config]):
         else:
             noise = 0.0
         if self.config.use_mit_actuators:
-            return ksim.MITPositionVelocityActuators(
+            if metadata is None:
+                raise ValueError("Metadata is required for MIT actuators")
+            return common.TargetPositionMITActuators(
                 physics_model,
                 metadata,
+                default_targets=(
+                    # right shoulder
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    # left shoulder
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    # right leg
+                    -0.23,
+                    0.0,
+                    0.0,
+                    -0.441,
+                    0.195,
+                    # left leg
+                    0.23,
+                    0.0,
+                    0.0,
+                    0.441,
+                    -0.195,
+                ),
                 pos_action_noise=noise,
                 vel_action_noise=noise,
                 pos_action_noise_type="gaussian",
@@ -173,9 +200,9 @@ class KbotDanceTask(KbotStandingTask[Config], Generic[Config]):
                     MAX_TORQUE["02"],
                 ],
             )
-        return ScaledTorqueActuators(
+        return common.ScaledTorqueActuators(
             default_targets=jnp.array(
-                [
+                (
                     # right shoulder
                     0.0,
                     0.0,
@@ -200,7 +227,7 @@ class KbotDanceTask(KbotStandingTask[Config], Generic[Config]):
                     0.0,
                     0.0,
                     0.0,
-                ]
+                ),
             ),
             action_scale=0.5,
             noise=noise,
@@ -210,48 +237,11 @@ class KbotDanceTask(KbotStandingTask[Config], Generic[Config]):
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [ksim.BadZTermination(unhealthy_z_lower=0.6, unhealthy_z_upper=1.5)]
 
-    def get_on_policy_variables(
-        self, model: KbotModel, trajectories: ksim.Trajectory, rng: PRNGKeyArray
-    ) -> PPOVariables:
-        """Gets PPO variables using the policy that generated the trajectory."""
-        if trajectories.aux_outputs is None:
-            raise ValueError("No aux outputs found in trajectories")
-        if not isinstance(trajectories.aux_outputs, AuxOutputs):
-            raise TypeError(f"Expected AuxOutputs, got {type(trajectories.aux_outputs)}")
-        if not hasattr(trajectories.aux_outputs, "log_probs") or not hasattr(trajectories.aux_outputs, "values"):
-            raise AttributeError("AuxOutputs object missing required attributes 'log_probs' or 'values'")
-        return PPOVariables(
-            log_probs_tn=trajectories.aux_outputs.log_probs,
-            values_t=trajectories.aux_outputs.values,
+    def get_initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
+        return (
+            jnp.zeros(HISTORY_LENGTH * SINGLE_STEP_HISTORY_SIZE),
+            jnp.zeros(HISTORY_LENGTH * SINGLE_STEP_HISTORY_SIZE),
         )
-
-    def get_off_policy_variables(
-        self, model: KbotModel, trajectories: ksim.Trajectory, rng: PRNGKeyArray
-    ) -> PPOVariables:
-        """Gets PPO variables using the current (potentially updated) policy."""
-        # Recalculate log_probs with the current model
-        par_actor_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0))
-        action_dist_btn = par_actor_fn(model, trajectories.obs, trajectories.command)
-        log_probs_tn = action_dist_btn.log_prob(trajectories.action)
-        # Recalculate values with the current model
-        par_critic_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
-        values_bt1 = par_critic_fn(model, trajectories.obs, trajectories.command)
-        values_t = values_bt1.squeeze(-1)
-        # Optionally compute entropy here if needed for entropy bonus
-        # entropy_tn = action_dist_btn.entropy()
-        return PPOVariables(
-            log_probs_tn=log_probs_tn,
-            values_t=values_t,
-            # entropy_tn=entropy_tn, # Uncomment if using entropy bonus
-        )
-
-    def get_curriculum(self, physics_model: ksim.PhysicsModel) -> Curriculum:
-        """Returns the curriculum for the task."""
-        # Using a constant curriculum (max difficulty) as a default
-        return ConstantCurriculum(level=1.0)
-
-    def get_initial_carry(self, rng: PRNGKeyArray) -> Array:
-        return jnp.zeros(HISTORY_LENGTH * SINGLE_STEP_HISTORY_SIZE)
 
     def sample_action(
         self,
@@ -262,10 +252,8 @@ class KbotDanceTask(KbotStandingTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, Array, AuxOutputs]:
-        action_n, history_n, super_aux_outputs = super().sample_action(
-            model, carry, physics_model, physics_state, observations, commands, rng
-        )
+    ) -> ksim.Action:
+        action_n = super().sample_action(model, carry, physics_model, physics_state, observations, commands, rng)
 
         # Getting the local cartesian positions for all tracked bodies.
         tracked_positions: dict[int, Array] = {}
@@ -274,11 +262,9 @@ class KbotDanceTask(KbotStandingTask[Config], Generic[Config]):
             tracked_positions[body_id] = jnp.array(body_pos)
 
         aux_outputs = GaitMatchingAuxOutputs(
-            log_probs=super_aux_outputs.log_probs,
-            values=super_aux_outputs.values,
             tracked_pos=xax.FrozenDict(tracked_positions),
         )
-        return action_n, history_n, aux_outputs
+        return ksim.Action(action=action_n.action, carry=action_n.carry, aux_outputs=aux_outputs)
 
     def run(self) -> None:
         mj_model: PhysicsModel = self.get_mujoco_model()
@@ -320,7 +306,7 @@ if __name__ == "__main__":
     # To visualize the environment, use the following command:
     #   python -m ksim_kbot.misc_tasks.dance run_environment=True
     # To visualize the reference gait, use the following command:
-    #   mjpython -m ksim_kbot.misc_tasks.dance run_environment=True visualize_reference_gait=True
+    #   mujoco python -m ksim_kbot.misc_tasks.dance run_environment=True visualize_reference_gait=True
     # On MacOS or other devices with less memory, you can change the number
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
@@ -337,7 +323,7 @@ if __name__ == "__main__":
             max_action_latency=0.0,
             min_action_latency=0.0,
             save_every_n_steps=25,
-            rollout_length_seconds=2.5,
+            rollout_length_seconds=1.25,
             log_full_trajectory_every_n_steps=5,
             # PPO parameters
             gamma=0.97,
@@ -352,7 +338,7 @@ if __name__ == "__main__":
             bvh_scaling_factor=1 / 135,
             mj_base_name="Torso_Side_Right",
             reference_base_name="CC_Base_Pelvis",
-            visualize_reference_gait=True,
+            visualize_reference_gait=False,
             use_mit_actuators=True,
         ),
     )

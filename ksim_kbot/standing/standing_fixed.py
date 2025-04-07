@@ -16,8 +16,8 @@ from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
-from ksim_kbot import common
-from ksim_kbot.standing.standing import KbotStandingTask, KbotStandingTaskConfig
+from ksim_kbot import common, rewards
+from ksim_kbot.standing.standing import MAX_TORQUE, KbotStandingTask, KbotStandingTaskConfig
 
 OBS_SIZE = 10 * 2 + 2 + 3 + 3 + 3 + 20  # = position + velocity + imu_acc + imu_gyro + projected_gravity + last_action
 CMD_SIZE = 3
@@ -28,20 +28,6 @@ SINGLE_STEP_HISTORY_SIZE = NUM_OUTPUTS + OBS_SIZE + CMD_SIZE
 HISTORY_LENGTH = 0
 
 NUM_INPUTS = (OBS_SIZE + CMD_SIZE) + SINGLE_STEP_HISTORY_SIZE * HISTORY_LENGTH
-
-MAX_TORQUE = {
-    "00": 1.0,
-    "02": 17.0,
-    "03": 60.0,
-    "04": 80.0,
-}
-
-
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class AuxOutputs:
-    log_probs: Array
-    values: Array
 
 
 class KbotActor(eqx.Module):
@@ -233,10 +219,10 @@ class KbotStandingFixedTask(KbotStandingTask[Config], Generic[Config]):
         if self.config.use_mit_actuators:
             if metadata is None:
                 raise ValueError("Metadata is required for MIT actuators")
-            return common.ScaledMITPositionVelocityActuators(
+            return common.TargetPositionMITActuators(
                 physics_model,
                 metadata,
-                default_targets=[
+                default_targets=(
                     # right leg
                     -0.23,
                     0.0,
@@ -249,7 +235,7 @@ class KbotStandingFixedTask(KbotStandingTask[Config], Generic[Config]):
                     0.0,
                     0.441,
                     -0.195,
-                ],
+                ),
                 pos_action_noise=0.1,
                 vel_action_noise=0.1,
                 pos_action_noise_type="gaussian",
@@ -388,7 +374,7 @@ class KbotStandingFixedTask(KbotStandingTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            common.JointDeviationPenalty(
+            rewards.JointDeviationPenalty(
                 scale=-0.02,
                 joint_targets=(
                     # right leg
@@ -411,7 +397,7 @@ class KbotStandingFixedTask(KbotStandingTask[Config], Generic[Config]):
             ksim.LinearVelocityTrackingReward(index="x", command_name="linear_velocity_command_x", scale=0.1),
             ksim.LinearVelocityTrackingReward(index="y", command_name="linear_velocity_command_y", scale=0.1),
             ksim.AngularVelocityTrackingReward(index="z", command_name="angular_velocity_command_z", scale=0.1),
-            common.FeetSlipPenalty(scale=-0.25),
+            rewards.FeetSlipPenalty(scale=-0.25),
             # common.TerminationPenalty(scale=-5.0),
         ]
 
@@ -433,9 +419,9 @@ class KbotStandingFixedTask(KbotStandingTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, Array, AuxOutputs]:
+    ) -> ksim.Action:
         actor_carry, critic_carry = carry
-        action_dist_n = self._run_actor(model.actor, observations, commands, actor_carry)
+        action_dist_n = self.run_actor(model.actor, observations, commands, actor_carry)  # type: ignore[arg-type]
         action_j = action_dist_n.sample(seed=rng)
 
         timestep_phase_2 = observations["timestep_phase_observation"]
@@ -448,7 +434,7 @@ class KbotStandingFixedTask(KbotStandingTask[Config], Generic[Config]):
         lin_vel_cmd_y = commands["linear_velocity_command_y"]
         ang_vel_cmd_z = commands["angular_velocity_command_z"]
         last_action_n = observations["last_action_observation"]
-        history_n = jnp.concatenate(
+        current_history_data = jnp.concatenate(
             [
                 timestep_phase_2,
                 joint_pos_n,
@@ -469,13 +455,13 @@ class KbotStandingFixedTask(KbotStandingTask[Config], Generic[Config]):
             # Roll the history by shifting the existing history and adding the new data
             carry_reshaped = actor_carry.reshape(HISTORY_LENGTH, SINGLE_STEP_HISTORY_SIZE)
             shifted_history = jnp.roll(carry_reshaped, shift=-1, axis=0)
-            new_history = shifted_history.at[HISTORY_LENGTH - 1].set(history_n)
-            history_n = new_history.reshape(-1)
-            history_n = (history_n, history_n)
+            new_history = shifted_history.at[HISTORY_LENGTH - 1].set(current_history_data)
+            history_array = new_history.reshape(-1)
+            next_carry = (history_array, history_array)
         else:
-            history_n = (jnp.zeros(0), jnp.zeros(0))
+            next_carry = (jnp.zeros(0), jnp.zeros(0))
 
-        return ksim.Action(action=action_j, carry=history_n, aux_outputs=None)
+        return ksim.Action(action=action_j, carry=next_carry, aux_outputs=None)
 
 
 if __name__ == "__main__":

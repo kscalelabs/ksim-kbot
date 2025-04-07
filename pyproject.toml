@@ -40,8 +40,10 @@ module = [
     "mujoco.*",
     "optax.*",
     "scipy.*",
-    "_pytest.*",
+    "bvhio.*",
+    "_pytest.*"
 ]
+
 ignore_missing_imports = true
 
 [tool.isort]

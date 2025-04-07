@@ -397,10 +397,10 @@ class KbotGetupTask(KbotStandingTask[Config], Generic[Config]):
         if self.config.use_mit_actuators:
             if metadata is None:
                 raise ValueError("Metadata is required for MIT actuators")
-            return common.ScaledMITPositionVelocityActuators(
+            return common.TargetPositionMITActuators(
                 physics_model,
                 metadata,
-                default_targets=[
+                default_targets=(
                     # right arm
                     0.0,
                     0.0,
@@ -425,7 +425,7 @@ class KbotGetupTask(KbotStandingTask[Config], Generic[Config]):
                     0.0,
                     0.0,
                     0.0,
-                ],
+                ),
                 pos_action_noise=0.1,
                 vel_action_noise=0.1,
                 pos_action_noise_type="gaussian",
@@ -633,9 +633,9 @@ class KbotGetupTask(KbotStandingTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, Array, AuxOutputs]:
-        actor_carry, critic_carry = carry
-        action_dist_n = self._run_actor(model.actor, observations, commands, actor_carry)
+    ) -> ksim.Action:
+        actor_carry, _ = carry
+        action_dist_n = self.run_actor(model.actor, observations, commands, actor_carry)  # type: ignore[arg-type]
         action_j = action_dist_n.sample(seed=rng)
 
         timestep_phase_2 = observations["timestep_phase_observation"]
@@ -648,7 +648,7 @@ class KbotGetupTask(KbotStandingTask[Config], Generic[Config]):
         lin_vel_cmd_y = commands["linear_velocity_command_y"]
         ang_vel_cmd_z = commands["angular_velocity_command_z"]
         last_action_n = observations["last_action_observation"]
-        history_n = jnp.concatenate(
+        current_history_data = jnp.concatenate(
             [
                 timestep_phase_2,
                 joint_pos_n,
@@ -669,13 +669,13 @@ class KbotGetupTask(KbotStandingTask[Config], Generic[Config]):
             # Roll the history by shifting the existing history and adding the new data
             carry_reshaped = actor_carry.reshape(HISTORY_LENGTH, SINGLE_STEP_HISTORY_SIZE)
             shifted_history = jnp.roll(carry_reshaped, shift=-1, axis=0)
-            new_history = shifted_history.at[HISTORY_LENGTH - 1].set(history_n)
-            history_n = new_history.reshape(-1)
-            history_n = (history_n, history_n)
+            new_history = shifted_history.at[HISTORY_LENGTH - 1].set(current_history_data)
+            history_array = new_history.reshape(-1)
+            next_carry = (history_array, history_array)
         else:
-            history_n = (jnp.zeros(0), jnp.zeros(0))
+            next_carry = (jnp.zeros(0), jnp.zeros(0))
 
-        return ksim.Action(action=action_j, carry=history_n, aux_outputs=None)
+        return ksim.Action(action=action_j, carry=next_carry, aux_outputs=None)
 
 
 if __name__ == "__main__":

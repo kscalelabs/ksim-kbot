@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 """Pseudo-Inverse Kinematics task for the default humanoid."""
 
 import asyncio
@@ -327,7 +328,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 switch_prob=self.config.ctrl_dt / 1,  # will last 1 seconds in expectation
                 vis_radius=0.05,
                 vis_color=(1.0, 0.0, 0.0, 0.8),
-            ),
+            ),  # type: ignore[call-arg]
             ksim.GlobalBodyQuaternionCommand.create(
                 model=physics_model,
                 base_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
@@ -337,7 +338,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 null_prob=0.5,
                 vis_magnitude=0.5,
                 vis_color=(0.0, 0.0, 1.0, 0.5),
-            ),
+            ),  # type: ignore[call-arg]
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
