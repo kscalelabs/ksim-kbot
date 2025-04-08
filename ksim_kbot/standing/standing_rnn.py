@@ -375,15 +375,15 @@ class KbotStandingRNNTask(KbotStandingTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    # python -m ksim_kbot.standing.standing_fixed
+    # python -m ksim_kbot.standing.standing_rnn disable_multiprocessing=True
     # To visualize the environment, use the following command:
-    # python -m ksim_kbot.standing.standing_fixed run_environment=True \
+    # python -m ksim_kbot.standing.standing_rnn run_environment=True \
     #  run_environment_num_seconds=1 \
     #  run_environment_save_path=videos/test.mp4
     KbotStandingRNNTask.launch(
         KbotStandingRNNTaskConfig(
             num_envs=8192,
-            batch_size=512,
+            batch_size=256,
             num_passes=10,
             epochs_per_log_step=1,
             # Simulation parameters.

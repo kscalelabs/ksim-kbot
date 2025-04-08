@@ -23,8 +23,8 @@ class JointDeviationPenalty(ksim.Reward):
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         diff = trajectory.qpos[..., 7:] - jnp.array(self.joint_targets)
-        diff = diff * jnp.array(self.joint_weights)
-        return xax.get_norm(diff, self.norm).sum(axis=-1)
+        cost = jnp.square(diff) * jnp.array(self.joint_weights)
+        return jnp.sum(cost, axis=-1)
 
     @classmethod
     def create(

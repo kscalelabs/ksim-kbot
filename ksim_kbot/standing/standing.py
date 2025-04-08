@@ -765,7 +765,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    # python -m ksim_kbot.standing.standing
+    # python -m ksim_kbot.standing.standing disable_multiprocessing=True
     # To visualize the environment, use the following command:
     # python -m ksim_kbot.standing.standing run_environment=True \
     #  run_environment_num_seconds=1 \
@@ -792,7 +792,7 @@ if __name__ == "__main__":
             max_grad_norm=0.5,
             use_mit_actuators=True,
             log_full_trajectory_every_n_steps=5,
-            save_every_n_steps=2,
+            save_every_n_steps=25,
             export_for_inference=True,
             domain_randomize=True,
         ),
