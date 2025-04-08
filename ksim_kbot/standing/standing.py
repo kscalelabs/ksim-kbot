@@ -535,35 +535,62 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         return [
             rewards.XYPositionPenalty(target_x=0.0, target_y=0.0, scale=-0.1),
             ksim.ActionSmoothnessPenalty(scale=-0.001),
-            # rewards.JointDeviationPenalty(
-            #     scale=-0.02,
-            #     joint_targets=(
-            #         # right arm
-            #         0.0,
-            #         0.0,
-            #         0.0,
-            #         0.0,
-            #         0.0,
-            #         # left arm
-            #         0.0,
-            #         0.0,
-            #         0.0,
-            #         0.0,
-            #         0.0,
-            #         # right leg
-            #         -0.23,
-            #         0.0,
-            #         0.0,
-            #         -0.441,
-            #         0.195,
-            #         # left leg
-            #         0.23,
-            #         0.0,
-            #         0.0,
-            #         0.441,
-            #         -0.195,
-            #     ),
-            # ),
+            rewards.JointDeviationPenalty.create(
+                physics_model=physics_model,
+                scale=-0.02,
+                joint_targets=(
+                    # right arm
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    # left arm
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    # right leg
+                    -0.23,
+                    0.0,
+                    0.0,
+                    -0.441,
+                    0.195,
+                    # left leg
+                    0.23,
+                    0.0,
+                    0.0,
+                    0.441,
+                    -0.195,
+                ),
+                joint_weights=(
+                    # right arm
+                    0.1,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    # left arm
+                    0.1,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    # right leg
+                    0.01,  # pitch
+                    1.0,
+                    1.0,
+                    0.01,  # knee
+                    1.0,
+                    # left leg
+                    0.01,  # pitch
+                    1.0,
+                    1.0,
+                    0.01,  # knee
+                    1.0,
+                ),
+            ),
             ksim.BaseHeightRangeReward(z_lower=0.7, z_upper=1.5, dropoff=10.0, scale=1.0),
             ksim.StayAliveReward(scale=1.0),
             rewards.FeetSlipPenalty(scale=-0.05),
