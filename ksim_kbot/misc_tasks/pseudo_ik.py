@@ -633,7 +633,7 @@ if __name__ == "__main__":
             rollout_length_seconds=10.0,
             render_length_seconds=10.0,
             save_every_n_steps=25,
-            export_for_inference=False,
+            export_for_inference=True,
             # Apparently rendering markers can sometimes cause segfaults.
             # Disable this if you are running into segfaults.
             render_markers=True,
