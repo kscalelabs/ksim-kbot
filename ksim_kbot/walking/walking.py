@@ -32,7 +32,7 @@ class NaiveForwardReward(ksim.Reward):
         return trajectory.qvel[..., 0].clip(max=self.clip_max)
 
 
-class DefaultHumanoidActor(eqx.Module):
+class Actor(eqx.Module):
     """Actor for the walking task."""
 
     mlp: eqx.nn.MLP
@@ -88,7 +88,7 @@ class DefaultHumanoidActor(eqx.Module):
         return dist_n
 
 
-class DefaultHumanoidCritic(eqx.Module):
+class Critic(eqx.Module):
     """Critic for the walking task."""
 
     mlp: eqx.nn.MLP
@@ -116,9 +116,9 @@ class DefaultHumanoidCritic(eqx.Module):
         return self.mlp(obs_n)
 
 
-class DefaultHumanoidModel(eqx.Module):
-    actor: DefaultHumanoidActor
-    critic: DefaultHumanoidCritic
+class Model(eqx.Module):
+    actor: Actor
+    critic: Critic
 
     def __init__(
         self,
@@ -128,7 +128,7 @@ class DefaultHumanoidModel(eqx.Module):
         depth: int,
         num_mixtures: int,
     ) -> None:
-        self.actor = DefaultHumanoidActor(
+        self.actor = Actor(
             key,
             min_std=0.0001,
             max_std=1.0,
@@ -137,7 +137,7 @@ class DefaultHumanoidModel(eqx.Module):
             depth=depth,
             num_mixtures=num_mixtures,
         )
-        self.critic = DefaultHumanoidCritic(
+        self.critic = Critic(
             key,
             hidden_size=hidden_size,
             depth=depth,
@@ -145,7 +145,7 @@ class DefaultHumanoidModel(eqx.Module):
 
 
 @dataclass
-class HumanoidWalkingTaskConfig(ksim.PPOConfig):
+class WalkingTaskConfig(ksim.PPOConfig):
     """Config for the humanoid walking task."""
 
     robot_urdf_path: str = xax.field(
@@ -240,10 +240,10 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     )
 
 
-Config = TypeVar("Config", bound=HumanoidWalkingTaskConfig)
+Config = TypeVar("Config", bound=WalkingTaskConfig)
 
 
-class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
+class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_optimizer(self) -> optax.GradientTransformation:
         """Builds the optimizer.
 
@@ -385,8 +385,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             min_level_steps=self.config.min_level_steps,
         )
 
-    def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
-        return DefaultHumanoidModel(
+    def get_model(self, key: PRNGKeyArray) -> Model:
+        return Model(
             key,
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
@@ -398,7 +398,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def run_actor(
         self,
-        model: DefaultHumanoidActor,
+        model: Actor,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
     ) -> distrax.Distribution:
@@ -444,7 +444,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def run_critic(
         self,
-        model: DefaultHumanoidCritic,
+        model: Critic,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
     ) -> Array:
@@ -490,7 +490,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_ppo_variables(
         self,
-        model: DefaultHumanoidModel,
+        model: Model,
         trajectories: ksim.Trajectory,
         carry: None,
         rng: PRNGKeyArray,
@@ -511,7 +511,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def sample_action(
         self,
-        model: DefaultHumanoidModel,
+        model: Model,
         carry: None,
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
@@ -537,8 +537,8 @@ if __name__ == "__main__":
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
     #   python -m examples.walking num_envs=8 batch_size=4
-    HumanoidWalkingTask.launch(
-        HumanoidWalkingTaskConfig(
+    WalkingTask.launch(
+        WalkingTaskConfig(
             # Training parameters.
             num_envs=2048,
             batch_size=256,
