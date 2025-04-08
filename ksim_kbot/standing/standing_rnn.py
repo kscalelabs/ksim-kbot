@@ -2,7 +2,6 @@
 """Defines simple task for training a standing policy for K-Bot."""
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Generic, TypeVar
 
 import distrax
@@ -10,19 +9,15 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import ksim
-import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray
-from kscale.web.gen.api import JointMetadataOutput
-from mujoco import mjx
 
-from ksim_kbot import common, rewards
-from ksim_kbot.standing.standing import MAX_TORQUE, KbotStandingTask, KbotStandingTaskConfig
+from ksim_kbot.standing.standing import NUM_INPUTS, KbotStandingTask, KbotStandingTaskConfig
 
 OBS_SIZE = 20 * 2 + 2 + 3 + 3 + 3 + 40  # = position + velocity + imu_acc + imu_gyro + projected_gravity + last_action
 CMD_SIZE = 3
 NUM_OUTPUTS = 20 * 2  # position + velocity
-NUM_INPUTS = OBS_SIZE + CMD_SIZE
+# NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_JOINTS = 20 * 2
 
 
@@ -195,7 +190,7 @@ class KbotRNNModel(eqx.Module):
         )
         self.critic = KbotRNNCritic(
             key,
-            num_inputs=num_inputs,
+            num_inputs=num_inputs + 2 + 3 + 4 + 3 + 3 + 20,
             hidden_size=hidden_size,
             depth=depth,
         )
@@ -224,6 +219,8 @@ Config = TypeVar("Config", bound=KbotStandingRNNTaskConfig)
 
 
 class KbotStandingRNNTask(KbotStandingTask[Config], Generic[Config]):
+    config: Config
+
     def get_model(self, key: PRNGKeyArray) -> KbotRNNModel:
         return KbotRNNModel(
             key,
@@ -234,268 +231,6 @@ class KbotStandingRNNTask(KbotStandingTask[Config], Generic[Config]):
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
         )
-
-    def get_mujoco_model(self) -> mujoco.MjModel:
-        mjcf_path = (Path(self.config.robot_urdf_path) / "scene.mjcf").resolve().as_posix()
-        mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
-
-        mj_model.opt.timestep = jnp.array(self.config.dt)
-        mj_model.opt.iterations = 6
-        mj_model.opt.ls_iterations = 6
-        mj_model.opt.disableflags = mjx.DisableBit.EULERDAMP
-        mj_model.opt.solver = mjx.SolverType.CG
-
-        return mj_model
-
-    def get_actuators(
-        self,
-        physics_model: ksim.PhysicsModel,
-        metadata: dict[str, JointMetadataOutput] | None = None,
-    ) -> ksim.Actuators:
-        if self.config.use_mit_actuators:
-            if metadata is None:
-                raise ValueError("Metadata is required for MIT actuators")
-            return common.TargetPositionMITActuators(
-                physics_model,
-                metadata,
-                default_targets=(
-                    # right shoulder
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # left shoulder
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # right leg
-                    -0.23,
-                    0.0,
-                    0.0,
-                    -0.441,
-                    0.195,
-                    # left leg
-                    0.23,
-                    0.0,
-                    0.0,
-                    0.441,
-                    -0.195,
-                ),
-                pos_action_noise=0.1,
-                vel_action_noise=0.1,
-                pos_action_noise_type="gaussian",
-                vel_action_noise_type="gaussian",
-                ctrl_clip=[
-                    # right arm
-                    MAX_TORQUE["03"],
-                    MAX_TORQUE["03"],
-                    MAX_TORQUE["02"],
-                    MAX_TORQUE["02"],
-                    MAX_TORQUE["00"],
-                    # left arm
-                    MAX_TORQUE["03"],
-                    MAX_TORQUE["03"],
-                    MAX_TORQUE["02"],
-                    MAX_TORQUE["02"],
-                    MAX_TORQUE["00"],
-                    # right leg
-                    MAX_TORQUE["04"],
-                    MAX_TORQUE["03"],
-                    MAX_TORQUE["03"],
-                    MAX_TORQUE["04"],
-                    MAX_TORQUE["02"],
-                    # left leg
-                    MAX_TORQUE["04"],
-                    MAX_TORQUE["03"],
-                    MAX_TORQUE["03"],
-                    MAX_TORQUE["04"],
-                    MAX_TORQUE["02"],
-                ],
-                action_scale=self.config.action_scale,
-            )
-        else:
-            return ksim.TorqueActuators()
-
-    def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
-        scale = 0.0 if self.config.domain_randomize else 0.01
-        return [
-            ksim.RandomBaseVelocityXYReset(scale=scale),
-            ksim.RandomJointPositionReset(scale=scale),
-            ksim.RandomJointVelocityReset(scale=scale),
-            common.ResetDefaultJointPosition(
-                default_targets=(
-                    0.0,
-                    0.0,
-                    0.9,
-                    # quat
-                    1.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # right arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # left arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # right leg
-                    -0.23,
-                    0.0,
-                    0.0,
-                    -0.441,
-                    0.195,
-                    # left leg
-                    0.23,
-                    0.0,
-                    0.0,
-                    0.441,
-                    -0.195,
-                )
-            ),
-        ]
-
-    def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
-        if self.config.domain_randomize:
-            vel_obs_noise = 0.0
-            imu_acc_noise = 0.5
-            imu_gyro_noise = 0.2
-            gvec_noise = 0.0
-            base_position_noise = 0.0
-            base_orientation_noise = 0.0
-            base_linear_velocity_noise = 0.0
-            base_angular_velocity_noise = 0.0
-            base_angular_velocity_noise = 0.0
-        else:
-            vel_obs_noise = 0.0
-            imu_acc_noise = 0.0
-            imu_gyro_noise = 0.0
-            gvec_noise = 0.0
-            base_position_noise = 0.0
-            base_orientation_noise = 0.0
-            base_linear_velocity_noise = 0.0
-            base_angular_velocity_noise = 0.0
-            base_angular_velocity_noise = 0.0
-        return [
-            common.TimestepPhaseObservation(),
-            common.JointPositionObservation(
-                default_targets=(
-                    # right arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # left arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # right leg
-                    -0.23,
-                    0.0,
-                    0.0,
-                    -0.441,
-                    0.195,
-                    # left leg
-                    0.23,
-                    0.0,
-                    0.0,
-                    0.441,
-                    -0.195,
-                ),
-                noise=0.01,
-            ),
-            ksim.JointVelocityObservation(noise=vel_obs_noise),
-            ksim.ActuatorForceObservation(),
-            ksim.SensorObservation.create(
-                physics_model=physics_model,
-                sensor_name="imu_acc",
-                noise=imu_acc_noise,
-            ),
-            ksim.SensorObservation.create(
-                physics_model=physics_model,
-                sensor_name="imu_gyro",
-                noise=imu_gyro_noise,
-            ),
-            common.ProjectedGravityObservation(noise=gvec_noise),
-            common.LastActionObservation(noise=0.0),
-            # Additional critic observations
-            ksim.BasePositionObservation(noise=base_position_noise),
-            ksim.BaseOrientationObservation(noise=base_orientation_noise),
-            ksim.BaseLinearVelocityObservation(noise=base_linear_velocity_noise),
-            ksim.BaseAngularVelocityObservation(noise=base_angular_velocity_noise),
-            ksim.CenterOfMassVelocityObservation(),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="local_linvel_origin", noise=0.0),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="global_linvel_origin", noise=0.0),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="global_angvel_origin", noise=0.0),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="upvector_origin", noise=0.0),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="orientation_origin", noise=0.0),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="gyro_origin", noise=0.0),
-            ksim.FeetContactObservation.create(
-                physics_model=physics_model,
-                foot_left_geom_names="KB_D_501L_L_LEG_FOOT_collision_box",
-                foot_right_geom_names="KB_D_501R_R_LEG_FOOT_collision_box",
-                floor_geom_names="floor",
-            ),
-            common.FeetPositionObservation.create(
-                physics_model=physics_model,
-                foot_left_site_name="left_foot",
-                foot_right_site_name="right_foot",
-                floor_threshold=0.00,
-            ),
-            common.TrueHeightObservation(),
-        ]
-
-    def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
-        return [
-            rewards.JointDeviationPenalty(
-                scale=-0.02,
-                joint_targets=(
-                    # right arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # left arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # right leg
-                    -0.23,
-                    0.0,
-                    0.0,
-                    -0.441,
-                    0.195,
-                    # left leg
-                    0.23,
-                    0.0,
-                    0.0,
-                    0.441,
-                    -0.195,
-                ),
-            ),
-            ksim.BaseHeightRangeReward(z_lower=0.6, z_upper=1.4, dropoff=10.0, scale=0.01),
-            ksim.StayAliveReward(scale=1.0),
-            ksim.ActuatorForcePenalty(scale=-0.005),
-            ksim.LinearVelocityTrackingReward(index="x", command_name="linear_velocity_command_x", scale=0.1),
-            ksim.LinearVelocityTrackingReward(index="y", command_name="linear_velocity_command_y", scale=0.1),
-            ksim.AngularVelocityTrackingReward(index="z", command_name="angular_velocity_command_z", scale=0.1),
-            rewards.FeetSlipPenalty(scale=-0.25),
-            # common.TerminationPenalty(scale=-5.0),
-        ]
 
     def run_actor(
         self,
