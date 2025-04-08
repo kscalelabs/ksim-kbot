@@ -16,9 +16,8 @@ from ksim_kbot.standing.standing import NUM_INPUTS, KbotStandingTask, KbotStandi
 
 OBS_SIZE = 20 * 2 + 2 + 3 + 3 + 3 + 40  # = position + velocity + imu_acc + imu_gyro + projected_gravity + last_action
 CMD_SIZE = 3
-NUM_OUTPUTS = 20 * 2  # position + velocity
-# NUM_INPUTS = OBS_SIZE + CMD_SIZE
-NUM_JOINTS = 20 * 2
+NUM_JOINTS = 20 * 2  # position + velocity
+ADDITIONAL_CRITIC_INPUT_SIZE = 2 + 3 + 4 + 3 + 3 + 20
 
 
 @jax.tree_util.register_dataclass
@@ -190,7 +189,7 @@ class KbotRNNModel(eqx.Module):
         )
         self.critic = KbotRNNCritic(
             key,
-            num_inputs=num_inputs + 2 + 3 + 4 + 3 + 3 + 20,
+            num_inputs=num_inputs + ADDITIONAL_CRITIC_INPUT_SIZE,
             hidden_size=hidden_size,
             depth=depth,
         )
@@ -274,7 +273,7 @@ class KbotStandingRNNTask(KbotStandingTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         carry: Array,
-    ) -> Array:
+    ) -> tuple[Array, Array]:
         timestep_phase_2 = observations["timestep_phase_observation"]
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"] / 10.0

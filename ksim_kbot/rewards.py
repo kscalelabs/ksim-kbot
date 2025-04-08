@@ -30,12 +30,13 @@ class JointDeviationPenalty(ksim.Reward):
     def create(
         cls,
         physics_model: ksim.PhysicsModel,
-        joint_targets: tuple[float, ...],
         scale: float = -1.0,
-        joint_weights: tuple[float, ...] = None,
+        *,
+        joint_targets: tuple[float, ...],
+        joint_weights: tuple[float, ...] | None = None,
     ) -> Self:
         if joint_weights is None:
-            joint_weights = [1.0] * len(joint_targets)
+            joint_weights = tuple([1.0] * len(joint_targets))
 
         return cls(
             scale=scale,
@@ -92,9 +93,8 @@ class FeetSlipPenalty(ksim.Reward):
             )
         contact = trajectory.obs[self.feet_contact_obs_name]
         body_vel = trajectory.obs[self.com_vel_obs_name][..., :2]
-        x = jnp.sum(jnp.linalg.norm(body_vel, axis=-1, keepdims=True) * contact, axis=-1)
-
-        return x
+        normed_body_vel = jnp.linalg.norm(body_vel, axis=-1, keepdims=True)
+        return jnp.sum(normed_body_vel * contact, axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)

@@ -590,9 +590,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                     1.0,
                 ),
             ),
-            ksim.BaseHeightRangeReward(z_lower=0.7, z_upper=1.5, dropoff=10.0, scale=1.0),
+            rewards.FeetSlipPenalty(scale=-0.05),
             ksim.StayAliveReward(scale=1.0),
-            # rewards.FeetSlipPenalty(scale=-0.05),
             # common.TerminationPenalty(scale=-5.0),
         ]
 
@@ -774,7 +773,7 @@ if __name__ == "__main__":
     KbotStandingTask.launch(
         KbotStandingTaskConfig(
             num_envs=8192,
-            batch_size=512,
+            batch_size=256,
             num_passes=10,
             epochs_per_log_step=1,
             # Simulation parameters.
