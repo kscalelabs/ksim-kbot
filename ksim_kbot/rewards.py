@@ -36,7 +36,7 @@ class JointDeviationPenalty(ksim.Reward):
     ) -> Self:
         if joint_weights is None:
             joint_weights = [1.0] * len(joint_targets)
-        breakpoint()
+
         return cls(
             scale=scale,
             joint_targets=joint_targets,

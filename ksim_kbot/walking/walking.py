@@ -382,6 +382,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards_list = [
             rewards.JointDeviationPenalty.create(
+                physics_model=physics_model,
                 scale=-0.1,
                 joint_weights=(
                     # right arm
