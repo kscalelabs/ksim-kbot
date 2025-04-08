@@ -353,7 +353,10 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards: list[ksim.Reward] = [
-            ksim.StayAliveReward(scale=1.0),
+            ksim.StayAliveReward(
+                success_reward=1.0,
+                scale=1.0,
+            ),
         ]
 
         if self.config.use_naive_reward:
@@ -375,6 +378,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.PitchTooGreatTermination(max_pitch=math.pi / 3),
             ksim.RollTooGreatTermination(max_roll=math.pi / 3),
             ksim.FastAccelerationTermination(),
+            ksim.FarFromOriginTermination(max_dist=10.0),
         ]
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
