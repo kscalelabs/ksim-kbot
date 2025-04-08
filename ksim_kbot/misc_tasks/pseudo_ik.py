@@ -18,7 +18,6 @@ import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
-from ksim.utils.mujoco import remove_joints_except
 from mujoco import mjx
 from xax.nn.export import export
 
@@ -218,7 +217,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_mujoco_model(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
         mjcf_path = (Path(self.config.robot_urdf_path) / "robot_scene.mjcf").resolve().as_posix()
-        mj_model_joint_removed = remove_joints_except(
+        mj_model_joint_removed = ksim.remove_mujoco_joints_except(
             mjcf_path,
             [
                 "dof_right_shoulder_pitch_03",
