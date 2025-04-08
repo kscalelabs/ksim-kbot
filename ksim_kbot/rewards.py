@@ -19,10 +19,30 @@ class JointDeviationPenalty(ksim.Reward):
 
     norm: xax.NormType = attrs.field(default="l2")
     joint_targets: tuple[float, ...] = attrs.field()
+    joint_weights: tuple[float, ...] = attrs.field(default=None)
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         diff = trajectory.qpos[..., 7:] - jnp.array(self.joint_targets)
-        return xax.get_norm(diff, self.norm).sum(axis=-1)
+        cost = jnp.square(diff) * jnp.array(self.joint_weights)
+        return jnp.sum(cost, axis=-1)
+
+    @classmethod
+    def create(
+        cls,
+        physics_model: ksim.PhysicsModel,
+        scale: float = -1.0,
+        *,
+        joint_targets: tuple[float, ...],
+        joint_weights: tuple[float, ...] | None = None,
+    ) -> Self:
+        if joint_weights is None:
+            joint_weights = tuple([1.0] * len(joint_targets))
+
+        return cls(
+            scale=scale,
+            joint_targets=joint_targets,
+            joint_weights=joint_weights,
+        )
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -73,7 +93,8 @@ class FeetSlipPenalty(ksim.Reward):
             )
         contact = trajectory.obs[self.feet_contact_obs_name]
         body_vel = trajectory.obs[self.com_vel_obs_name][..., :2]
-        return jnp.sum(jnp.linalg.norm(body_vel, axis=-1, keepdims=True) * contact, axis=-1)
+        normed_body_vel = jnp.linalg.norm(body_vel, axis=-1, keepdims=True)
+        return jnp.sum(normed_body_vel * contact, axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -215,6 +236,22 @@ class TerminationPenalty(ksim.Reward):
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         return trajectory.done
+
+
+@attrs.define(frozen=True, kw_only=True)
+class XYPositionPenalty(ksim.Reward):
+    """Penalty for deviation from a target (x, y) position."""
+
+    target_x: float = attrs.field()
+    target_y: float = attrs.field()
+    norm: xax.NormType = attrs.field(default="l2")
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        current_pos = trajectory.qpos[..., :2]
+        target_pos = jnp.array([self.target_x, self.target_y])
+        diff = current_pos - target_pos
+
+        return xax.get_norm(diff, self.norm).sum(axis=-1)
 
 
 # Gate stateful rewards for reference

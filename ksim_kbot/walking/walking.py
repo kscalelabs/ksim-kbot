@@ -1,4 +1,4 @@
-"""Defines simple task for training a walking policy for the default humanoid."""
+"""Defines simple task for training a walking policy for the K-Bot."""
 
 import asyncio
 import math
@@ -535,13 +535,13 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m examples.walking
+    #   python -m ksim_kbot.walking.walking
     # To visualize the environment, use the following command:
-    #   python -m examples.walking run_environment=True
+    #   python -m ksim_kbot.walking.walking run_environment=True
     # On MacOS or other devices with less memory, you can change the number
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
-    #   python -m examples.walking num_envs=8 batch_size=4
+    #   python -m ksim_kbot.walking.walking num_envs=8 batch_size=4
     WalkingTask.launch(
         WalkingTaskConfig(
             # Training parameters.

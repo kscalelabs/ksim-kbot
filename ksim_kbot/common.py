@@ -177,6 +177,15 @@ class FeetPositionObservation(ksim.Observation):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class FeetContactObservation(ksim.FeetContactObservation):
+    """Observation of the feet contact."""
+
+    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
+        feet_contact_12 = super().observe(state, rng)
+        return feet_contact_12.flatten()
+
+
+@attrs.define(frozen=True, kw_only=True)
 class GVecTermination(ksim.Termination):
     """Terminates the episode if the robot is facing down."""
 
@@ -185,7 +194,7 @@ class GVecTermination(ksim.Termination):
 
     def __call__(self, state: ksim.PhysicsData, curriculum_level: Array) -> Array:
         start, end = self.sensor_idx_range
-        return state.sensordata[start:end][-1] < self.min_z
+        return jnp.where(state.sensordata[start:end][-1] < self.min_z, -1, 0)
 
     @classmethod
     def create(cls, physics_model: ksim.PhysicsModel, sensor_name: str) -> Self:
