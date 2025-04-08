@@ -21,7 +21,7 @@ from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from ksim.utils.mujoco import remove_joints_except
 from mujoco import mjx
-from xax.nn.export import export
+# from xax.nn.export import export
 
 import ksim_kbot.common
 from ksim_kbot.standing.standing import MAX_TORQUE
@@ -572,57 +572,57 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             num_levels=10,
         )
 
-    def make_export_model(self, model: KbotModel, stochastic: bool = False, batched: bool = False) -> Callable:
-        """Makes a callable inference function that directly takes a flattened input vector and returns an action.
+    # def make_export_model(self, model: KbotModel, stochastic: bool = False, batched: bool = False) -> Callable:
+    #     """Makes a callable inference function that directly takes a flattened input vector and returns an action.
 
-        Returns:
-            A tuple containing the inference function and the size of the input vector.
-        """
+    #     Returns:
+    #         A tuple containing the inference function and the size of the input vector.
+    #     """
 
-        def deterministic_model_fn(obs: Array) -> Array:
-            return model.actor.call_flat_obs(obs).mode()
+    #     def deterministic_model_fn(obs: Array) -> Array:
+    #         return model.actor.call_flat_obs(obs).mode()
 
-        def stochastic_model_fn(obs: Array) -> Array:
-            dist = model.actor.call_flat_obs(obs)
-            return dist.sample(seed=jax.random.PRNGKey(0))
+    #     def stochastic_model_fn(obs: Array) -> Array:
+    #         dist = model.actor.call_flat_obs(obs)
+    #         return dist.sample(seed=jax.random.PRNGKey(0))
 
-        if stochastic:
-            model_fn = stochastic_model_fn
-        else:
-            model_fn = deterministic_model_fn
+    #     if stochastic:
+    #         model_fn = stochastic_model_fn
+    #     else:
+    #         model_fn = deterministic_model_fn
 
-        if batched:
+    #     if batched:
 
-            def batched_model_fn(obs: Array) -> Array:
-                return jax.vmap(model_fn)(obs)
+    #         def batched_model_fn(obs: Array) -> Array:
+    #             return jax.vmap(model_fn)(obs)
 
-            return batched_model_fn
+    #         return batched_model_fn
 
-        return model_fn
+    #     return model_fn
 
-    def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
-        if not self.config.export_for_inference:
-            return state
+    # def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
+    #     if not self.config.export_for_inference:
+    #         return state
 
-        model: KbotModel = self.load_checkpoint(ckpt_path, part="model")
+    #     model: KbotModel = self.load_checkpoint(ckpt_path, part="model", model_template=self.get_model)
 
-        model_fn = self.make_export_model(model, stochastic=False, batched=True)
+    #     model_fn = self.make_export_model(model, stochastic=False, batched=True)
 
-        input_shapes = [(NUM_INPUTS,)]
+    #     input_shapes = [(NUM_INPUTS,)]
 
-        tf_path = (
-            ckpt_path.parent / "tf_model"
-            if self.config.only_save_most_recent
-            else ckpt_path.parent / f"tf_model_{state.num_steps}"
-        )
+    #     tf_path = (
+    #         ckpt_path.parent / "tf_model"
+    #         if self.config.only_save_most_recent
+    #         else ckpt_path.parent / f"tf_model_{state.num_steps}"
+    #     )
 
-        export(
-            model_fn,
-            input_shapes,  # type: ignore [arg-type]
-            tf_path,
-        )
+    #     export(
+    #         model_fn,
+    #         input_shapes,  # type: ignore [arg-type]
+    #         tf_path,
+    #     )
 
-        return state
+    #     return state
 
 
 if __name__ == "__main__":
@@ -637,8 +637,8 @@ if __name__ == "__main__":
     KbotPseudoIKTask.launch(
         KbotPseudoIKTaskConfig(
             # Training parameters.
-            num_envs=3000,
-            batch_size=300,
+            num_envs=2048,
+            batch_size=256,
             num_passes=10,
             epochs_per_log_step=1,
             # Logging parameters.
@@ -653,7 +653,7 @@ if __name__ == "__main__":
             rollout_length_seconds=10.0,
             render_length_seconds=10.0,
             save_every_n_steps=25,
-            export_for_inference=True,
+            export_for_inference=False,
             # Apparently rendering markers can sometimes cause segfaults.
             # Disable this if you are running into segfaults.
             render_markers=True,
