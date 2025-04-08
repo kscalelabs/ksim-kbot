@@ -383,6 +383,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             increase_threshold=self.config.increase_threshold,
             decrease_threshold=self.config.decrease_threshold,
             min_level_steps=self.config.min_level_steps,
+            dt=self.config.ctrl_dt,
         )
 
     def get_model(self, key: PRNGKeyArray) -> Model:
