@@ -19,9 +19,9 @@ import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
-from ksim.utils.mujoco import remove_joints_except
+from ksim.utils.mujoco import remove_joints_except, add_new_body
 from mujoco import mjx
-# from xax.nn.export import export
+from xax.nn.export import export
 
 import ksim_kbot.common
 from ksim_kbot.standing.standing import MAX_TORQUE
@@ -285,11 +285,30 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
         with open(temp_path, "w") as f:
             f.write(mj_model_joint_removed)
 
-        mj_model = mujoco.MjModel.from_xml_path(temp_path)
+        # add body
+        mj_model_added_body = add_new_body(
+            temp_path,
+            parent_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
+            new_body_name="ik_target",
+            pos=(0.0, 0.0, -0.1),
+            quat=(1.0, 0.0, 0.0, 0.0),
+            add_visual=True,
+            visual_geom_color=(0, 1, 0, 1),
+            visual_geom_size=(0.03, 0.03, 0.03),
+        )
+
+        temp_path_2 = (
+            (Path(self.config.robot_urdf_path) / f"robot_scene_added_body_{uuid.uuid4()}.mjcf").resolve().as_posix()
+        )
+
+        with open(temp_path_2, "w") as f:
+            f.write(mj_model_added_body)
+
+        mj_model = mujoco.MjModel.from_xml_path(temp_path_2)
 
         # remove the temp file
         os.remove(temp_path)
-
+        os.remove(temp_path_2)
         mj_model.opt.timestep = jnp.array(self.config.dt)
         mj_model.opt.iterations = 6
         mj_model.opt.ls_iterations = 6
@@ -390,10 +409,10 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.CartesianBodyTargetCommand.create(
                 model=physics_model,
                 # pivot_name="KC_C_104R_PitchHardstopDriven",
-                pivot_point=(0.25, -0.1, 0.0),
+                pivot_point=(0.3, -0.1, 0.0),
                 base_name="floating_base_link",
                 curriculum_scale=2.0,
-                sample_sphere_radius=0.1,
+                sample_sphere_radius=0.25,
                 positive_x=False,  # forward + backward
                 positive_y=False,
                 positive_z=False,
@@ -403,7 +422,7 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
             ),  # type: ignore[call-arg]
             ksim.GlobalBodyQuaternionCommand.create(
                 model=physics_model,
-                base_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
+                base_name="ik_target",
                 switch_prob=self.config.ctrl_dt / 1,  # will last 1 seconds in expectation
                 vis_size=0.02,
                 null_prob=1.0,
@@ -416,24 +435,24 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
         return [
             ksim.ContinuousCartesianBodyTargetReward.create(
                 model=physics_model,
-                tracked_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
+                tracked_body_name="ik_target",
                 base_body_name="floating_base_link",
                 norm="l2",
                 scale=2.5,
                 sensitivity=1.0,
                 threshold=0.0001,  # with l2 xax norm, this is 1cm
                 time_bonus_scale=0.3,
-                command_name="cartesian_body_target_command_floating_base_link",
+                command_name="cartesian_body_target_command_floating_base_link_(0.3, -0.1, 0.0)",
             ),
-            ksim.GlobalBodyQuaternionReward.create(
-                model=physics_model,
-                command_name="global_body_quaternion_command_KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
-                tracked_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
-                base_body_name="floating_base_link",
-                norm="l2",
-                scale=0.1,
-                sensitivity=1.0,
-            ),
+            # ksim.GlobalBodyQuaternionReward.create(
+            #     model=physics_model,
+            #     command_name="global_body_quaternion_command_KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
+            #     tracked_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
+            #     base_body_name="floating_base_link",
+            #     norm="l2",
+            #     scale=0.1,
+            #     sensitivity=1.0,
+            # ),
             # ksim_kbot.common.JointDeviationPenalty(
             #     joint_targets=(0.0,
             #                    0.0,
@@ -445,7 +464,7 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
             # ),
             ksim.CartesianBodyTargetVectorReward.create(
                 model=physics_model,
-                command_name="cartesian_body_target_command_floating_base_link",
+                command_name="cartesian_body_target_command_floating_base_link_(0.3, -0.1, 0.0)",
                 tracked_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
                 base_body_name="floating_base_link",
                 scale=3.0,
@@ -455,7 +474,7 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
             ),
             ksim.CartesianBodyTargetPenalty.create(
                 model=physics_model,
-                command_name="cartesian_body_target_command_floating_base_link",
+                command_name="cartesian_body_target_command_floating_base_link_(0.3, -0.1, 0.0)",
                 tracked_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
                 base_body_name="floating_base_link",
                 norm="l2",
@@ -488,8 +507,8 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
     ) -> distrax.Normal:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"] / 50.0
-        xyz_target_3 = commands["cartesian_body_target_command_floating_base_link"]
-        quat_target_4 = commands["global_body_quaternion_command_KB_C_501X_Right_Bayonet_Adapter_Hard_Stop"]
+        xyz_target_3 = commands["cartesian_body_target_command_floating_base_link_(0.3, -0.1, 0.0)"]
+        quat_target_4 = commands["global_body_quaternion_command_ik_target"]
         prev_action_n = observations["last_action_observation"]
         return model.actor(
             joint_pos_n=joint_pos_n,
@@ -508,8 +527,8 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
         joint_pos_n = observations["joint_position_observation"]  # 26
         joint_vel_n = observations["joint_velocity_observation"] / 100.0  # 27
         actuator_force_n = observations["actuator_force_observation"]  # 27
-        xyz_target_3 = commands["cartesian_body_target_command_floating_base_link"]  # 3
-        quat_target_4 = commands["global_body_quaternion_command_KB_C_501X_Right_Bayonet_Adapter_Hard_Stop"]  # 4
+        xyz_target_3 = commands["cartesian_body_target_command_floating_base_link_(0.3, -0.1, 0.0)"]  # 3
+        quat_target_4 = commands["global_body_quaternion_command_ik_target"]  # 4
         end_effector_pos_3 = observations["cartesian_body_position_observation_KC_C_104R_PitchHardstopDriven"]  # 3
         prev_action_n = observations["last_action_observation"]  # 5
 
@@ -572,57 +591,61 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
             num_levels=10,
         )
 
-    # def make_export_model(self, model: KbotModel, stochastic: bool = False, batched: bool = False) -> Callable:
-    #     """Makes a callable inference function that directly takes a flattened input vector and returns an action.
+    def make_export_model(self, model: KbotModel, stochastic: bool = False, batched: bool = False) -> Callable:
+        """Makes a callable inference function that directly takes a flattened input vector and returns an action.
 
-    #     Returns:
-    #         A tuple containing the inference function and the size of the input vector.
-    #     """
+        Returns:
+            A tuple containing the inference function and the size of the input vector.
+        """
 
-    #     def deterministic_model_fn(obs: Array) -> Array:
-    #         return model.actor.call_flat_obs(obs).mode()
+        def deterministic_model_fn(obs: Array) -> Array:
+            return model.actor.call_flat_obs(obs).mode()
 
-    #     def stochastic_model_fn(obs: Array) -> Array:
-    #         dist = model.actor.call_flat_obs(obs)
-    #         return dist.sample(seed=jax.random.PRNGKey(0))
+        def stochastic_model_fn(obs: Array) -> Array:
+            dist = model.actor.call_flat_obs(obs)
+            return dist.sample(seed=jax.random.PRNGKey(0))
 
-    #     if stochastic:
-    #         model_fn = stochastic_model_fn
-    #     else:
-    #         model_fn = deterministic_model_fn
+        if stochastic:
+            model_fn = stochastic_model_fn
+        else:
+            model_fn = deterministic_model_fn
 
-    #     if batched:
+        if batched:
 
-    #         def batched_model_fn(obs: Array) -> Array:
-    #             return jax.vmap(model_fn)(obs)
+            def batched_model_fn(obs: Array) -> Array:
+                return jax.vmap(model_fn)(obs)
 
-    #         return batched_model_fn
+            return batched_model_fn
 
-    #     return model_fn
+        return model_fn
 
-    # def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
-    #     if not self.config.export_for_inference:
-    #         return state
+    def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
+        if not self.config.export_for_inference:
+            return state
 
-    #     model: KbotModel = self.load_checkpoint(ckpt_path, part="model", model_template=self.get_model)
+        model: KbotModel = self.load_ckpt_with_template(
+            ckpt_path,
+            part="model",
+            model_template=self.get_model(key=jax.random.PRNGKey(0)),
+        )
 
-    #     model_fn = self.make_export_model(model, stochastic=False, batched=True)
+        model_fn = self.make_export_model(model, stochastic=False, batched=True)
 
-    #     input_shapes = [(NUM_INPUTS,)]
+        input_shapes = [(NUM_INPUTS,)]
 
-    #     tf_path = (
-    #         ckpt_path.parent / "tf_model"
-    #         if self.config.only_save_most_recent
-    #         else ckpt_path.parent / f"tf_model_{state.num_steps}"
-    #     )
+        tf_path = (
+            ckpt_path.parent / "tf_model"
+            if self.config.only_save_most_recent
+            else ckpt_path.parent / f"tf_model_{state.num_steps}"
+        )
 
-    #     export(
-    #         model_fn,
-    #         input_shapes,  # type: ignore [arg-type]
-    #         tf_path,
-    #     )
+        export(
+            model_fn,
+            input_shapes,  # type: ignore [arg-type]
+            tf_path,
+        )
 
-    #     return state
+        return state
 
 
 if __name__ == "__main__":
@@ -653,7 +676,7 @@ if __name__ == "__main__":
             rollout_length_seconds=10.0,
             render_length_seconds=10.0,
             save_every_n_steps=25,
-            export_for_inference=False,
+            export_for_inference=True,
             # Apparently rendering markers can sometimes cause segfaults.
             # Disable this if you are running into segfaults.
             render_markers=True,

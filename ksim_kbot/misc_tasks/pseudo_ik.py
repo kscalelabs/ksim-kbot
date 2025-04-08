@@ -19,7 +19,7 @@ import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
-from ksim.utils.mujoco import remove_joints_except
+from ksim.utils.mujoco import remove_joints_except, add_new_body
 from mujoco import mjx
 from xax.nn.export import export
 
@@ -285,11 +285,30 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         with open(temp_path, "w") as f:
             f.write(mj_model_joint_removed)
 
-        mj_model = mujoco.MjModel.from_xml_path(temp_path)
+        # add body
+        mj_model_added_body = add_new_body(
+            temp_path,
+            parent_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
+            new_body_name="ik_target",
+            pos=(0.0, 0.0, -0.1),
+            quat=(1.0, 0.0, 0.0, 0.0),
+            add_visual=True,
+            visual_geom_color=(0, 1, 0, 1),
+            visual_geom_size=(0.03, 0.03, 0.03),
+        )
+
+        temp_path_2 = (
+            (Path(self.config.robot_urdf_path) / f"robot_scene_added_body_{uuid.uuid4()}.mjcf").resolve().as_posix()
+        )
+
+        with open(temp_path_2, "w") as f:
+            f.write(mj_model_added_body)
+
+        mj_model = mujoco.MjModel.from_xml_path(temp_path_2)
 
         # remove the temp file
         os.remove(temp_path)
-
+        os.remove(temp_path_2)
         mj_model.opt.timestep = jnp.array(self.config.dt)
         mj_model.opt.iterations = 6
         mj_model.opt.ls_iterations = 6
@@ -390,10 +409,10 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.CartesianBodyTargetCommand.create(
                 model=physics_model,
                 # pivot_name="KC_C_104R_PitchHardstopDriven",
-                pivot_point=(0.25, -0.1, 0.0),
+                pivot_point=(0.3, -0.1, 0.0),
                 base_name="floating_base_link",
                 curriculum_scale=2.0,
-                sample_sphere_radius=0.1,
+                sample_sphere_radius=0.25,
                 positive_x=False,  # forward + backward
                 positive_y=False,
                 positive_z=False,
@@ -403,7 +422,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             ),
             ksim.CartesianBodyTargetCommand.create(
                 model=physics_model,
-                pivot_point=(0.2, -0.1, 0.0),
+                pivot_point=(0.25, -0.1, 0.0),
                 base_name="floating_base_link",
                 curriculum_scale=2.0,
                 sample_sphere_radius=0.1,
@@ -420,17 +439,17 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         return [
             ksim.PositionTrackingReward.create(
                 model=physics_model,
-                tracked_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
+                tracked_body_name="ik_target",
                 base_body_name="floating_base_link",
-                scale=2.5,
-                command_name="cartesian_body_target_command_floating_base_link_(0.25, -0.1, 0.0)",
+                scale=8.0,
+                command_name="cartesian_body_target_command_floating_base_link_(0.3, -0.1, 0.0)",
             ),
             ksim.PositionTrackingReward.create(
                 model=physics_model,
                 tracked_body_name="KC_C_401R_R_UpForearmDrive",
                 base_body_name="floating_base_link",
-                scale=1.0,
-                command_name="cartesian_body_target_command_floating_base_link_(0.2, -0.1, 0.0)",
+                scale=2.0,
+                command_name="cartesian_body_target_command_floating_base_link_(0.25, -0.1, 0.0)",
             ),
             # ksim_kbot.common.JointDeviationPenalty(
             #     joint_targets=(0.0,
@@ -442,10 +461,10 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             #     freejoint_first=False,
             # ),
             ksim.ObservationMeanPenalty(observation_name="contact_observation_arms", scale=-1.0),
-            ksim.ActuatorForcePenalty(scale=-0.00001, norm="l1"),
-            ksim.ActionSmoothnessPenalty(scale=-0.02, norm="l2"),
-            ksim.JointVelocityPenalty(scale=-0.001, freejoint_first=False, norm="l2"),
-            ksim.ActuatorJerkPenalty(scale=-0.001, ctrl_dt=self.config.ctrl_dt, norm="l2"),
+            ksim.ActuatorForcePenalty(scale=-0.000001, norm="l1"),
+            ksim.ActionSmoothnessPenalty(scale=-0.00002, norm="l2"),
+            ksim.JointVelocityPenalty(scale=-0.000001, freejoint_first=False, norm="l2"),
+            ksim.ActuatorJerkPenalty(scale=-0.0000001, ctrl_dt=self.config.ctrl_dt, norm="l2"),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -468,8 +487,8 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
     ) -> distrax.Normal:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"] / 50.0
-        xyz_upper_target_3 = commands["cartesian_body_target_command_floating_base_link_(0.25, -0.1, 0.0)"]
-        xyz_lower_target_3 = commands["cartesian_body_target_command_floating_base_link_(0.2, -0.1, 0.0)"]
+        xyz_upper_target_3 = commands["cartesian_body_target_command_floating_base_link_(0.3, -0.1, 0.0)"]
+        xyz_lower_target_3 = commands["cartesian_body_target_command_floating_base_link_(0.25, -0.1, 0.0)"]
         prev_action_n = observations["last_action_observation"]
         return model.actor(
             joint_pos_n=joint_pos_n,
@@ -488,8 +507,8 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         joint_pos_n = observations["joint_position_observation"]  # 26
         joint_vel_n = observations["joint_velocity_observation"] / 100.0  # 27
         actuator_force_n = observations["actuator_force_observation"]  # 27
-        xyz_upper_target_3 = commands["cartesian_body_target_command_floating_base_link_(0.25, -0.1, 0.0)"]  # 3
-        xyz_lower_target_3 = commands["cartesian_body_target_command_floating_base_link_(0.2, -0.1, 0.0)"]  # 3
+        xyz_upper_target_3 = commands["cartesian_body_target_command_floating_base_link_(0.3, -0.1, 0.0)"]  # 3
+        xyz_lower_target_3 = commands["cartesian_body_target_command_floating_base_link_(0.25, -0.1, 0.0)"]  # 3
         end_effector_pos_3 = observations["cartesian_body_position_observation_KC_C_104R_PitchHardstopDriven"]  # 3
         prev_action_n = observations["last_action_observation"]  # 5
 
@@ -545,7 +564,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
         return ksim.RewardLevelCurriculum(
-            reward_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop_position_tracking_reward",
+            reward_name="ik_target_position_tracking_reward",
             increase_threshold=0.1,
             decrease_threshold=0.08,
             min_level_steps=10,
@@ -584,7 +603,11 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         if not self.config.export_for_inference:
             return state
 
-        model: KbotModel = self.load_checkpoint(ckpt_path, part="model", model_template=self.get_model)
+        model = self.load_ckpt_with_template(
+            ckpt_path,
+            part="model",
+            model_template=self.get_model(jax.random.PRNGKey(0)),
+        )
 
         model_fn = self.make_export_model(model, stochastic=False, batched=True)
 
