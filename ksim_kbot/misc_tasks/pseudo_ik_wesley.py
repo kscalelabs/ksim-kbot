@@ -19,7 +19,7 @@ import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
-from ksim.utils.mujoco import remove_joints_except, add_new_body
+from ksim.utils.mujoco import remove_mujoco_joints_except, add_new_mujoco_body
 from mujoco import mjx
 from xax.nn.export import export
 
@@ -27,6 +27,170 @@ import ksim_kbot.common
 from ksim_kbot.standing.standing import MAX_TORQUE
 
 NUM_JOINTS = 5  # disabling all DoFs except for the right arm.
+
+@attrs.define(frozen=True, kw_only=True)
+class CartesianBodyTargetPenalty(ksim.Reward):
+    """Penalizes larger distances between the body and the target position."""
+
+    tracked_body_idx: int = attrs.field()
+    base_body_idx: int = attrs.field()
+    command_name: str = attrs.field()
+    norm: xax.NormType = attrs.field()
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        body_pos = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
+        target_pos = trajectory.command[self.command_name]
+        return xax.get_norm(body_pos - target_pos, self.norm).mean(axis=-1)
+
+    @classmethod
+    def create(
+        cls,
+        model: ksim.PhysicsModel,
+        command_name: str,
+        tracked_body_name: str,
+        base_body_name: str,
+        norm: xax.NormType = "l2",
+        scale: float = 1.0,
+    ) -> Self:
+        body_idx = ksim.get_body_data_idx_from_name(model, tracked_body_name)
+        base_idx = ksim.get_body_data_idx_from_name(model, base_body_name)
+        return cls(
+            tracked_body_idx=body_idx,
+            base_body_idx=base_idx,
+            norm=norm,
+            scale=scale,
+            command_name=command_name,
+        )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class CartesianBodyTargetVectorReward(ksim.Reward):
+    """Rewards the alignment of the body's velocity vector to the direction of the target."""
+
+    tracked_body_idx: int = attrs.field()
+    base_body_idx: int = attrs.field()
+    command_name: str = attrs.field()
+    dt: float = attrs.field()
+    normalize_velocity: bool = attrs.field()
+    distance_threshold: float = attrs.field()
+    epsilon: float = attrs.field(default=1e-6)
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        body_pos_TL = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
+
+        body_pos_right_shifted_TL = jnp.roll(body_pos_TL, shift=1, axis=0)
+
+        # Zero out the first velocity
+        body_pos_right_shifted_TL = body_pos_right_shifted_TL.at[0].set(body_pos_TL[0])
+
+        body_vel_TL = (body_pos_TL - body_pos_right_shifted_TL) / self.dt
+
+        target_vector = trajectory.command[self.command_name] - body_pos_TL
+        normalized_target_vector = target_vector / (
+            jnp.linalg.norm(target_vector, axis=-1, keepdims=True) + self.epsilon
+        )
+
+        # Threshold to only apply reward to the body when it is far from the target.
+        distance_scalar = jnp.linalg.norm(target_vector, axis=-1)
+        far_from_target = distance_scalar > self.distance_threshold
+
+        velocity_scalar = jnp.linalg.norm(body_vel_TL, axis=-1)
+        high_velocity = velocity_scalar > 0.1
+
+        if self.normalize_velocity:
+            normalized_body_vel = body_vel_TL / (jnp.linalg.norm(body_vel_TL, axis=-1, keepdims=True) + self.epsilon)
+            original_products = normalized_body_vel * normalized_target_vector
+        else:
+            original_products = body_vel_TL * normalized_target_vector
+
+        # This will give maximum reward if near the target (and velocity is normalized)
+        return jnp.where(far_from_target & high_velocity, jnp.sum(original_products, axis=-1), 1.1)
+
+    @classmethod
+    def create(
+        cls,
+        model: ksim.PhysicsModel,
+        command_name: str,
+        tracked_body_name: str,
+        base_body_name: str,
+        dt: float,
+        normalize_velocity: bool = True,
+        scale: float = 1.0,
+        epsilon: float = 1e-6,
+        distance_threshold: float = 0.1,
+    ) -> Self:
+        body_idx = ksim.get_body_data_idx_from_name(model, tracked_body_name)
+        base_idx = ksim.get_body_data_idx_from_name(model, base_body_name)
+        return cls(
+            tracked_body_idx=body_idx,
+            base_body_idx=base_idx,
+            scale=scale,
+            command_name=command_name,
+            dt=dt,
+            normalize_velocity=normalize_velocity,
+            epsilon=epsilon,
+            distance_threshold=distance_threshold,
+        )
+
+@attrs.define(frozen=True, kw_only=True)
+class ContinuousCartesianBodyTargetReward(ksim.Reward):
+    """Rewards the closeness of the body to the target position more for the longer it has been doing so."""
+
+    tracked_body_idx: int = attrs.field()
+    base_body_idx: int = attrs.field()
+    command_name: str = attrs.field()
+    norm: xax.NormType = attrs.field()
+    sensitivity: float = attrs.field()
+    threshold: float = attrs.field()
+    time_bonus_scale: float = attrs.field()
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        body_pos = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
+        target_pos = trajectory.command[self.command_name]
+
+        error = xax.get_norm(body_pos - target_pos, self.norm)
+        base_reward = jnp.exp(-error * self.sensitivity)
+        under_threshold = error < self.threshold
+
+        def count_scan_fn(carry: Array, x: Array) -> tuple[Array, Array]:
+            x = x.astype(jnp.int32)
+            # Reset counter to 0 if not under threshold, otherwise increment
+            count = jnp.where(x, carry + 1, 0)
+            return count, count
+
+        _, consecutive_steps = jax.lax.scan(
+            count_scan_fn, init=jnp.zeros_like(under_threshold[0], dtype=jnp.int32), xs=under_threshold
+        )
+
+        # time_bonus = jnp.exp(consecutive_steps * self.time_sensitivity) * self.time_bonus_scale
+        time_bonus = consecutive_steps * self.time_bonus_scale
+        return (base_reward + time_bonus).mean(axis=-1)
+
+    @classmethod
+    def create(
+        cls,
+        model: ksim.PhysicsModel,
+        command_name: str,
+        tracked_body_name: str,
+        base_body_name: str,
+        norm: xax.NormType = "l2",
+        scale: float = 1.0,
+        sensitivity: float = 1.0,
+        threshold: float = 0.25,
+        time_bonus_scale: float = 0.1,
+    ) -> Self:
+        body_idx = ksim.get_body_data_idx_from_name(model, tracked_body_name)
+        base_idx = ksim.get_body_data_idx_from_name(model, base_body_name)
+        return cls(
+            tracked_body_idx=body_idx,
+            base_body_idx=base_idx,
+            norm=norm,
+            scale=scale,
+            sensitivity=sensitivity,
+            command_name=command_name,
+            threshold=threshold,
+            time_bonus_scale=time_bonus_scale,
+        )
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -266,7 +430,7 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_mujoco_model(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
         mjcf_path = (Path(self.config.robot_urdf_path) / "robot_scene_collisions_simplified.mjcf").resolve().as_posix()
-        mj_model_joint_removed = remove_joints_except(
+        mj_model_joint_removed = remove_mujoco_joints_except(
             mjcf_path,
             [
                 "dof_right_shoulder_pitch_03",
@@ -286,7 +450,7 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
             f.write(mj_model_joint_removed)
 
         # add body
-        mj_model_added_body = add_new_body(
+        mj_model_added_body = add_new_mujoco_body(
             temp_path,
             parent_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
             new_body_name="ik_target",
@@ -409,7 +573,7 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.CartesianBodyTargetCommand.create(
                 model=physics_model,
                 # pivot_name="KC_C_104R_PitchHardstopDriven",
-                pivot_point=(0.3, -0.1, 0.0),
+                pivot_point=(0.3, 0.0, 0.0),
                 base_name="floating_base_link",
                 curriculum_scale=1.5,
                 sample_sphere_radius=0.25,
@@ -433,7 +597,7 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.ContinuousCartesianBodyTargetReward.create(
+            ContinuousCartesianBodyTargetReward.create(
                 model=physics_model,
                 tracked_body_name="ik_target",
                 base_body_name="floating_base_link",
@@ -442,7 +606,7 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
                 sensitivity=1.0,
                 threshold=0.000025,  # with l2 xax norm, this is 0.5cm
                 time_bonus_scale=0.3,
-                command_name="cartesian_body_target_command_floating_base_link_(0.3, -0.1, 0.0)",
+                command_name="cartesian_body_target_command_floating_base_link_(0.3, 0.0, 0.0)",
             ),
             # ksim.GlobalBodyQuaternionReward.create(
             #     model=physics_model,
@@ -462,9 +626,9 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
             #     scale=-0.05,
             #     freejoint_first=False,
             # ),
-            ksim.CartesianBodyTargetVectorReward.create(
+            CartesianBodyTargetVectorReward.create(
                 model=physics_model,
-                command_name="cartesian_body_target_command_floating_base_link_(0.3, -0.1, 0.0)",
+                command_name="cartesian_body_target_command_floating_base_link_(0.3, 0.0, 0.0)",
                 tracked_body_name="ik_target",
                 base_body_name="floating_base_link",
                 scale=3.0,
@@ -472,16 +636,16 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
                 distance_threshold=0.1,
                 dt=self.config.dt,
             ),
-            ksim.CartesianBodyTargetPenalty.create(
+            CartesianBodyTargetPenalty.create(
                 model=physics_model,
-                command_name="cartesian_body_target_command_floating_base_link_(0.3, -0.1, 0.0)",
+                command_name="cartesian_body_target_command_floating_base_link_(0.3, 0.0, 0.0)",
                 tracked_body_name="ik_target",
                 base_body_name="floating_base_link",
                 norm="l2",
                 scale=-6.0,
             ),
-            ksim.ObservationMeanPenalty(observation_name="contact_observation_arms", scale=-1.0),
-            ksim.ActuatorForcePenalty(scale=-0.00001, norm="l1"),
+            ksim.ObservationMeanPenalty(observation_name="contact_observation_arms", scale=-0.1),
+            ksim.ActuatorForcePenalty(scale=-0.000001, norm="l1"),
             ksim.ActionSmoothnessPenalty(scale=-0.02, norm="l2"),
             ksim.JointVelocityPenalty(scale=-0.001, freejoint_first=False, norm="l2"),
             ksim.ActuatorJerkPenalty(scale=-0.001, ctrl_dt=self.config.ctrl_dt, norm="l2"),
@@ -507,7 +671,7 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
     ) -> distrax.Normal:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"] / 50.0
-        xyz_target_3 = commands["cartesian_body_target_command_floating_base_link_(0.3, -0.1, 0.0)"]
+        xyz_target_3 = commands["cartesian_body_target_command_floating_base_link_(0.3, 0.0, 0.0)"]
         quat_target_4 = commands["global_body_quaternion_command_ik_target"]
         prev_action_n = observations["last_action_observation"]
         return model.actor(
@@ -527,7 +691,7 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
         joint_pos_n = observations["joint_position_observation"]  # 26
         joint_vel_n = observations["joint_velocity_observation"] / 100.0  # 27
         actuator_force_n = observations["actuator_force_observation"]  # 27
-        xyz_target_3 = commands["cartesian_body_target_command_floating_base_link_(0.3, -0.1, 0.0)"]  # 3
+        xyz_target_3 = commands["cartesian_body_target_command_floating_base_link_(0.3, 0.0, 0.0)"]  # 3
         quat_target_4 = commands["global_body_quaternion_command_ik_target"]  # 4
         end_effector_pos_3 = observations["cartesian_body_position_observation_KC_C_104R_PitchHardstopDriven"]  # 3
         prev_action_n = observations["last_action_observation"]  # 5
@@ -685,3 +849,235 @@ if __name__ == "__main__":
             use_mit_actuators=True,
         ),
     )
+
+"""
+
+@attrs.define(kw_only=True)
+class CartesianBodyTargetMarker(Marker):
+    command_name: str = attrs.field()
+
+    def __attrs_post_init__(self) -> None:
+        if self.target_name is None or self.target_type != "body":
+            raise ValueError("Base body name must be provided. Make sure to create with `get`.")
+
+    def update(self, trajectory: Trajectory) -> None:
+        self.pos = trajectory.command[self.command_name]
+
+    @classmethod
+    def get(
+        cls, command_name: str, base_body_name: str, radius: float, rgba: tuple[float, float, float, float]
+    ) -> Self:
+        return cls(
+            command_name=command_name,
+            target_name=base_body_name,
+            target_type="body",
+            geom=mujoco.mjtGeom.mjGEOM_SPHERE,
+            scale=(radius, radius, radius),
+            rgba=rgba,
+        )
+
+@attrs.define(frozen=True)
+class CartesianBodyTargetCommand(Command):
+
+    pivot_point: tuple[float, float, float] = attrs.field()
+    base_body_name: str = attrs.field()
+    base_id: int = attrs.field()
+    sample_sphere_radius: float = attrs.field()
+    positive_x: bool = attrs.field()
+    positive_y: bool = attrs.field()
+    positive_z: bool = attrs.field()
+    switch_prob: float = attrs.field()
+    vis_radius: float = attrs.field()
+    vis_color: tuple[float, float, float, float] = attrs.field()
+    curriculum_scale: float = attrs.field(default=1.0)
+
+    def _sample_sphere(self, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
+        # Sample a random unit vector symmetrically.
+        rng, rng_vec, rng_u = jax.random.split(rng, 3)
+        vec = jax.random.normal(rng_vec, (3,))
+        vec /= jnp.linalg.norm(vec)
+
+        # Generate a random radius with the proper distribution, ensuring scalar u.
+        u = jax.random.uniform(rng_u, ())  # Sample u as a scalar
+        r_scale = u ** (1 / 3)  # r_scale is scalar
+        r = self.sample_sphere_radius * r_scale * (curriculum_level * self.curriculum_scale + 1.0)  # r is scalar
+
+        # Scale the unit vector by the scalar radius.
+        scaled_vec = vec * r  # (3,) * () -> (3,)
+
+        # Apply sign constraints (original logic was slightly off, needed to unpack first)
+        x, y, z = scaled_vec
+        x = jnp.where(self.positive_x, jnp.abs(x), -jnp.abs(x))
+        y = jnp.where(self.positive_y, jnp.abs(y), -jnp.abs(y))
+        z = jnp.where(self.positive_z, jnp.abs(z), -jnp.abs(z))
+
+        return jnp.array([x, y, z])
+
+    def initial_command(
+        self,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        sphere_sample = self._sample_sphere(rng, curriculum_level)
+        pivot_pos = jnp.array(self.pivot_point)
+        return pivot_pos + sphere_sample
+
+    def __call__(
+        self,
+        prev_command: Array,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        rng_a, rng_b = jax.random.split(rng)
+        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
+        return jnp.where(switch_mask, new_commands, prev_command)
+
+    def get_markers(self) -> Collection[Marker]:
+        return [CartesianBodyTargetMarker.get(self.command_name, self.base_body_name, self.vis_radius, self.vis_color)]
+
+    def get_name(self) -> str:
+        return f"{super().get_name()}_{self.base_body_name}_{self.pivot_point}"
+
+    @classmethod
+    def create(
+        cls,
+        model: PhysicsModel,
+        pivot_point: tuple[float, float, float],
+        base_name: str,
+        sample_sphere_radius: float,
+        curriculum_scale: float = 1.0,
+        positive_x: bool = True,
+        positive_y: bool = True,
+        positive_z: bool = True,
+        switch_prob: float = 0.1,
+        vis_radius: float = 0.05,
+        vis_color: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.8),
+    ) -> Self:
+        base_id = get_body_data_idx_from_name(model, base_name)
+        return cls(
+            pivot_point=pivot_point,
+            base_body_name=base_name,
+            base_id=base_id,
+            sample_sphere_radius=sample_sphere_radius,
+            curriculum_scale=curriculum_scale,
+            positive_x=positive_x,
+            positive_y=positive_y,
+            positive_z=positive_z,
+            switch_prob=switch_prob,
+            vis_radius=vis_radius,
+            vis_color=vis_color,
+        )
+
+
+
+
+@attrs.define(kw_only=True)
+class GlobalBodyQuaternionMarker(Marker):
+    command_name: str = attrs.field()
+
+    def __attrs_post_init__(self) -> None:
+        if self.target_name is None or self.target_type != "body":
+            raise ValueError("Base body name must be provided. Make sure to create with `get`.")
+
+    def update(self, trajectory: Trajectory) -> None:
+        command = trajectory.command[self.command_name]
+        # Check if command is zeros (null quaternion)
+        is_null = jnp.all(jnp.isclose(command, 0.0))
+
+        # Only update orientation if command is not null
+        if not is_null:
+            self.geom = mujoco.mjtGeom.mjGEOM_ARROW
+            self.orientation = command
+        else:
+            self.geom = mujoco.mjtGeom.mjGEOM_SPHERE
+
+    @classmethod
+    def get(
+        cls,
+        command_name: str,
+        base_body_name: str,
+        size: float,
+        magnitude: float,
+        rgba: tuple[float, float, float, float],
+    ) -> Self:
+        return cls(
+            command_name=command_name,
+            target_name=base_body_name,
+            target_type="body",
+            geom=mujoco.mjtGeom.mjGEOM_ARROW,
+            scale=(size, size, magnitude),
+            rgba=rgba,
+        )
+
+
+@attrs.define(frozen=True)
+class GlobalBodyQuaternionCommand(Command):
+
+    base_body_name: str = attrs.field()
+    base_id: int = attrs.field()
+    switch_prob: float = attrs.field()
+    null_prob: float = attrs.field()  # Probability of sampling null quaternion
+    vis_magnitude: float = attrs.field()
+    vis_size: float = attrs.field()
+    vis_color: tuple[float, float, float, float] = attrs.field()
+
+    def initial_command(
+        self,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        rng_a, rng_b = jax.random.split(rng)
+        is_null = jax.random.bernoulli(rng_a, self.null_prob)
+        quat = jax.random.normal(rng_b, (4,))
+        random_quat = quat / jnp.linalg.norm(quat)
+        return jnp.where(is_null, jnp.zeros(4), random_quat)
+
+    def __call__(
+        self,
+        prev_command: Array,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        rng_a, rng_b = jax.random.split(rng)
+        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
+        return jnp.where(switch_mask, new_commands, prev_command)
+
+    def get_markers(self) -> Collection[Marker]:
+        return [
+            GlobalBodyQuaternionMarker.get(
+                self.command_name, self.base_body_name, self.vis_size, self.vis_magnitude, self.vis_color
+            )
+        ]
+
+    def get_name(self) -> str:
+        return f"{super().get_name()}_{self.base_body_name}"
+
+    @classmethod
+    def create(
+        cls,
+        model: PhysicsModel,
+        base_name: str,
+        switch_prob: float = 0.1,
+        null_prob: float = 0.1,
+        vis_magnitude: float = 0.5,
+        vis_size: float = 0.05,
+        vis_color: tuple[float, float, float, float] = (0.0, 0.0, 1.0, 0.8),
+    ) -> Self:
+        base_id = get_body_data_idx_from_name(model, base_name)
+        return cls(
+            base_body_name=base_name,
+            base_id=base_id,
+            switch_prob=switch_prob,
+            null_prob=null_prob,
+            vis_magnitude=vis_magnitude,
+            vis_size=vis_size,
+            vis_color=vis_color,
+        )
+
+"""
