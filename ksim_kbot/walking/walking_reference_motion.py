@@ -25,6 +25,7 @@ from ksim.utils.reference_motion import (
 )
 from scipy.spatial.transform import Rotation as R
 
+from ksim_kbot import rewards as kbot_rewards
 from ksim_kbot.walking.walking import NaiveForwardReward
 from ksim_kbot.walking.walking_rnn import RnnModel, WalkingRnnTask, WalkingRnnTaskConfig
 
@@ -116,6 +117,20 @@ class MatchReferenceMotionReward(ksim.Reward):
 class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
     config: Config
 
+    def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
+        return [
+            # NOTE: bring it back when stable
+            # ksim.PushEvent(
+            #     x_force=0.0,
+            #     y_force=0.0,
+            #     z_force=0.0,
+            #     x_angular_force=0.0,
+            #     y_angular_force=0.0,
+            #     z_angular_force=0.0,
+            #     interval_range=(10.0, 10.0),
+            # ),
+        ]
+
     def get_initial_model_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
         return super().get_initial_model_carry(rng)
 
@@ -130,16 +145,13 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 ctrl_dt=self.config.ctrl_dt,
                 scale=0.05,
             ),
+            ksim.ActionSmoothnessPenalty(scale=-0.01),
+            kbot_rewards.OrientationPenalty(scale=-1.0),
         ]
-        # add orientation penalty
-        rewards += [
-            ksim.LinearVelocityPenalty(index="z", scale=-0.01),
-            ksim.AngularVelocityPenalty(index="x", scale=-0.01),
-            ksim.AngularVelocityPenalty(index="y", scale=-0.01),
-        ]
+
         if self.config.use_naive_reward:
             rewards += [
-                NaiveForwardReward(clip_max=self.config.naive_clip_max, scale=0.2),
+                NaiveForwardReward(clip_max=0.3, scale=0.2),
             ]
         else:
             rewards += [
@@ -148,6 +160,32 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 ksim.AngularVelocityTrackingReward(index="z", command_name="angular_velocity_command_z", scale=0.01),
             ]
         return rewards
+
+    def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
+        return [
+            ksim.JointPositionObservation(),
+            ksim.JointVelocityObservation(),
+            ksim.ActuatorForceObservation(),
+            ksim.CenterOfMassInertiaObservation(),
+            ksim.CenterOfMassVelocityObservation(),
+            ksim.BasePositionObservation(),
+            ksim.BaseOrientationObservation(),
+            ksim.BaseLinearVelocityObservation(),
+            ksim.BaseAngularVelocityObservation(),
+            ksim.BaseLinearAccelerationObservation(),
+            ksim.BaseAngularAccelerationObservation(),
+            ksim.ActuatorAccelerationObservation(),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_acc"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_gyro"),
+            ksim.FeetContactObservation.create(
+                physics_model=physics_model,
+                foot_left_geom_names="KB_D_501L_L_LEG_FOOT_collision_box",
+                foot_right_geom_names="KB_D_501R_R_LEG_FOOT_collision_box",
+                floor_geom_names="floor",
+            ),
+            ksim.TimestepObservation(),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="upvector_origin", noise=0.0),
+        ]
 
     def sample_action(
         self,
