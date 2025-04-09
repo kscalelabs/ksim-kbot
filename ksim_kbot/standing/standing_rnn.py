@@ -347,14 +347,14 @@ class KbotStandingRNNTask(KbotStandingTask[Config], Generic[Config]):
     def sample_action(
         self,
         model: KbotRNNModel,
-        carry: tuple[Array, Array],
+        model_carry: tuple[Array, Array],
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> ksim.Action:
-        actor_carry_in, critic_carry_in = carry
+        actor_carry_in, critic_carry_in = model_carry
 
         # Runs the actor model to get the action distribution.
         action_dist_j, actor_carry = self.run_actor(

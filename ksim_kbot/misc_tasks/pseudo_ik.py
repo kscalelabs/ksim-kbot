@@ -464,7 +464,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
     def sample_action(
         self,
         model: KbotModel,
-        carry: None,
+        model_carry: None,
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, Array],

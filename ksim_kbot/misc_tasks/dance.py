@@ -246,14 +246,14 @@ class KbotDanceTask(KbotStandingTask[Config], Generic[Config]):
     def sample_action(
         self,
         model: KbotModel,
-        carry: Array,
+        model_carry: tuple[Array, Array],
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> ksim.Action:
-        action_n = super().sample_action(model, carry, physics_model, physics_state, observations, commands, rng)
+        action_n = super().sample_action(model, model_carry, physics_model, physics_state, observations, commands, rng)
 
         # Getting the local cartesian positions for all tracked bodies.
         tracked_positions: dict[int, Array] = {}
