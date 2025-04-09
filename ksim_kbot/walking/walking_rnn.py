@@ -12,12 +12,7 @@ import ksim
 import xax
 from jaxtyping import Array, PRNGKeyArray
 
-from .walking import (
-    NUM_INPUTS,
-    NUM_JOINTS,
-    WalkingTask,
-    WalkingTaskConfig,
-)
+from .walking import NUM_INPUTS, NUM_JOINTS, WalkingTask, WalkingTaskConfig
 
 
 @jax.tree_util.register_dataclass
