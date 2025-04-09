@@ -2,7 +2,8 @@
 """Defines simple task for training a standing policy for K-Bot."""
 
 from dataclasses import dataclass
-from typing import Generic, TypeVar
+from pathlib import Path
+from typing import Callable, Generic, TypeVar
 
 import distrax
 import equinox as eqx
@@ -11,6 +12,7 @@ import jax.numpy as jnp
 import ksim
 import xax
 from jaxtyping import Array, PRNGKeyArray
+from xax.nn.export import export
 
 from ksim_kbot.standing.standing import NUM_INPUTS, KbotStandingTask, KbotStandingTaskConfig
 
@@ -372,6 +374,63 @@ class KbotStandingRNNTask(KbotStandingTask[Config], Generic[Config]):
             aux_outputs=None,
         )
 
+    def make_export_model(self, model: KbotRNNModel, stochastic: bool = False, batched: bool = False) -> Callable:
+        """Makes a callable inference function that directly takes a flattened input vector and returns an action.
+
+        Returns:
+            A tuple containing the inference function and the size of the input vector.
+        """
+        # Cast model to the expected type to satisfy MyPy
+        if not hasattr(model, "actor") or not hasattr(model.actor, "forward"):
+            raise TypeError("Model passed to forward must have actor with forward method.")
+
+        def deterministic_model_fn(obs: Array, carry: Array) -> Array:
+            # Use the cast model
+            dist, carry = model.actor.forward(obs, carry)
+            return dist.mode(), carry
+
+        def stochastic_model_fn(obs: Array, carry: Array) -> Array:
+            # Use the cast model
+            dist, carry = model.actor.forward(obs, carry)
+            return dist.sample(seed=jax.random.PRNGKey(0)), carry
+
+        if stochastic:
+            model_fn = stochastic_model_fn
+        else:
+            model_fn = deterministic_model_fn
+
+        if batched:
+
+            def batched_model_fn(obs: Array, carry: Array) -> Array:
+                return jax.vmap(model_fn)(obs, carry)
+
+            return batched_model_fn
+
+        return model_fn
+
+    def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
+        if not self.config.export_for_inference:
+            return state
+
+        model: KbotRNNModel = self.load_ckpt(ckpt_path, part="model")
+
+        model_fn = self.make_export_model(model, stochastic=False, batched=True)
+
+        input_shapes = [
+            (NUM_INPUTS,),
+            (
+                self.config.depth,
+                self.config.hidden_size,
+            ),
+        ]
+        export(
+            model_fn,
+            input_shapes,
+            ckpt_path.parent / "tf_model",
+        )
+
+        return state
+
 
 if __name__ == "__main__":
     # To run training, use the following command:
@@ -402,7 +461,7 @@ if __name__ == "__main__":
             max_grad_norm=0.5,
             use_mit_actuators=True,
             log_full_trajectory_every_n_steps=5,
-            save_every_n_steps=25,
+            save_every_n_steps=1,
             export_for_inference=True,
             domain_randomize=True,
         ),
