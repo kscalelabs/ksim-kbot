@@ -290,13 +290,13 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             joint_name_to_metadata=metadata,
         )
 
-    def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
+    def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
         return [
-            ksim.StaticFrictionRandomization(),
-            ksim.ArmatureRandomization(),
-            ksim.MassMultiplicationRandomization.from_body_name(physics_model, "Torso_Side_Right"),
-            ksim.JointDampingRandomization(),
-            ksim.JointZeroPositionRandomization(),
+            ksim.StaticFrictionRandomizer(),
+            ksim.ArmatureRandomizer(),
+            ksim.MassMultiplicationRandomizer.from_body_name(physics_model, "Torso_Side_Right"),
+            ksim.JointDampingRandomizer(),
+            ksim.JointZeroPositionRandomizer(),
         ]
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:

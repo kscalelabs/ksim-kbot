@@ -447,7 +447,7 @@ class KbotGetupTask(KbotStandingTask[Config], Generic[Config]):
         else:
             return ksim.TorqueActuators()
 
-    def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
+    def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
         return []
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:

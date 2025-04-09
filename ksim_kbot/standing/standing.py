@@ -355,14 +355,14 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         else:
             return ksim.TorqueActuators()
 
-    def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
+    def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
         if self.config.domain_randomize:
             return [
-                ksim.StaticFrictionRandomization(scale_lower=0.5, scale_upper=2.0),
-                ksim.JointZeroPositionRandomization(scale_lower=-0.01, scale_upper=0.01),
-                ksim.ArmatureRandomization(scale_lower=1.0, scale_upper=1.05),
-                ksim.MassMultiplicationRandomization.from_body_name(physics_model, "Torso_Side_Right"),
-                ksim.JointDampingRandomization(scale_lower=0.95, scale_upper=1.05),
+                ksim.StaticFrictionRandomizer(scale_lower=0.5, scale_upper=2.0),
+                ksim.JointZeroPositionRandomizer(scale_lower=-0.01, scale_upper=0.01),
+                ksim.ArmatureRandomizer(scale_lower=1.0, scale_upper=1.05),
+                ksim.MassMultiplicationRandomizer.from_body_name(physics_model, "Torso_Side_Right"),
+                ksim.JointDampingRandomizer(scale_lower=0.95, scale_upper=1.05),
             ]
         else:
             return []

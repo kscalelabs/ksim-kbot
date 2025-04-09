@@ -282,13 +282,13 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         else:
             return ksim.TorqueActuators()
 
-    def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
+    def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
         return [
-            ksim.StaticFrictionRandomization(scale_lower=0.5, scale_upper=2.0, freejoint_first=False),
-            ksim.JointZeroPositionRandomization(scale_lower=-0.05, scale_upper=0.05, freejoint_first=False),
-            ksim.ArmatureRandomization(scale_lower=1.0, scale_upper=1.05, freejoint_first=False),
-            ksim.MassMultiplicationRandomization.from_body_name(physics_model, "KC_C_104R_PitchHardstopDriven"),
-            ksim.JointDampingRandomization(scale_lower=0.95, scale_upper=1.05, freejoint_first=False),
+            ksim.StaticFrictionRandomizer(scale_lower=0.5, scale_upper=2.0, freejoint_first=False),
+            ksim.JointZeroPositionRandomizer(scale_lower=-0.05, scale_upper=0.05, freejoint_first=False),
+            ksim.ArmatureRandomizer(scale_lower=1.0, scale_upper=1.05, freejoint_first=False),
+            ksim.MassMultiplicationRandomizer.from_body_name(physics_model, "KC_C_104R_PitchHardstopDriven"),
+            ksim.JointDampingRandomizer(scale_lower=0.95, scale_upper=1.05, freejoint_first=False),
         ]
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
