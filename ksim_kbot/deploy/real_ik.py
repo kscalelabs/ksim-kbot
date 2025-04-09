@@ -3,14 +3,14 @@
 import argparse
 import asyncio
 import logging
-import time
 import select
 import sys
 import termios
+import time
 from contextlib import contextmanager
-from typing import Generator
 from dataclasses import dataclass
 from enum import Enum
+from typing import Generator
 
 import numpy as np
 import pykos
@@ -94,7 +94,7 @@ class TargetState:
             self.xyz_target[2] -= self.step_size
         elif key == "e":
             self.xyz_target[2] += self.step_size
-        logger.debug(f"Target position updated to: {self.xyz_target}")
+        logger.debug("Target position updated to: %s", self.xyz_target)
 
     def get_target(self) -> tuple[np.ndarray, np.ndarray]:
         return self.xyz_target.copy(), self.quat_target.copy()
@@ -145,9 +145,9 @@ async def keyboard_input(target_state: TargetState) -> None:
             logger.info("Keyboard input stopping...")
 
 
-async def get_observation(kos_instances, prev_action: np.ndarray, target_state: TargetState) -> np.ndarray:
-    # Use the first KOS instance for observation
-    # kos = next(iter(kos_instances))
+async def get_observation(
+    kos_instances: dict[str, pykos.KOS], prev_action: np.ndarray, target_state: TargetState
+) -> np.ndarray:
     kos = kos_instances["real"]
     xyz_target, quat_target = target_state.get_target()
     if kos_instances["sim"] is not None:
@@ -173,15 +173,14 @@ async def get_observation(kos_instances, prev_action: np.ndarray, target_state: 
         / 50.0
     )
 
-    
     # Log target position for debug purposes
-    logger.debug(f"xyz_target: {xyz_target}")
+    logger.debug("xyz_target: %s", xyz_target)
 
     observation = np.concatenate([pos_obs, vel_obs, xyz_target, quat_target, prev_action], axis=-1)
     return observation
 
 
-async def send_actions(kos_instances, position: np.ndarray, velocity: np.ndarray) -> None:
+async def send_actions(kos_instances: dict[str, pykos.KOS], position: np.ndarray, velocity: np.ndarray) -> None:
     position = np.rad2deg(position)
     velocity = np.rad2deg(velocity)
     actuator_commands: list[pykos.services.actuator.ActuatorCommand] = [
@@ -193,11 +192,11 @@ async def send_actions(kos_instances, position: np.ndarray, velocity: np.ndarray
         for ac in ACTIVE_ACTUATOR_LIST
     ]
     # Send commands to all KOS instances
-    await asyncio.gather(*(kos.actuator.command_actuators(actuator_commands) for kos in kos_instances))
+    await asyncio.gather(*(kos.actuator.command_actuators(actuator_commands) for kos in kos_instances.values()))
 
 
-async def configure_actuators(kos_instances) -> None:
-    for kos in kos_instances:
+async def configure_actuators(kos_instances: dict[str, pykos.KOS]) -> None:
+    for kos in kos_instances.values():
         for ac in ACTIVE_ACTUATOR_LIST:
             await kos.actuator.configure_actuator(
                 actuator_id=ac.actuator_id,
@@ -208,7 +207,7 @@ async def configure_actuators(kos_instances) -> None:
             )
 
 
-async def reset(kos_instances) -> None:
+async def reset(kos_dict: dict[str, pykos.KOS]) -> None:
     zero_commands: list[pykos.services.actuator.ActuatorCommand] = [
         {
             "actuator_id": ac.actuator_id,
@@ -218,14 +217,14 @@ async def reset(kos_instances) -> None:
         for ac in ACTIVE_ACTUATOR_LIST
     ]
 
-    logger.info(f"zero_commands: {zero_commands}")
+    logger.info("zero_commands: %s", zero_commands)
     # Send reset commands to all KOS instances
-    for kos in kos_instances:
+    for kos in kos_dict.values():
         await kos.actuator.command_actuators(zero_commands)
 
 
-async def disable(kos_instances) -> None:
-    for kos in kos_instances:
+async def disable(kos_dict: dict[str, pykos.KOS]) -> None:
+    for kos in kos_dict.values():
         for ac in ACTIVE_ACTUATOR_LIST:
             await kos.actuator.configure_actuator(
                 actuator_id=ac.actuator_id,
@@ -252,22 +251,22 @@ async def main(model_path: str, episode_length: int, mode: Mode) -> None:
             color={"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0},
             label=True,
         )
-    
+
     if not kos_dict:
         raise ValueError("No KOS instances configured for the selected mode")
-    
-    await disable(kos_dict.values())
+
+    await disable(kos_dict)
     time.sleep(1)
     logger.info("Configuring actuators...")
-    await configure_actuators(kos_dict.values())
+    await configure_actuators(kos_dict)
     await asyncio.sleep(1)
     logger.info("Resetting...")
-    await reset(kos_dict.values())
-    
+    await reset(kos_dict)
+
     # Start keyboard input task
     keyboard_task = asyncio.create_task(keyboard_input(target_state))
     keyboard_task.add_done_callback(lambda _: logger.info("Keyboard task done"))
-    
+
     prev_action = np.zeros(len(ACTIVE_ACTUATOR_LIST) * 2)
     observation = (await get_observation(kos_dict, prev_action, target_state)).reshape(1, -1)
 
@@ -291,7 +290,7 @@ async def main(model_path: str, episode_length: int, mode: Mode) -> None:
             velocity = action[len(ACTIVE_ACTUATOR_LIST) :]
             observation, _ = await asyncio.gather(
                 get_observation(kos_dict, prev_action, target_state),
-                send_actions(kos_dict.values(), position, velocity),
+                send_actions(kos_dict, position, velocity),
             )
             prev_action = action
 
@@ -305,13 +304,13 @@ async def main(model_path: str, episode_length: int, mode: Mode) -> None:
     except asyncio.CancelledError:
         logger.info("Exiting...")
         keyboard_task.cancel()  # Make sure to cancel the keyboard task
-        await disable(kos_dict.values())
+        await disable(kos_dict)
         logger.info("Actuators disabled")
         raise KeyboardInterrupt
     except KeyboardInterrupt:
         logger.info("Keyboard interrupt received...")
         keyboard_task.cancel()  # Make sure to cancel the keyboard task
-        await disable(kos_dict.values())
+        await disable(kos_dict)
         logger.info("Actuators disabled")
         raise
     finally:
@@ -321,7 +320,7 @@ async def main(model_path: str, episode_length: int, mode: Mode) -> None:
     # Clean up keyboard task
     keyboard_task.cancel()
     # Disable actuators
-    await disable(kos_dict.values())
+    await disable(kos_dict)
 
 
 if __name__ == "__main__":
