@@ -18,10 +18,10 @@ from jaxtyping import Array, PRNGKeyArray
 from ksim.types import PhysicsModel
 from ksim.utils.reference_motion import (
     ReferenceMapping,
-    generate_reference_gait,
+    generate_reference_motion,
     get_local_xpos,
     get_reference_joint_id,
-    visualize_reference_gait,
+    visualize_reference_motion,
 )
 from scipy.spatial.transform import Rotation as R
 
@@ -34,7 +34,7 @@ SINGLE_STEP_HISTORY_SIZE = 0
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
-class GaitMatchingAuxOutputs:
+class MotionAuxOutputs:
     tracked_pos: xax.FrozenDict[int, Array]
 
 
@@ -68,9 +68,9 @@ class WalkingRnnRefMotionTaskConfig(WalkingRnnTaskConfig):
         value=1.0,
         help="Scaling factor to ensure the BVH tree matches the Mujoco model.",
     )
-    offset_reference_gait: tuple[float, float, float] = xax.field(
+    offset_reference_motion: tuple[float, float, float] = xax.field(
         value=(0.1, 0.09, -0.29),
-        help="Offset to apply to the reference gait.",
+        help="Offset to apply to the reference motion.",
     )
     mj_base_name: str = xax.field(
         value="pelvis",
@@ -80,9 +80,9 @@ class WalkingRnnRefMotionTaskConfig(WalkingRnnTaskConfig):
         value="CC_Base_Pelvis",
         help="The BVH joint name of the base of the humanoid",
     )
-    visualize_reference_gait: bool = xax.field(
+    visualize_reference_motion: bool = xax.field(
         value=False,
-        help="Whether to visualize the reference gait.",
+        help="Whether to visualize the reference motion.",
     )
 
 
@@ -91,20 +91,20 @@ Config = TypeVar("Config", bound=WalkingRnnRefMotionTaskConfig)
 
 @attrs.define(frozen=True, kw_only=True)
 class MatchReferenceMotionReward(ksim.Reward):
-    reference_gait: xax.FrozenDict[int, xax.HashableArray]
+    reference_motion: xax.FrozenDict[int, xax.HashableArray]
     ctrl_dt: float
     norm: xax.NormType = attrs.field(default="l1")
     sensitivity: float = attrs.field(default=5.0)
 
     @property
     def num_frames(self) -> int:
-        return list(self.reference_gait.values())[0].array.shape[0]
+        return list(self.reference_motion.values())[0].array.shape[0]
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        assert isinstance(trajectory.aux_outputs, GaitMatchingAuxOutputs)
-        reference_gait: xax.FrozenDict[int, Array] = jax.tree.map(lambda x: x.array, self.reference_gait)
+        assert isinstance(trajectory.aux_outputs, MotionAuxOutputs)
+        reference_motion: xax.FrozenDict[int, Array] = jax.tree.map(lambda x: x.array, self.reference_motion)
         step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
-        target_pos = jax.tree.map(lambda x: jnp.take(x, step_number, axis=0), reference_gait)
+        target_pos = jax.tree.map(lambda x: jnp.take(x, step_number, axis=0), reference_motion)
         tracked_pos = trajectory.aux_outputs.tracked_pos
         error = jax.tree.map(lambda target, tracked: xax.get_norm(target - tracked, self.norm), target_pos, tracked_pos)
         mean_error_over_bodies = jax.tree.reduce(jnp.add, error) / len(error)
@@ -126,7 +126,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 scale=1.0,
             ),
             MatchReferenceMotionReward(
-                reference_gait=self.reference_gait,
+                reference_motion=self.reference_motion,
                 ctrl_dt=self.config.ctrl_dt,
                 scale=0.1,
             ),
@@ -164,7 +164,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
         return ksim.Action(
             action=action_n.action,
             carry=model_carry,
-            aux_outputs=GaitMatchingAuxOutputs(
+            aux_outputs=MotionAuxOutputs(
                 tracked_pos=xax.FrozenDict(tracked_positions),
             ),
         )
@@ -180,25 +180,25 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
             quat = R.from_euler("xyz", euler_rotation).as_quat(scalar_first=True)
             root.applyRotation(glm.quat(*quat), bake=True)
 
-        np_reference_gait = generate_reference_gait(
+        np_reference_motion = generate_reference_motion(
             mappings=HUMANOID_REFERENCE_MAPPINGS,
             model=mj_model,
             root=root,
             reference_base_id=reference_base_id,
             root_callback=rotation_callback,
             scaling_factor=self.config.bvh_scaling_factor,
-            offset=np.array(self.config.offset_reference_gait),
+            offset=np.array(self.config.offset_reference_motion),
         )
-        self.reference_gait: xax.FrozenDict[int, xax.HashableArray] = jax.tree.map(
-            lambda x: xax.hashable_array(jnp.array(x)), np_reference_gait
+        self.reference_motion: xax.FrozenDict[int, xax.HashableArray] = jax.tree.map(
+            lambda x: xax.hashable_array(jnp.array(x)), np_reference_motion
         )
-        self.tracked_body_ids = tuple(self.reference_gait.keys())
+        self.tracked_body_ids = tuple(self.reference_motion.keys())
 
-        if self.config.visualize_reference_gait:
-            visualize_reference_gait(
+        if self.config.visualize_reference_motion:
+            visualize_reference_motion(
                 mj_model,
                 base_id=self.mj_base_id,
-                reference_gait=np_reference_gait,
+                reference_motion=np_reference_motion,
             )
         else:
             super().run()
@@ -206,11 +206,11 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m ksim_kbot.walking.walking_reference_motion
+    #   python -m ksim_kbot.walking.walking_reference_motion disable_multiprocessing=True
     # To visualize the environment, use the following command:
     #   python -m ksim_kbot.walking.walking_reference_motion run_environment=True
     # To visualize the reference gait, use the following command:
-    #   mujoco python -m ksim_kbot.walking.walking_reference_motion num_envs=1 batch_size=1
+    #   mjpython -m ksim_kbot.walking.walking_reference_motion visualize_reference_motion=True
     # On MacOS or other devices with less memory, you can change the number
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
@@ -224,14 +224,15 @@ if __name__ == "__main__":
             epochs_per_log_step=1,
             rollout_length_seconds=10.0,
             # Simulation parameters.
-            dt=0.005,
+            dt=0.002,
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
             rotate_bvh_euler=(0, np.pi / 2, 0),
             bvh_scaling_factor=1 / 100,
-            offset_reference_gait=(0.02, 0.09, -0.29),
+            offset_reference_motion=(0.02, 0.09, -0.29),
             mj_base_name="floating_base_link",
             reference_base_name="CC_Base_Pelvis",
+            use_naive_reward=True,
         ),
     )

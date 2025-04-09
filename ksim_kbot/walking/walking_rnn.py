@@ -383,9 +383,9 @@ class WalkingRnnTask(WalkingTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m examples.walking_rnn
+    #   python -m ksim_kbot.walking.walking_rnn
     # To visualize the environment, use the following command:
-    #   python -m examples.walking_rnn run_environment=True
+    #   python -m ksim_kbot.walking.walking_rnn run_environment=True
     WalkingRnnTask.launch(
         WalkingRnnTaskConfig(
             # Training parameters.
@@ -399,5 +399,6 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
+            use_naive_reward=True,
         ),
     )

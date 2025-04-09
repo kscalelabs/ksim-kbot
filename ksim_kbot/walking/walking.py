@@ -537,13 +537,13 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m examples.walking
+    #   python -m ksim_kbot.walking.walking
     # To visualize the environment, use the following command:
-    #   python -m examples.walking run_environment=True
+    #   python -m ksim_kbot.walking.walking run_environment=True
     # On MacOS or other devices with less memory, you can change the number
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
-    #   python -m examples.walking num_envs=8 batch_size=4
+    #   python -m ksim_kbot.walking.walking num_envs=8 batch_size=4
     WalkingTask.launch(
         WalkingTaskConfig(
             # Training parameters.
@@ -552,6 +552,7 @@ if __name__ == "__main__":
             num_passes=4,
             epochs_per_log_step=1,
             rollout_length_seconds=10.0,
+            use_naive_reward=True,
             # Logging parameters.
             # log_full_trajectory_every_n_seconds=60,
             # Simulation parameters.
