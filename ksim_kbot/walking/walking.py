@@ -149,7 +149,7 @@ class WalkingTaskConfig(ksim.PPOConfig):
     """Config for the humanoid walking task."""
 
     robot_urdf_path: str = xax.field(
-        value="ksim_kbot/kscale-assets/kbot-v2-lw-feet/",
+        value="ksim_kbot/kscale-assets/kbot-v2-feet/",
         help="The path to the assets directory for the robot.",
     )
 

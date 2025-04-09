@@ -190,15 +190,15 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m ksim_kbot.misc_tasks.dance
+    #   python -m ksim_kbot.walking.walking_reference_motion
     # To visualize the environment, use the following command:
-    #   python -m ksim_kbot.misc_tasks.dance run_environment=True
+    #   python -m ksim_kbot.walking.walking_reference_motion run_environment=True
     # To visualize the reference gait, use the following command:
-    #   mujoco python -m ksim_kbot.misc_tasks.dance run_environment=True visualize_reference_gait=True
+    #   mujoco python -m ksim_kbot.walking.walking_reference_motion num_envs=1 batch_size=1
     # On MacOS or other devices with less memory, you can change the number
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
-    #   python -m ksim_kbot.misc_tasks.dance num_envs=1 batch_size=1
+    #   python -m ksim_kbot.walking.walking_reference_motion num_envs=1 batch_size=1
     WalkingRnnRefMotionTask.launch(
         WalkingRnnRefMotionTaskConfig(
             # Training parameters.
