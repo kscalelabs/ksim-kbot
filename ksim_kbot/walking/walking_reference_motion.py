@@ -128,12 +128,18 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
             MatchReferenceMotionReward(
                 reference_motion=self.reference_motion,
                 ctrl_dt=self.config.ctrl_dt,
-                scale=0.1,
+                scale=0.05,
             ),
+        ]
+        # add orientation penalty
+        rewards += [
+            ksim.LinearVelocityPenalty(index="z", scale=-0.01),
+            ksim.AngularVelocityPenalty(index="x", scale=-0.01),
+            ksim.AngularVelocityPenalty(index="y", scale=-0.01),
         ]
         if self.config.use_naive_reward:
             rewards += [
-                NaiveForwardReward(clip_max=self.config.naive_clip_max, scale=1.0),
+                NaiveForwardReward(clip_max=self.config.naive_clip_max, scale=0.2),
             ]
         else:
             rewards += [
