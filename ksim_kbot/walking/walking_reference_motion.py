@@ -85,6 +85,14 @@ class WalkingRnnRefMotionTaskConfig(WalkingRnnTaskConfig):
         value=False,
         help="Whether to visualize the reference motion.",
     )
+    orientation_penalty: float = xax.field(
+        value=-1.0,
+        help="The scale to apply to the orientation penalty.",
+    )
+    naive_reward_scale: float = xax.field(
+        value=1.0,
+        help="The scale to apply to the naive reward.",
+    )
 
 
 Config = TypeVar("Config", bound=WalkingRnnRefMotionTaskConfig)
@@ -145,13 +153,13 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 ctrl_dt=self.config.ctrl_dt,
                 scale=0.05,
             ),
+            kbot_rewards.OrientationPenalty(scale=self.config.orientation_penalty),
             ksim.ActionSmoothnessPenalty(scale=-0.01),
-            kbot_rewards.OrientationPenalty(scale=-1.0),
         ]
 
         if self.config.use_naive_reward:
             rewards += [
-                NaiveForwardReward(clip_max=0.3, scale=0.2),
+                NaiveForwardReward(clip_max=5.0, scale=self.config.naive_reward_scale),
             ]
         else:
             rewards += [
