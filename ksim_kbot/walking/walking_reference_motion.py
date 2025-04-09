@@ -25,7 +25,7 @@ from ksim.utils.reference_motion import (
 )
 from scipy.spatial.transform import Rotation as R
 
-from ksim_kbot import rewards as kbot_rewards
+from ksim_kbot import common, rewards as kbot_rewards
 from ksim_kbot.walking.walking import NaiveForwardReward
 from ksim_kbot.walking.walking_rnn import RnnModel, WalkingRnnTask, WalkingRnnTaskConfig
 
@@ -161,6 +161,57 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
             ]
         return rewards
 
+    def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
+        return [
+            ksim.RandomJointPositionReset(),
+            ksim.RandomJointVelocityReset(),
+            common.ResetDefaultJointPosition(
+                default_targets=(
+                    0.0,
+                    0.0,
+                    0.9,
+                    # quat
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    # right arm
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    # left arm
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    # right leg
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    # left leg
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                )
+            ),
+        ]
+
+    def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
+        return [
+            # ksim.StaticFrictionRandomizer(),
+            # ksim.ArmatureRandomizer(),
+            # ksim.MassMultiplicationRandomizer.from_body_name(physics_model, "Torso_Side_Right"),
+            # ksim.JointDampingRandomizer(),
+            # ksim.JointZeroPositionRandomizer(),
+        ]
+
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
             ksim.JointPositionObservation(),
@@ -264,7 +315,7 @@ if __name__ == "__main__":
             # Training parameters.
             num_envs=2048,
             batch_size=256,
-            num_passes=4,
+            num_passes=10,
             epochs_per_log_step=1,
             rollout_length_seconds=10.0,
             # Simulation parameters.
@@ -272,6 +323,14 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
+            # PPO parameters
+            gamma=0.97,
+            lam=0.95,
+            entropy_coef=0.005,
+            learning_rate=1e-4,
+            clip_param=0.3,
+            max_grad_norm=0.5,
+            # Reference motion parameters
             rotate_bvh_euler=(0, np.pi / 2, 0),
             bvh_scaling_factor=1 / 100,
             offset_reference_motion=(0.02, 0.09, -0.29),
