@@ -3,7 +3,7 @@
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generic, TypeVar
+from typing import Callable, Generic, TypeVar
 
 import distrax
 import equinox as eqx
@@ -17,6 +17,7 @@ from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from ksim.curriculum import ConstantCurriculum, Curriculum
 from mujoco import mjx
+from xax.nn.export import export
 
 from ksim_kbot import common, rewards
 
@@ -761,6 +762,59 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             next_carry = (jnp.zeros(0), jnp.zeros(0))
 
         return ksim.Action(action=action_j, carry=next_carry, aux_outputs=None)
+
+    def make_export_model(self, model: KbotModel, stochastic: bool = False, batched: bool = False) -> Callable:
+        """Makes a callable inference function that directly takes a flattened input vector and returns an action.
+
+        Returns:
+            A tuple containing the inference function and the size of the input vector.
+        """
+        # Cast model to the expected type to satisfy MyPy
+        if not hasattr(model, "actor") or not hasattr(model.actor, "call_flat_obs"):
+            raise TypeError("Model passed to forward must have actor with call_flat_obs method.")
+
+        def deterministic_model_fn(obs: Array) -> Array:
+            # Use the cast model
+            return model.actor.call_flat_obs(obs).mode()
+
+        def stochastic_model_fn(obs: Array) -> Array:
+            # Use the cast model
+            distribution = model.actor.call_flat_obs(obs)
+            return distribution.sample(seed=jax.random.PRNGKey(0))
+
+        if stochastic:
+            model_fn = stochastic_model_fn
+        else:
+            model_fn = deterministic_model_fn
+
+        if batched:
+
+            def batched_model_fn(obs: Array) -> Array:
+                return jax.vmap(model_fn)(obs)
+
+            return batched_model_fn
+
+        return model_fn
+
+    @property
+    def get_input_shapes(self) -> list[tuple[int, ...]]:
+        return [(NUM_INPUTS,)]
+
+    def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
+        state = super().on_after_checkpoint_save(ckpt_path, state)
+        model: KbotModel = self.load_ckpt(ckpt_path, part="model")
+
+        model_fn = self.make_export_model(model, stochastic=False, batched=True)
+
+        input_shapes: list[tuple[int, ...]] = self.get_input_shapes
+
+        export(
+            model_fn,
+            input_shapes,
+            ckpt_path.parent / "tf_model",
+        )
+
+        return state
 
 
 if __name__ == "__main__":
