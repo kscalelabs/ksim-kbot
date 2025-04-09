@@ -184,7 +184,7 @@ class KbotModel(eqx.Module):
     def __init__(self, key: PRNGKeyArray, *, hidden_size: int, depth: int) -> None:
         self.actor = KbotActor(
             key,
-            min_std=0.001,
+            min_std=0.0, #0.001,
             max_std=1.0,
             var_scale=1.0,
             mean_scale=1.0,
@@ -411,7 +411,7 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
                 # pivot_name="KC_C_104R_PitchHardstopDriven",
                 pivot_point=(0.3, -0.1, 0.0),
                 base_name="floating_base_link",
-                curriculum_scale=2.0,
+                curriculum_scale=1.5,
                 sample_sphere_radius=0.25,
                 positive_x=False,  # forward + backward
                 positive_y=False,
@@ -440,7 +440,7 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
                 norm="l2",
                 scale=2.5,
                 sensitivity=1.0,
-                threshold=0.0001,  # with l2 xax norm, this is 1cm
+                threshold=0.000025,  # with l2 xax norm, this is 0.5cm
                 time_bonus_scale=0.3,
                 command_name="cartesian_body_target_command_floating_base_link_(0.3, -0.1, 0.0)",
             ),
@@ -465,7 +465,7 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.CartesianBodyTargetVectorReward.create(
                 model=physics_model,
                 command_name="cartesian_body_target_command_floating_base_link_(0.3, -0.1, 0.0)",
-                tracked_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
+                tracked_body_name="ik_target",
                 base_body_name="floating_base_link",
                 scale=3.0,
                 normalize_velocity=True,
@@ -475,7 +475,7 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.CartesianBodyTargetPenalty.create(
                 model=physics_model,
                 command_name="cartesian_body_target_command_floating_base_link_(0.3, -0.1, 0.0)",
-                tracked_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
+                tracked_body_name="ik_target",
                 base_body_name="floating_base_link",
                 norm="l2",
                 scale=-6.0,
@@ -586,7 +586,7 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
         return ksim.RewardLevelCurriculum(
             reward_name="continuous_cartesian_body_target_reward",
             increase_threshold=0.1,
-            decrease_threshold=0.08,
+            decrease_threshold=0.05,
             min_level_steps=10,
             num_levels=10,
         )
@@ -681,6 +681,7 @@ if __name__ == "__main__":
             # Disable this if you are running into segfaults.
             render_markers=True,
             render_camera_name="iso_camera",
+            disable_multiprocessing=False,
             use_mit_actuators=True,
         ),
     )
