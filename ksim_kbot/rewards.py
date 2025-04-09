@@ -288,3 +288,23 @@ class FeetPhaseReward(ksim.Reward):
         stance = xax.cubic_bezier_interpolation(jnp.array(0), swing_height, 2 * x)
         swing = xax.cubic_bezier_interpolation(swing_height, jnp.array(0), 2 * x - 1)
         return jnp.where(x <= 0.5, stance, swing)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class KsimLinearVelocityTrackingReward(ksim.Reward):
+    """Penalty for deviating from the linear velocity command."""
+
+    index: int = attrs.field()
+    command_name: str = attrs.field()
+    norm: xax.NormType = attrs.field(default="l1")
+    temp: float = attrs.field(default=1.0)
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        dim = self.index
+        lin_vel_cmd = trajectory.command[self.command_name].squeeze(-1)
+        lin_vel = trajectory.qvel[..., dim]
+        norm = xax.get_norm(lin_vel - lin_vel_cmd, self.norm)
+        return 1.0 / (norm / self.temp + 1.0)
+
+    def get_name(self) -> str:
+        return f"{self.index}_{super().get_name()}"

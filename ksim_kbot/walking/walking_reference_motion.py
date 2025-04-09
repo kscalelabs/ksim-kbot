@@ -15,7 +15,6 @@ import numpy as np
 import xax
 from bvhio.lib.hierarchy import Joint as BvhioJoint
 from jaxtyping import Array, PRNGKeyArray
-from kscale.web.gen.api import JointMetadataOutput
 from ksim.types import PhysicsModel
 from ksim.utils.reference_motion import (
     ReferenceMapping,
@@ -26,7 +25,7 @@ from ksim.utils.reference_motion import (
 )
 from scipy.spatial.transform import Rotation as R
 
-from ksim_kbot import common
+from ksim_kbot.walking.walking import NaiveForwardReward
 from ksim_kbot.walking.walking_rnn import RnnModel, WalkingRnnTask, WalkingRnnTaskConfig
 
 HISTORY_LENGTH = 0
@@ -117,28 +116,44 @@ class MatchReferenceMotionReward(ksim.Reward):
 class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
     config: Config
 
+    def get_initial_model_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
+        return super().get_initial_model_carry(rng)
+
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
-        rewards = super().get_rewards(physics_model)
-        rewards.append(
+        rewards: list[ksim.Reward] = [
+            ksim.StayAliveReward(
+                success_reward=1.0,
+                scale=1.0,
+            ),
             MatchReferenceMotionReward(
                 reference_gait=self.reference_gait,
                 ctrl_dt=self.config.ctrl_dt,
                 scale=0.1,
             ),
-        )
+        ]
+        if self.config.use_naive_reward:
+            rewards += [
+                NaiveForwardReward(clip_max=self.config.naive_clip_max, scale=1.0),
+            ]
+        else:
+            rewards += [
+                ksim.LinearVelocityTrackingReward(index="x", command_name="linear_velocity_command_x", scale=1.0),
+                ksim.LinearVelocityTrackingReward(index="y", command_name="linear_velocity_command_y", scale=0.1),
+                ksim.AngularVelocityTrackingReward(index="z", command_name="angular_velocity_command_z", scale=0.01),
+            ]
         return rewards
 
     def sample_action(
         self,
         model: RnnModel,
-        carry: tuple[Array, Array],
+        model_carry: tuple[Array, Array],
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> ksim.Action:
-        action_n = super().sample_action(model, carry, physics_model, physics_state, observations, commands, rng)
+        action_n = super().sample_action(model, model_carry, physics_model, physics_state, observations, commands, rng)
 
         # Getting the local cartesian positions for all tracked bodies.
         tracked_positions: dict[int, Array] = {}
@@ -148,6 +163,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
 
         return ksim.Action(
             action=action_n.action,
+            carry=model_carry,
             aux_outputs=GaitMatchingAuxOutputs(
                 tracked_pos=xax.FrozenDict(tracked_positions),
             ),

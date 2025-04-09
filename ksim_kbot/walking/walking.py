@@ -19,6 +19,8 @@ from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
+from ksim_kbot import common
+
 NUM_JOINTS = 20
 
 NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 230 + 138 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 1 + 1 + 1
@@ -290,13 +292,13 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             joint_name_to_metadata=metadata,
         )
 
-    def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
+    def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
         return [
-            ksim.StaticFrictionRandomization(),
-            ksim.ArmatureRandomization(),
-            ksim.MassMultiplicationRandomization.from_body_name(physics_model, "Torso_Side_Right"),
-            ksim.JointDampingRandomization(),
-            ksim.JointZeroPositionRandomization(),
+            ksim.StaticFrictionRandomizer(),
+            ksim.ArmatureRandomizer(),
+            ksim.MassMultiplicationRandomizer.from_body_name(physics_model, "Torso_Side_Right"),
+            ksim.JointDampingRandomizer(),
+            ksim.JointZeroPositionRandomizer(),
         ]
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
@@ -346,9 +348,9 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         switch_prob = self.config.ctrl_dt / 5
         return [
-            ksim.LinearVelocityCommand(index="x", range=(-1.0, 2.5), zero_prob=0.1, switch_prob=switch_prob),
-            ksim.LinearVelocityCommand(index="y", range=(-0.3, 0.3), zero_prob=0.9, switch_prob=switch_prob),
-            ksim.AngularVelocityCommand(index="z", scale=0.2, zero_prob=0.9, switch_prob=switch_prob),
+            common.LinearVelocityCommand(index="x", range=(-1.0, 2.5), zero_prob=0.1, switch_prob=switch_prob),
+            common.LinearVelocityCommand(index="y", range=(-0.3, 0.3), zero_prob=0.9, switch_prob=switch_prob),
+            common.AngularVelocityCommand(index="z", scale=0.2, zero_prob=0.9, switch_prob=switch_prob),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
@@ -398,7 +400,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             num_mixtures=self.config.num_mixtures,
         )
 
-    def get_initial_carry(self, rng: PRNGKeyArray) -> None:
+    def get_initial_model_carry(self, rng: PRNGKeyArray) -> None:
         return None
 
     def run_actor(
@@ -517,7 +519,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def sample_action(
         self,
         model: Model,
-        carry: None,
+        model_carry: None,
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, Array],
