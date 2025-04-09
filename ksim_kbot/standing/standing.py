@@ -603,7 +603,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     def get_model(self, key: PRNGKeyArray) -> KbotModel:
         return KbotModel(key)
 
-    def get_initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
+    def get_initial_model_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
         return (
             jnp.zeros(HISTORY_LENGTH * SINGLE_STEP_HISTORY_SIZE),
             jnp.zeros(HISTORY_LENGTH * SINGLE_STEP_HISTORY_SIZE),

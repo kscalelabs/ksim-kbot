@@ -371,7 +371,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
     def get_model(self, key: PRNGKeyArray) -> KbotModel:
         return KbotModel(key)
 
-    def get_initial_carry(self, rng: PRNGKeyArray) -> None:
+    def get_initial_model_carry(self, rng: PRNGKeyArray) -> None:
         return None
 
     def _run_actor(

@@ -237,7 +237,7 @@ class KbotDanceTask(KbotStandingTask[Config], Generic[Config]):
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [ksim.BadZTermination(unhealthy_z_lower=0.6, unhealthy_z_upper=1.5)]
 
-    def get_initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
+    def get_initial_model_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
         return (
             jnp.zeros(HISTORY_LENGTH * SINGLE_STEP_HISTORY_SIZE),
             jnp.zeros(HISTORY_LENGTH * SINGLE_STEP_HISTORY_SIZE),

@@ -332,7 +332,7 @@ class WalkingRnnTask(WalkingTask[Config], Generic[Config]):
 
         return ppo_variables, (actor_carry, critic_carry)
 
-    def get_initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
+    def get_initial_model_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
         return (
             jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
             jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
