@@ -74,8 +74,8 @@ ACTIVE_ACTUATOR_LIST = [
 
 class TargetState:
     def __init__(self) -> None:
-        self.xyz_target = np.array([0.3, -0.1, 0.0])
-        self.quat_target = np.array([0.0, 0.0, 0.0, 1.0])  # Identity quaternion
+        self.xyz_target = [0.3, -0.1, 0.0]
+        self.quat_target = [0.0, 0.0, 0.0, 1.0]  # Identity quaternion
         self.step_size = 0.01
 
     async def update_from_key(self, key: str) -> None:
@@ -93,7 +93,7 @@ class TargetState:
             self.xyz_target[2] += self.step_size
         logger.debug("Target position updated to: %s", self.xyz_target)
 
-    def get_target(self) -> tuple[np.ndarray, np.ndarray]:
+    def get_target(self) -> tuple[list[float], list[float]]:
         return self.xyz_target.copy(), self.quat_target.copy()
 
 
@@ -107,7 +107,7 @@ async def get_observation(
             kos.actuator.get_actuators_state([ac.actuator_id for ac in ACTIVE_ACTUATOR_LIST]),
             kos_instances["sim"].sim.update_marker(
                 name="target",
-                offset=target_state.xyz_target.tolist(),
+                offset=xyz_target,
             ),
         )
     else:
@@ -198,7 +198,7 @@ async def main(model_path: str, episode_length: int, mode: Mode) -> None:
             marker_type="sphere",
             target_name="floating_base_link",
             target_type="body",
-            offset=target_state.xyz_target.tolist(),
+            offset=target_state.xyz_target,
             scale=[0.05, 0.05, 0.05],
             color={"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0},
             label=True,

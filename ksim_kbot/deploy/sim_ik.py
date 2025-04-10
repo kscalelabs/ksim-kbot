@@ -71,7 +71,7 @@ ACTIVE_ACTUATOR_LIST = [
 
 class TargetState:
     def __init__(self) -> None:
-        self.xyz_target = np.array([0.3, -0.1, 0.0])
+        self.xyz_target = [0.3, -0.1, 0.0]
         self.step_size = 0.01
 
     async def update_from_key(self, key: str) -> None:
@@ -89,7 +89,7 @@ class TargetState:
             self.xyz_target[2] += self.step_size
         logger.debug("Target position updated to: %s", self.xyz_target)
 
-    def get_target(self) -> np.ndarray:
+    def get_target(self) -> list[float]:
         return self.xyz_target.copy()
 
 
@@ -237,7 +237,7 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
         marker_type="sphere",
         target_name="floating_base_link",
         target_type="body",
-        offset=target_state.xyz_target.tolist(),
+        offset=target_state.xyz_target,
         scale=[0.05, 0.05, 0.05],
         color={"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0},
         label=True,
@@ -264,7 +264,7 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
                 send_actions(kos, position, velocity),
                 kos.sim.update_marker(
                     name="target",
-                    offset=target_state.xyz_target.tolist(),
+                    offset=target_state.xyz_target,
                 ),
             )
             prev_action = action
