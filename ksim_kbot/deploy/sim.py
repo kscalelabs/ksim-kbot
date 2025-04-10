@@ -7,8 +7,9 @@ import signal
 import subprocess
 import sys
 import time
+import types
 from dataclasses import dataclass
-from typing import Callable, List
+from typing import Callable
 
 import numpy as np
 import pykos
@@ -58,7 +59,7 @@ class Actuator:
     joint_name: str
 
 
-ACTUATOR_LIST: List[Actuator] = [
+ACTUATOR_LIST: list[Actuator] = [
     # right arm
     Actuator(21, 0, 40.0, 4.0, 60.0, "dof_right_shoulder_pitch_03"),
     Actuator(22, 1, 40.0, 4.0, 60.0, "dof_right_shoulder_roll_03"),
@@ -86,7 +87,9 @@ ACTUATOR_LIST: List[Actuator] = [
 ]
 
 
-async def get_observation(kos, prev_action, cmd, phase, history):
+async def get_observation(
+    kos: pykos.KOS, prev_action: np.ndarray, cmd: np.ndarray, phase: float, history: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, float]:
     ids = [ac.actuator_id for ac in ACTUATOR_LIST]
     act_states, imu, raw_quat = await asyncio.gather(
         kos.actuator.get_actuators_state(ids), kos.imu.get_imu_values(), kos.imu.get_quaternion()
@@ -102,8 +105,7 @@ async def get_observation(kos, prev_action, cmd, phase, history):
 
     r = R.from_quat([raw_quat.x, raw_quat.y, raw_quat.z, raw_quat.w])
     gvec = r.apply(np.array([0, 0, -1]), inverse=True)
-    # Rotation from the torso frame
-    # TODO
+    # During training gravity vector is taken from the first torso frame
     gvec = np.array([gvec[1], -gvec[2], -gvec[0]])
 
     phase += 2 * np.pi * 1.2550827 * DT
@@ -115,7 +117,7 @@ async def get_observation(kos, prev_action, cmd, phase, history):
     return obs, full_obs, phase
 
 
-def update_history(history, obs, obs_size, cmd_size, hist_len):
+def update_history(history: np.ndarray, obs: np.ndarray, obs_size: int, cmd_size: int, hist_len: int) -> np.ndarray:
     step_size = obs_size + cmd_size
     history = history.reshape(hist_len, step_size)
     history = np.roll(history, shift=-1, axis=0)
@@ -123,7 +125,7 @@ def update_history(history, obs, obs_size, cmd_size, hist_len):
     return history.flatten()
 
 
-async def send_actions(kos, position, velocity):
+async def send_actions(kos: pykos.KOS, position: np.ndarray, velocity: np.ndarray) -> None:
     position = np.rad2deg(position)
     velocity = np.rad2deg(velocity)
     commands = [
@@ -133,7 +135,7 @@ async def send_actions(kos, position, velocity):
     await kos.actuator.command_actuators(commands)
 
 
-async def configure_actuators(kos):
+async def configure_actuators(kos: pykos.KOS) -> None:
     for ac in ACTUATOR_LIST:
         await kos.actuator.configure_actuator(
             actuator_id=ac.actuator_id,
@@ -144,7 +146,7 @@ async def configure_actuators(kos):
         )
 
 
-async def reset(kos):
+async def reset(kos: pykos.KOS) -> None:
     await kos.sim.reset(
         pos={"x": 0.0, "y": 0.0, "z": 1.01},
         quat={"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
@@ -157,7 +159,7 @@ def spawn_kos_sim(no_render: bool) -> tuple[subprocess.Popen, Callable]:
     proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     time.sleep(5)
 
-    def cleanup(sig=None, frame=None):
+    def cleanup(sig: int | None = None, frame: types.FrameType | None = None) -> None:
         proc.terminate()
         try:
             proc.wait(timeout=5)
@@ -170,7 +172,7 @@ def spawn_kos_sim(no_render: bool) -> tuple[subprocess.Popen, Callable]:
     return proc, cleanup
 
 
-async def main(model_path: str, ip: str, no_render: bool, episode_length: int):
+async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -> None:
     model = tf.saved_model.load(model_path)
     try:
         kos = pykos.KOS(ip=ip)
