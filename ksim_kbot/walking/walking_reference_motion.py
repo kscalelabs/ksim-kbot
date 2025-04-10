@@ -109,10 +109,10 @@ class MatchReferenceMotionReward(ksim.Reward):
     ctrl_dt: float
     norm: xax.NormType = attrs.field(default="l1")
     sensitivity: float = attrs.field(default=5.0)
-    body_name: str | int
+    body_idx: int
 
     def get_name(self) -> str:
-        return f"{self.body_name}_{super().get_name()}"
+        return f"{self.body_idx}_{super().get_name()}"
 
     @property
     def num_frames(self) -> int:
@@ -123,8 +123,8 @@ class MatchReferenceMotionReward(ksim.Reward):
         reference_motion: xax.FrozenDict[int, Array] = jax.tree.map(lambda x: x.array, self.reference_motion)
         step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
         target_pos_dict = jax.tree.map(lambda x: jnp.take(x, step_number, axis=0), reference_motion)
-        tracked_pos = trajectory.aux_outputs.tracked_pos[self.body_name]
-        target_pos_array = target_pos_dict[self.body_name]
+        tracked_pos = trajectory.aux_outputs.tracked_pos[self.body_idx]
+        target_pos_array = target_pos_dict[self.body_idx]
         mean_error = xax.get_norm(target_pos_array - tracked_pos, self.norm).mean(axis=-1)
 
         reward = jnp.exp(-mean_error * self.sensitivity)
@@ -150,7 +150,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                     reference_motion=xax.FrozenDict({body_id: self.reference_motion[body_id]}),
                     ctrl_dt=self.config.ctrl_dt,
                     scale=self.config.match_reward_scale,
-                    body_name=body_id,
+                    body_idx=body_id,
                 ),
             )
 
