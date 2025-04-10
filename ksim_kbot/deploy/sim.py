@@ -16,6 +16,8 @@ import pykos
 import tensorflow as tf
 from scipy.spatial.transform import Rotation as R
 
+from ksim_kbot.deploy.keyboard_controller import KeyboardController
+
 logger = logging.getLogger(__name__)
 DT = 0.02  # time step (50Hz)
 
@@ -43,6 +45,28 @@ DEFAULT_POSITIONS = np.array(
         -0.195,  # left leg
     ]
 )
+
+
+class CommandState:
+    def __init__(self) -> None:
+        self.cmd = np.array([0.3, 0.0])
+        self.step_size = 0.01
+
+    async def update_from_key(self, key: str) -> None:
+        if key == "a":
+            self.cmd[0] -= self.step_size
+        elif key == "d":
+            self.cmd[0] += self.step_size
+        elif key == "w":
+            self.cmd[1] += self.step_size
+        elif key == "s":
+            self.cmd[1] -= self.step_size
+
+        logger.debug("Command updated to: %s", self.cmd)
+
+    def get_command(self) -> np.ndarray:
+        return self.cmd.copy()
+
 
 OBS_SIZE = 20 + 20 + 3 + 3 + 3 + 40 + 4  # pos_diff (20) + vel_obs (20) + imu (6) - adjust if needed
 CMD_SIZE = 2
@@ -182,10 +206,14 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
     await configure_actuators(kos)
     await reset(kos)
 
-    cmd = np.array([0.3, 0.0])
+    command_state = CommandState()
+    keyboard_controller = KeyboardController(command_state.update_from_key)
+    await keyboard_controller.start()
+
     phase = np.array([0, np.pi])
     prev_action = np.zeros(len(ACTUATOR_LIST) * 2)
-    obs, phase = await get_observation(kos, prev_action, cmd, phase)
+
+    obs, phase = await get_observation(kos, prev_action, command_state.get_command(), phase)
     if no_render:
         await kos.process_manager.start_kclip("deployment")
 
@@ -199,11 +227,15 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
         pos = action[: len(ACTUATOR_LIST)] + DEFAULT_POSITIONS
         vel = action[len(ACTUATOR_LIST) :]
         (obs, phase), _ = await asyncio.gather(
-            get_observation(kos, prev_action, cmd, phase),
+            get_observation(kos, prev_action, command_state.get_command(), phase),
             send_actions(kos, pos, vel),
         )
         prev_action = action
-        await asyncio.sleep(max(0, target_time - time.time()))
+        if time.time() < target_time:
+            await asyncio.sleep(max(0, target_time - time.time()))
+        else:
+            logger.info("Loop overran by %s seconds", time.time() - target_time)
+
         target_time += DT
 
     if no_render:

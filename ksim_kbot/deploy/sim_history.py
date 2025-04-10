@@ -192,8 +192,13 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
     await configure_actuators(kos)
     await reset(kos)
 
+    # command_state = CommandState()
+    # keyboard_controller = KeyboardController(command_state.update_from_key)
+    # await keyboard_controller.start()
+
     history = np.zeros(HIST_LEN * (OBS_SIZE + CMD_SIZE))
     cmd = np.array([0.3, 0.0])
+    # cmd = command_state.get_command()
     phase = np.array([0, np.pi])
     prev_action = np.zeros(len(ACTUATOR_LIST) * 2)
     obs, full_obs, phase = await get_observation(kos, prev_action, cmd, phase, history)
@@ -217,7 +222,11 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
             )
         )[0]
         prev_action = action
-        await asyncio.sleep(max(0, target_time - time.time()))
+        if time.time() < target_time:
+            await asyncio.sleep(max(0, target_time - time.time()))
+        else:
+            logger.info("Loop overran by %s seconds", time.time() - target_time)
+
         target_time += DT
 
     if no_render:
