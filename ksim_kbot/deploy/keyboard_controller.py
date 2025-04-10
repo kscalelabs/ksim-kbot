@@ -45,19 +45,16 @@ class KeyboardController:
             # Restore terminal settings
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
-    async def _run_loop(self) -> None:
+    async def _run_loop(self, timeout: float = 0.01) -> None:
         """The main loop that listens for keyboard input."""
         logger.info("\nKeyboard control active:")
-        logger.info("  w/s: forward/backward")
-        logger.info("  a/d: left/right")
-        logger.info("  q/e: down/up")
         logger.info("  Press Ctrl+C to exit\n")
 
         with self._cbreak():
             try:
                 while True:
                     # Check if input is available
-                    if select.select([sys.stdin], [], [], 0.1)[0]:
+                    if select.select([sys.stdin], [], [], timeout)[0]:
                         key = sys.stdin.read(1)
                         if key == "\x03":  # Ctrl+C
                             logger.info("Ctrl+C detected by keyboard listener.")
