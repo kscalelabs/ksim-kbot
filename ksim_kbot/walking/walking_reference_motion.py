@@ -25,9 +25,11 @@ from ksim.utils.reference_motion import (
 )
 from scipy.spatial.transform import Rotation as R
 
-from ksim_kbot import common, rewards as kbot_rewards
 from ksim_kbot.walking.walking import NaiveForwardReward
 from ksim_kbot.walking.walking_rnn import RnnModel, WalkingRnnTask, WalkingRnnTaskConfig
+import ksim_kbot.rewards as kbot_rewards
+HISTORY_LENGTH = 0
+SINGLE_STEP_HISTORY_SIZE = 0
 
 
 @jax.tree_util.register_dataclass
@@ -91,7 +93,7 @@ class WalkingRnnRefMotionTaskConfig(WalkingRnnTaskConfig):
         help="The scale to apply to the naive reward.",
     )
     match_reward_scale: float = xax.field(
-        value=0.01,
+        value=0.05,
         help="The scale to apply to the match reward.",
     )
 
@@ -126,22 +128,11 @@ class MatchReferenceMotionReward(ksim.Reward):
 class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
     config: Config
 
-    def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
-        return [
-            # NOTE: bring it back when stable
-            # ksim.PushEvent(
-            #     x_force=0.0,
-            #     y_force=0.0,
-            #     z_force=0.0,
-            #     x_angular_force=0.0,
-            #     y_angular_force=0.0,
-            #     z_angular_force=0.0,
-            #     interval_range=(10.0, 10.0),
-            # ),
-        ]
-
     def get_initial_model_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
-        return super().get_initial_model_carry(rng)
+        return (
+            jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
+            jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
+        )
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards: list[ksim.Reward] = [
@@ -154,13 +145,13 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 ctrl_dt=self.config.ctrl_dt,
                 scale=self.config.match_reward_scale,
             ),
-            kbot_rewards.OrientationPenalty(scale=self.config.orientation_penalty),
-            ksim.ActionSmoothnessPenalty(scale=-0.01),
+            # kbot_rewards.OrientationPenalty(scale=self.config.orientation_penalty),
+            # ksim.AccelerationPenalty(scale=self.config.acceleration_penalty),
         ]
 
         if self.config.use_naive_reward:
             rewards += [
-                NaiveForwardReward(clip_max=5.0, scale=self.config.naive_reward_scale),
+                NaiveForwardReward(clip_max=self.config.naive_clip_max, scale=1.0),
             ]
         else:
             rewards += [
@@ -168,57 +159,13 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 ksim.LinearVelocityTrackingReward(index="y", command_name="linear_velocity_command_y", scale=0.1),
                 ksim.AngularVelocityTrackingReward(index="z", command_name="angular_velocity_command_z", scale=0.01),
             ]
+
         return rewards
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
         return [
             ksim.RandomJointPositionReset(),
             ksim.RandomJointVelocityReset(),
-            common.ResetDefaultJointPosition(
-                default_targets=(
-                    0.0,
-                    0.0,
-                    1.01,
-                    # quat
-                    1.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # right arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # left arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # right leg
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # left leg
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                )
-            ),
-        ]
-
-    def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
-        return [
-            # ksim.StaticFrictionRandomizer(),
-            # ksim.ArmatureRandomizer(),
-            # ksim.MassMultiplicationRandomizer.from_body_name(physics_model, "Torso_Side_Right"),
-            # ksim.JointDampingRandomizer(),
-            # ksim.JointZeroPositionRandomizer(),
         ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
@@ -247,6 +194,48 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="upvector_origin", noise=0.0),
         ]
 
+    def get_ppo_variables(
+        self,
+        model: RnnModel,
+        trajectory: ksim.Trajectory,
+        model_carry: tuple[Array, Array],
+        rng: PRNGKeyArray,
+    ) -> tuple[ksim.PPOVariables, tuple[Array, Array]]:
+        def scan_fn(
+            actor_critic_carry: tuple[Array, Array], transition: ksim.Trajectory
+        ) -> tuple[tuple[Array, Array], ksim.PPOVariables]:
+            actor_carry, critic_carry = actor_critic_carry
+            actor_dist, next_actor_carry = self.run_actor(
+                model=model.actor,
+                observations=transition.obs,
+                commands=transition.command,
+                carry=actor_carry,
+            )
+            log_probs = actor_dist.log_prob(transition.action)
+            assert isinstance(log_probs, Array)
+            value, next_critic_carry = self.run_critic(
+                model=model.critic,
+                observations=transition.obs,
+                commands=transition.command,
+                carry=critic_carry,
+            )
+
+            transition_ppo_variables = ksim.PPOVariables(
+                log_probs=log_probs,
+                values=value.squeeze(-1),
+            )
+
+            initial_carry = self.get_initial_model_carry(rng)
+            next_carry = jax.tree.map(
+                lambda x, y: jnp.where(transition.done, x, y), initial_carry, (next_actor_carry, next_critic_carry)
+            )
+
+            return next_carry, transition_ppo_variables
+
+        next_model_carry, ppo_variables = jax.lax.scan(scan_fn, model_carry, trajectory)
+
+        return ppo_variables, next_model_carry
+
     def sample_action(
         self,
         model: RnnModel,
@@ -257,7 +246,17 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> ksim.Action:
-        action_n = super().sample_action(model, model_carry, physics_model, physics_state, observations, commands, rng)
+        actor_carry_in, critic_carry_in = model_carry
+
+        # Runs the actor model to get the action distribution.
+        action_dist_j, actor_carry = self.run_actor(
+            model=model.actor,
+            observations=observations,
+            commands=commands,
+            carry=actor_carry_in,
+        )
+
+        action_j = action_dist_j.sample(seed=rng)
 
         # Getting the local cartesian positions for all tracked bodies.
         tracked_positions: dict[int, Array] = {}
@@ -266,8 +265,8 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
             tracked_positions[body_id] = jnp.array(body_pos)
 
         return ksim.Action(
-            action=action_n.action,
-            carry=model_carry,
+            action=action_j,
+            carry=(actor_carry, critic_carry_in),
             aux_outputs=MotionAuxOutputs(
                 tracked_pos=xax.FrozenDict(tracked_positions),
             ),
@@ -310,7 +309,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m ksim_kbot.walking.walking_reference_motion disable_multiprocessing=True
+    #  python -m ksim_kbot.walking.walking_reference_motion disable_multiprocessing=True
     # To visualize the environment, use the following command:
     #   python -m ksim_kbot.walking.walking_reference_motion run_environment=True
     # To visualize the reference gait, use the following command:
@@ -332,19 +331,12 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
-            # # PPO parameters
-            # gamma=0.97,
-            # lam=0.95,
-            # entropy_coef=0.005,
-            # learning_rate=1e-4,
-            # clip_param=0.3,
-            # max_grad_norm=0.5,
+            use_naive_reward=True,
             # Reference motion parameters
             rotate_bvh_euler=(0, np.pi / 2, 0),
             bvh_scaling_factor=1 / 100,
             offset_reference_motion=(0.02, 0.09, -0.29),
             mj_base_name="floating_base_link",
             reference_base_name="CC_Base_Pelvis",
-            use_naive_reward=True,
         ),
     )
