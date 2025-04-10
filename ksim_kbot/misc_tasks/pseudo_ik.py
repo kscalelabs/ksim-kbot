@@ -672,7 +672,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             BodyOrientationCommand.create(
                 model=physics_model,
                 base_body_name="ik_target",
-                switch_prob=self.config.ctrl_dt * 10,
+                switch_prob=self.config.ctrl_dt,
                 null_prob=self.config.ctrl_dt * 5,
                 vis_magnitude=0.5,
                 vis_size=0.05,
@@ -689,17 +689,6 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 scale=10.0,
                 command_name="target_position_command",
             ),
-            # ContinuousCartesianBodyTargetReward.create(
-            #     model=physics_model,
-            #     tracked_body_name="ik_target",
-            #     base_body_name="floating_base_link",
-            #     norm="l2",
-            #     scale=2.5,
-            #     sensitivity=1.0,
-            #     threshold=0.000025,  # with l2 xax norm, this is 0.5cm
-            #     time_bonus_scale=0.3,
-            #     command_name="target_position_command",
-            # ),
             BodyOrientationTrackingReward.create(
                 model=physics_model,
                 command_name="ik_target_body_orientation_command",
@@ -826,8 +815,8 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
         return ksim.RewardLevelCurriculum(
             reward_name="ik_target_position_tracking_reward",
-            increase_threshold=0.1,
-            decrease_threshold=0.05,
+            increase_threshold=0.15,
+            decrease_threshold=0.12,
             min_level_steps=10,
             num_levels=10,
         )
@@ -926,112 +915,3 @@ if __name__ == "__main__":
             use_mit_actuators=True,
         ),
     )
-
-"""
-@attrs.define(kw_only=True)
-class GlobalBodyQuaternionMarker(Marker):
-    command_name: str = attrs.field()
-
-    def __attrs_post_init__(self) -> None:
-        if self.target_name is None or self.target_type != "body":
-            raise ValueError("Base body name must be provided. Make sure to create with `get`.")
-
-    def update(self, trajectory: Trajectory) -> None:
-        command = trajectory.command[self.command_name]
-        # Check if command is zeros (null quaternion)
-        is_null = jnp.all(jnp.isclose(command, 0.0))
-
-        # Only update orientation if command is not null
-        if not is_null:
-            self.geom = mujoco.mjtGeom.mjGEOM_ARROW
-            self.orientation = command
-        else:
-            self.geom = mujoco.mjtGeom.mjGEOM_SPHERE
-
-    @classmethod
-    def get(
-        cls,
-        command_name: str,
-        base_body_name: str,
-        size: float,
-        magnitude: float,
-        rgba: tuple[float, float, float, float],
-    ) -> Self:
-        return cls(
-            command_name=command_name,
-            target_name=base_body_name,
-            target_type="body",
-            geom=mujoco.mjtGeom.mjGEOM_ARROW,
-            scale=(size, size, magnitude),
-            rgba=rgba,
-        )
-
-
-@attrs.define(frozen=True)
-class GlobalBodyQuaternionCommand(Command):
-
-    base_body_name: str = attrs.field()
-    base_id: int = attrs.field()
-    switch_prob: float = attrs.field()
-    null_prob: float = attrs.field()  # Probability of sampling null quaternion
-    vis_magnitude: float = attrs.field()
-    vis_size: float = attrs.field()
-    vis_color: tuple[float, float, float, float] = attrs.field()
-
-    def initial_command(
-        self,
-        physics_data: PhysicsData,
-        curriculum_level: Array,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        rng_a, rng_b = jax.random.split(rng)
-        is_null = jax.random.bernoulli(rng_a, self.null_prob)
-        quat = jax.random.normal(rng_b, (4,))
-        random_quat = quat / jnp.linalg.norm(quat)
-        return jnp.where(is_null, jnp.zeros(4), random_quat)
-
-    def __call__(
-        self,
-        prev_command: Array,
-        physics_data: PhysicsData,
-        curriculum_level: Array,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        rng_a, rng_b = jax.random.split(rng)
-        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
-        return jnp.where(switch_mask, new_commands, prev_command)
-
-    def get_markers(self) -> Collection[Marker]:
-        return [
-            GlobalBodyQuaternionMarker.get(
-                self.command_name, self.base_body_name, self.vis_size, self.vis_magnitude, self.vis_color
-            )
-        ]
-
-    def get_name(self) -> str:
-        return f"{super().get_name()}_{self.base_body_name}"
-
-    @classmethod
-    def create(
-        cls,
-        model: PhysicsModel,
-        base_name: str,
-        switch_prob: float = 0.1,
-        null_prob: float = 0.1,
-        vis_magnitude: float = 0.5,
-        vis_size: float = 0.05,
-        vis_color: tuple[float, float, float, float] = (0.0, 0.0, 1.0, 0.8),
-    ) -> Self:
-        base_id = get_body_data_idx_from_name(model, base_name)
-        return cls(
-            base_body_name=base_name,
-            base_id=base_id,
-            switch_prob=switch_prob,
-            null_prob=null_prob,
-            vis_magnitude=vis_magnitude,
-            vis_size=vis_size,
-            vis_color=vis_color,
-        )
-
-"""
