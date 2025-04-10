@@ -325,3 +325,13 @@ class FeetPhaseReward(ksim.Reward):
         stance = xax.cubic_bezier_interpolation(jnp.array(0), swing_height, 2 * x)
         swing = xax.cubic_bezier_interpolation(swing_height, jnp.array(0), 2 * x - 1)
         return jnp.where(x <= 0.5, stance, swing)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FarFromOriginTerminationReward(ksim.Reward):
+    """Reward for being far from the origin."""
+
+    max_dist: float = attrs.field()
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        return jnp.linalg.norm(trajectory.qpos[..., :2], axis=-1) > self.max_dist

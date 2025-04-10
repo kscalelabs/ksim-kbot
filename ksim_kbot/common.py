@@ -216,3 +216,16 @@ class ResetDefaultJointPosition(ksim.Reset):
             case mjx.Data:
                 qpos = qpos.at[:].set(self.default_targets)
         return ksim.utils.mujoco.update_data_field(data, "qpos", qpos)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FarFromOriginTermination(ksim.Termination):
+    """Terminates the episode if the robot is too far from the origin.
+
+    This is treated as a positive termination.
+    """
+
+    max_dist: float = attrs.field()
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        return jnp.linalg.norm(trajectory.qpos[..., :2], axis=-1) > self.max_dist
