@@ -355,14 +355,14 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         else:
             return ksim.TorqueActuators()
 
-    def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
+    def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
         if self.config.domain_randomize:
             return [
-                ksim.StaticFrictionRandomization(scale_lower=0.5, scale_upper=2.0),
-                ksim.JointZeroPositionRandomization(scale_lower=-0.01, scale_upper=0.01),
-                ksim.ArmatureRandomization(scale_lower=1.0, scale_upper=1.05),
-                ksim.MassMultiplicationRandomization.from_body_name(physics_model, "Torso_Side_Right"),
-                ksim.JointDampingRandomization(scale_lower=0.95, scale_upper=1.05),
+                ksim.StaticFrictionRandomizer(scale_lower=0.5, scale_upper=2.0),
+                ksim.JointZeroPositionRandomizer(scale_lower=-0.01, scale_upper=0.01),
+                ksim.ArmatureRandomizer(scale_lower=1.0, scale_upper=1.05),
+                ksim.MassMultiplicationRandomizer.from_body_name(physics_model, "Torso_Side_Right"),
+                ksim.JointDampingRandomizer(scale_lower=0.95, scale_upper=1.05),
             ]
         else:
             return []
@@ -526,9 +526,9 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         switch_prob = 0.0
         return [
-            ksim.LinearVelocityCommand(index="x", range=(0.0, 0.0), zero_prob=1.0, switch_prob=switch_prob),
-            ksim.LinearVelocityCommand(index="y", range=(0.0, 0.0), zero_prob=1.0, switch_prob=switch_prob),
-            ksim.AngularVelocityCommand(index="z", scale=0.0, zero_prob=1.0, switch_prob=switch_prob),
+            ksim.LinearVelocityCommand(index="x", range=(0.0, 0.0), zero_prob=1.0, switch_prob=switch_prob),  # type: ignore[attr-defined]
+            ksim.LinearVelocityCommand(index="y", range=(0.0, 0.0), zero_prob=1.0, switch_prob=switch_prob),  # type: ignore[attr-defined]
+            ksim.AngularVelocityCommand(index="z", scale=0.0, zero_prob=1.0, switch_prob=switch_prob),  # type: ignore[attr-defined]
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
@@ -565,9 +565,9 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ksim.BaseHeightRangeReward(z_lower=0.6, z_upper=1.4, dropoff=10.0, scale=0.01),
             ksim.StayAliveReward(scale=1.0),
             ksim.ActuatorForcePenalty(scale=-0.005),
-            ksim.LinearVelocityTrackingReward(index="x", command_name="linear_velocity_command_x", scale=0.1),
-            ksim.LinearVelocityTrackingReward(index="y", command_name="linear_velocity_command_y", scale=0.1),
-            ksim.AngularVelocityTrackingReward(index="z", command_name="angular_velocity_command_z", scale=0.1),
+            ksim.LinearVelocityTrackingReward(index="x", command_name="linear_velocity_command_x", scale=0.1),  # type: ignore[attr-defined]
+            ksim.LinearVelocityTrackingReward(index="y", command_name="linear_velocity_command_y", scale=0.1),  # type: ignore[attr-defined]
+            ksim.AngularVelocityTrackingReward(index="z", command_name="angular_velocity_command_z", scale=0.1),  # type: ignore[attr-defined]
             rewards.FeetSlipPenalty(scale=-0.25),
             # common.TerminationPenalty(scale=-5.0),
         ]

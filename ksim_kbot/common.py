@@ -220,7 +220,7 @@ class LinearVelocityCommand(ksim.Command):
     """
 
     range: tuple[float, float] = attrs.field()
-    index: int | None = attrs.field(default=None)
+    index: int | str | None = attrs.field(default=None)
     zero_prob: float = attrs.field(default=0.0)
     switch_prob: float = attrs.field(default=0.0)
     vis_height: float = attrs.field(default=1.0)
@@ -259,7 +259,7 @@ class AngularVelocityCommand(ksim.Command):
     """Command to turn the robot."""
 
     scale: float = attrs.field()
-    index: int | None = attrs.field(default=None)
+    index: int | str | None = attrs.field(default=None)
     zero_prob: float = attrs.field(default=0.0)
     switch_prob: float = attrs.field(default=0.0)
 

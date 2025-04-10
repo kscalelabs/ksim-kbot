@@ -1,3 +1,4 @@
+# mypy: disable-error-code="override"
 """Walking default humanoid task with reference gait tracking."""
 
 from dataclasses import dataclass
@@ -25,9 +26,10 @@ from ksim.utils.reference_motion import (
 )
 from scipy.spatial.transform import Rotation as R
 
+import ksim_kbot.rewards as kbot_rewards
 from ksim_kbot.walking.walking import NaiveForwardReward
 from ksim_kbot.walking.walking_rnn import RnnModel, WalkingRnnTask, WalkingRnnTaskConfig
-import ksim_kbot.rewards as kbot_rewards
+
 HISTORY_LENGTH = 0
 SINGLE_STEP_HISTORY_SIZE = 0
 
@@ -128,12 +130,6 @@ class MatchReferenceMotionReward(ksim.Reward):
 class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
     config: Config
 
-    def get_initial_model_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
-        return (
-            jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
-            jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
-        )
-
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards: list[ksim.Reward] = [
             ksim.StayAliveReward(
@@ -145,21 +141,15 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 ctrl_dt=self.config.ctrl_dt,
                 scale=self.config.match_reward_scale,
             ),
-            # kbot_rewards.OrientationPenalty(scale=self.config.orientation_penalty),
+            kbot_rewards.OrientationPenalty(scale=self.config.orientation_penalty),
             # ksim.AccelerationPenalty(scale=self.config.acceleration_penalty),
+            # kbot_rewards.FeetSlipPenalty(scale=-0.25),
         ]
 
         if self.config.use_naive_reward:
             rewards += [
                 NaiveForwardReward(clip_max=self.config.naive_clip_max, scale=1.0),
             ]
-        else:
-            rewards += [
-                ksim.LinearVelocityTrackingReward(index="x", command_name="linear_velocity_command_x", scale=1.0),
-                ksim.LinearVelocityTrackingReward(index="y", command_name="linear_velocity_command_y", scale=0.1),
-                ksim.AngularVelocityTrackingReward(index="z", command_name="angular_velocity_command_z", scale=0.01),
-            ]
-
         return rewards
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
@@ -309,7 +299,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #  python -m ksim_kbot.walking.walking_reference_motion disable_multiprocessing=True
+    #   python -m ksim_kbot.walking.walking_reference_motion
     # To visualize the environment, use the following command:
     #   python -m ksim_kbot.walking.walking_reference_motion run_environment=True
     # To visualize the reference gait, use the following command:
@@ -323,7 +313,7 @@ if __name__ == "__main__":
             # Training parameters.
             num_envs=2048,
             batch_size=256,
-            num_passes=4,
+            num_passes=10,
             epochs_per_log_step=1,
             rollout_length_seconds=10.0,
             # Simulation parameters.
@@ -332,6 +322,13 @@ if __name__ == "__main__":
             max_action_latency=0.0,
             min_action_latency=0.0,
             use_naive_reward=True,
+            # PPO parameters.
+            gamma=0.97,
+            lam=0.95,
+            entropy_coef=0.005,
+            learning_rate=1e-4,
+            clip_param=0.3,
+            max_grad_norm=0.5,
             # Reference motion parameters
             rotate_bvh_euler=(0, np.pi / 2, 0),
             bvh_scaling_factor=1 / 100,

@@ -367,9 +367,9 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ]
         else:
             rewards += [
-                ksim.LinearVelocityTrackingReward(index="x", command_name="linear_velocity_command_x", scale=1.0),
-                ksim.LinearVelocityTrackingReward(index="y", command_name="linear_velocity_command_y", scale=0.1),
-                ksim.AngularVelocityTrackingReward(index="z", command_name="angular_velocity_command_z", scale=0.01),
+                ksim.LinearVelocityTrackingReward(index="x", command_name="linear_velocity_command_x", scale=1.0),  # type: ignore[attr-defined]
+                ksim.LinearVelocityTrackingReward(index="y", command_name="linear_velocity_command_y", scale=0.1),  # type: ignore[attr-defined]
+                ksim.AngularVelocityTrackingReward(index="z", command_name="angular_velocity_command_z", scale=0.01),  # type: ignore[attr-defined]
             ]
 
         return rewards

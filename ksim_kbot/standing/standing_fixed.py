@@ -394,9 +394,9 @@ class KbotStandingFixedTask(KbotStandingTask[Config], Generic[Config]):
             ksim.BaseHeightRangeReward(z_lower=0.6, z_upper=1.4, dropoff=10.0, scale=0.01),
             ksim.StayAliveReward(scale=1.0),
             ksim.ActuatorForcePenalty(scale=-0.005),
-            ksim.LinearVelocityTrackingReward(index="x", command_name="linear_velocity_command_x", scale=0.1),
-            ksim.LinearVelocityTrackingReward(index="y", command_name="linear_velocity_command_y", scale=0.1),
-            ksim.AngularVelocityTrackingReward(index="z", command_name="angular_velocity_command_z", scale=0.1),
+            ksim.LinearVelocityTrackingReward(index="x", command_name="linear_velocity_command_x", scale=0.1),  # type: ignore[attr-defined]
+            ksim.LinearVelocityTrackingReward(index="y", command_name="linear_velocity_command_y", scale=0.1),  # type: ignore[attr-defined]
+            ksim.AngularVelocityTrackingReward(index="z", command_name="angular_velocity_command_z", scale=0.1),  # type: ignore[attr-defined]
             rewards.FeetSlipPenalty(scale=-0.25),
             # common.TerminationPenalty(scale=-5.0),
         ]
