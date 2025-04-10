@@ -7,46 +7,45 @@ import signal
 import subprocess
 import sys
 import time
-import types
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, List
 
 import numpy as np
 import pykos
 import tensorflow as tf
+from scipy.spatial.transform import Rotation as R
 
 logger = logging.getLogger(__name__)
-
-DT = 0.02  # Policy time step (50Hz)
+DT = 0.02  # time step (50Hz)
 
 DEFAULT_POSITIONS = np.array(
     [
-        # right arm (nn_id 0-4)
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        # left arm (nn_id 5-9)
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        # right leg (nn_id 10-14)
+        0,
+        0,
+        0,
+        0,
+        0,  # right arm
+        0,
+        0,
+        0,
+        0,
+        0,  # left arm
         -0.23,
-        0.0,
-        0.0,
+        0,
+        0,
         -0.441,
-        0.195,
-        # left leg (nn_id 15-19)
+        0.195,  # right leg
         0.23,
-        0.0,
-        0.0,
+        0,
+        0,
         0.441,
-        -0.195,
+        -0.195,  # left leg
     ]
 )
+
+OBS_SIZE = 20 + 20 + 3 + 3 + 3 + 40 + 4  # pos_diff (20) + vel_obs (20) + imu (6) - adjust if needed
+CMD_SIZE = 2
+HIST_LEN = 5
 
 
 @dataclass
@@ -59,71 +58,82 @@ class Actuator:
     joint_name: str
 
 
-ACTUATOR_LIST: list[Actuator] = [
-    # Right arm (nn_id 0-4)
-    Actuator(actuator_id=21, nn_id=0, kp=40.0, kd=4.0, max_torque=40.0, joint_name="dof_right_shoulder_pitch_03"),
-    Actuator(actuator_id=22, nn_id=1, kp=40.0, kd=4.0, max_torque=40.0, joint_name="dof_right_shoulder_roll_03"),
-    Actuator(actuator_id=23, nn_id=2, kp=30.0, kd=1.0, max_torque=14.0, joint_name="dof_right_shoulder_yaw_02"),
-    Actuator(actuator_id=24, nn_id=3, kp=30.0, kd=1.0, max_torque=14.0, joint_name="dof_right_elbow_02"),
-    Actuator(actuator_id=25, nn_id=4, kp=20.0, kd=0.45473329537059787, max_torque=1.0, joint_name="dof_right_wrist_00"),
-    # Left arm (nn_id 5-9)
-    Actuator(actuator_id=11, nn_id=5, kp=40.0, kd=4.0, max_torque=40.0, joint_name="dof_left_shoulder_pitch_03"),
-    Actuator(actuator_id=12, nn_id=6, kp=40.0, kd=4.0, max_torque=40.0, joint_name="dof_left_shoulder_roll_03"),
-    Actuator(actuator_id=13, nn_id=7, kp=30.0, kd=1.0, max_torque=14.0, joint_name="dof_left_shoulder_yaw_02"),
-    Actuator(actuator_id=14, nn_id=8, kp=30.0, kd=1.0, max_torque=14.0, joint_name="dof_left_elbow_02"),
-    Actuator(actuator_id=15, nn_id=9, kp=20.0, kd=0.45473329537059787, max_torque=1.0, joint_name="dof_left_wrist_00"),
-    # Right leg (nn_id 10-14)
-    Actuator(actuator_id=41, nn_id=10, kp=85.0, kd=5.0, max_torque=60.0, joint_name="dof_right_hip_pitch_04"),
-    Actuator(actuator_id=42, nn_id=11, kp=40.0, kd=4.0, max_torque=40.0, joint_name="dof_right_hip_roll_03"),
-    Actuator(actuator_id=43, nn_id=12, kp=40.0, kd=4.0, max_torque=40.0, joint_name="dof_right_hip_yaw_03"),
-    Actuator(actuator_id=44, nn_id=13, kp=85.0, kd=5.0, max_torque=60.0, joint_name="dof_right_knee_04"),
-    Actuator(actuator_id=45, nn_id=14, kp=30.0, kd=1.0, max_torque=14.0, joint_name="dof_right_ankle_02"),
-    # Left leg (nn_id 15-19)
-    Actuator(actuator_id=31, nn_id=15, kp=85.0, kd=5.0, max_torque=60.0, joint_name="dof_left_hip_pitch_04"),
-    Actuator(actuator_id=32, nn_id=16, kp=40.0, kd=4.0, max_torque=40.0, joint_name="dof_left_hip_roll_03"),
-    Actuator(actuator_id=33, nn_id=17, kp=40.0, kd=4.0, max_torque=40.0, joint_name="dof_left_hip_yaw_03"),
-    Actuator(actuator_id=34, nn_id=18, kp=85.0, kd=5.0, max_torque=60.0, joint_name="dof_left_knee_04"),
-    Actuator(actuator_id=35, nn_id=19, kp=30.0, kd=1.0, max_torque=14.0, joint_name="dof_left_ankle_02"),
+ACTUATOR_LIST: List[Actuator] = [
+    # right arm
+    Actuator(21, 0, 40.0, 4.0, 60.0, "dof_right_shoulder_pitch_03"),
+    Actuator(22, 1, 40.0, 4.0, 60.0, "dof_right_shoulder_roll_03"),
+    Actuator(23, 2, 30.0, 1.0, 17.0, "dof_right_shoulder_yaw_02"),
+    Actuator(24, 3, 30.0, 1.0, 17.0, "dof_right_elbow_02"),
+    Actuator(25, 4, 20.0, 0.45473329537059787, 1.0, "dof_right_wrist_00"),
+    # left arm
+    Actuator(11, 5, 40.0, 4.0, 60.0, "dof_left_shoulder_pitch_03"),
+    Actuator(12, 6, 40.0, 4.0, 60.0, "dof_left_shoulder_roll_03"),
+    Actuator(13, 7, 30.0, 1.0, 17.0, "dof_left_shoulder_yaw_02"),
+    Actuator(14, 8, 30.0, 1.0, 17.0, "dof_left_elbow_02"),
+    Actuator(15, 9, 20.0, 0.45473329537059787, 1.0, "dof_left_wrist_00"),
+    # right leg
+    Actuator(41, 10, 85.0, 5.0, 80.0, "dof_right_hip_pitch_04"),
+    Actuator(42, 11, 40.0, 4.0, 60.0, "dof_right_hip_roll_03"),
+    Actuator(43, 12, 40.0, 4.0, 60.0, "dof_right_hip_yaw_03"),
+    Actuator(44, 13, 85.0, 5.0, 80.0, "dof_right_knee_04"),
+    Actuator(45, 14, 30.0, 1.0, 17.0, "dof_right_ankle_02"),
+    # left leg
+    Actuator(31, 15, 85.0, 5.0, 80.0, "dof_left_hip_pitch_04"),
+    Actuator(32, 16, 40.0, 4.0, 60.0, "dof_left_hip_roll_03"),
+    Actuator(33, 17, 40.0, 4.0, 60.0, "dof_left_hip_yaw_03"),
+    Actuator(34, 18, 85.0, 5.0, 80.0, "dof_left_knee_04"),
+    Actuator(35, 19, 30.0, 1.0, 17.0, "dof_left_ankle_02"),
 ]
 
 
-async def get_observation(kos: pykos.KOS, prev_action: np.ndarray) -> np.ndarray:
-    (actuator_states, imu) = await asyncio.gather(
-        kos.actuator.get_actuators_state([ac.actuator_id for ac in ACTUATOR_LIST]),
-        kos.imu.get_imu_values(),
+async def get_observation(kos, prev_action, cmd, phase, history):
+    ids = [ac.actuator_id for ac in ACTUATOR_LIST]
+    act_states, imu, raw_quat = await asyncio.gather(
+        kos.actuator.get_actuators_state(ids), kos.imu.get_imu_values(), kos.imu.get_quaternion()
     )
-    state_dict_pos = {state.actuator_id: state.position for state in actuator_states.states}
-    pos_obs = np.deg2rad(
-        np.array([state_dict_pos[ac.actuator_id] for ac in sorted(ACTUATOR_LIST, key=lambda x: x.nn_id)])
-    )
+    pos_dict = {s.actuator_id: s.position for s in act_states.states}
+    pos_obs = np.deg2rad([pos_dict[ac.actuator_id] for ac in sorted(ACTUATOR_LIST, key=lambda x: x.nn_id)])
     pos_diff = pos_obs - DEFAULT_POSITIONS
-    state_dict_vel = {state.actuator_id: state.velocity for state in actuator_states.states}
-    vel_obs = np.deg2rad(
-        np.array([state_dict_vel[ac.actuator_id] for ac in sorted(ACTUATOR_LIST, key=lambda x: x.nn_id)])
-    )
+
+    vel_dict = {s.actuator_id: s.velocity for s in act_states.states}
+    vel_obs = np.deg2rad([vel_dict[ac.actuator_id] for ac in sorted(ACTUATOR_LIST, key=lambda x: x.nn_id)])
+
     imu_obs = np.array([imu.accel_x, imu.accel_y, imu.accel_z, imu.gyro_x, imu.gyro_y, imu.gyro_z])
-    cmd = np.array([0.0, 0.0])
-    observation = np.concatenate([pos_diff, vel_obs, imu_obs, cmd, prev_action], axis=-1)
-    return observation
+
+    r = R.from_quat([raw_quat.x, raw_quat.y, raw_quat.z, raw_quat.w])
+    gvec = r.apply(np.array([0, 0, -1]), inverse=True)
+    # Rotation from the torso frame
+    # TODO
+    gvec = np.array([gvec[1], -gvec[2], -gvec[0]])
+
+    phase += 2 * np.pi * 1.2550827 * DT
+    phase = np.fmod(phase + np.pi, 2 * np.pi) - np.pi
+    phase_vec = np.array([np.cos(phase), np.sin(phase)]).flatten()
+
+    obs = np.concatenate([pos_diff, vel_obs, imu_obs, gvec, cmd, prev_action, phase_vec])
+    full_obs = np.concatenate([obs, history])
+    return obs, full_obs, phase
 
 
-async def send_actions(kos: pykos.KOS, position: np.ndarray, velocity: np.ndarray) -> None:
+def update_history(history, obs, obs_size, cmd_size, hist_len):
+    step_size = obs_size + cmd_size
+    history = history.reshape(hist_len, step_size)
+    history = np.roll(history, shift=-1, axis=0)
+    history[-1] = obs
+    return history.flatten()
+
+
+async def send_actions(kos, position, velocity):
     position = np.rad2deg(position)
     velocity = np.rad2deg(velocity)
-    actuator_commands: list[pykos.services.actuator.ActuatorCommand] = [
-        {
-            "actuator_id": ac.actuator_id,
-            "position": position[ac.nn_id],
-            "velocity": velocity[ac.nn_id],
-        }
+    commands = [
+        {"actuator_id": ac.actuator_id, "position": position[ac.nn_id], "velocity": velocity[ac.nn_id]}
         for ac in ACTUATOR_LIST
     ]
-    logger.debug(actuator_commands)
-
-    await kos.actuator.command_actuators(actuator_commands)
+    await kos.actuator.command_actuators(commands)
 
 
-async def configure_actuators(kos: pykos.KOS) -> None:
+async def configure_actuators(kos):
     for ac in ACTUATOR_LIST:
         await kos.actuator.configure_actuator(
             actuator_id=ac.actuator_id,
@@ -134,158 +144,94 @@ async def configure_actuators(kos: pykos.KOS) -> None:
         )
 
 
-async def reset(kos: pykos.KOS) -> None:
-    # Define standing joint positions based on standing.py
-
+async def reset(kos):
     await kos.sim.reset(
-        pos={"x": 0.0, "y": 0.0, "z": 1.01},  # Using the z-value from your existing reset function
+        pos={"x": 0.0, "y": 0.0, "z": 1.01},
         quat={"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
-        joints=[{"name": actuator.joint_name, "pos": pos} for actuator, pos in zip(ACTUATOR_LIST, DEFAULT_POSITIONS)],
+        joints=[{"name": ac.joint_name, "pos": pos} for ac, pos in zip(ACTUATOR_LIST, DEFAULT_POSITIONS)],
     )
 
 
 def spawn_kos_sim(no_render: bool) -> tuple[subprocess.Popen, Callable]:
-    """Spawn the KOS-Sim KBot2 process and return the process object."""
-    logger.info("Starting KOS-Sim kbot2-feet...")
-    args = ["kos-sim", "kbot2-feet"]
-    if no_render:
-        args.append("--no-render")
-    process = subprocess.Popen(
-        args,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-
-    logger.info("Waiting for KOS-Sim to start...")
+    args = ["kos-sim", "kbot2-feet"] + (["--no-render"] if no_render else [])
+    proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     time.sleep(5)
 
-    def cleanup(sig: int | None = None, frame: types.FrameType | None = None) -> None:
-        logger.info("Terminating KOS-Sim...")
-        process.terminate()
+    def cleanup(sig=None, frame=None):
+        proc.terminate()
         try:
-            process.wait(timeout=5)
+            proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            process.kill()
+            proc.kill()
         if sig:
             sys.exit(0)
 
     signal.signal(signal.SIGTERM, cleanup)
+    return proc, cleanup
 
-    return process, cleanup
 
-
-async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -> None:
+async def main(model_path: str, ip: str, no_render: bool, episode_length: int):
     model = tf.saved_model.load(model_path)
-    sim_process = None
-    cleanup_fn = None
-
     try:
-        # Try to connect to existing KOS-Sim
-        logger.info("Attempting to connect to existing KOS-Sim...")
         kos = pykos.KOS(ip=ip)
         await kos.sim.get_parameters()
-        logger.info("Connected to existing KOS-Sim instance.")
-    except Exception as e:
-        logger.info("Could not connect to existing KOS-Sim: %s", e)
-        logger.info("Starting a new KOS-Sim instance locally...")
-        sim_process, cleanup_fn = spawn_kos_sim(no_render)
+    except Exception:
+        _, cleanup = spawn_kos_sim(no_render)
         kos = pykos.KOS()
-        attempts = 0
-        while attempts < 5:
+        for _ in range(5):
             try:
                 await kos.sim.get_parameters()
-                logger.info("Connected to new KOS-Sim instance.")
                 break
-            except Exception as connect_error:
-                attempts += 1
-                logger.info("Failed to connect to KOS-Sim: %s", connect_error)
+            except Exception:
                 time.sleep(2)
-
-        if attempts == 5:
+        else:
             raise RuntimeError("Failed to connect to KOS-Sim")
 
     await configure_actuators(kos)
     await reset(kos)
-    prev_action = np.zeros(len(ACTUATOR_LIST) * 2)
-    observation = (await get_observation(kos, prev_action)).reshape(1, -1)
 
+    history = np.zeros(HIST_LEN * (OBS_SIZE + CMD_SIZE))
+    cmd = np.array([0.3, 0.0])
+    phase = np.array([0, np.pi])
+    prev_action = np.zeros(len(ACTUATOR_LIST) * 2)
+    obs, full_obs, phase = await get_observation(kos, prev_action, cmd, phase, history)
     if no_render:
         await kos.process_manager.start_kclip("deployment")
 
-    # warm up model
-    model.infer(observation)
+    # warm-up
+    model.infer(full_obs.reshape(1, -1))
 
     target_time = time.time() + DT
-    observation = (await get_observation(kos, prev_action)).reshape(1, -1)
-
     end_time = time.time() + episode_length
-
-    try:
-        while time.time() < end_time:
-            observation = observation.reshape(1, -1)
-            # move it all to the infer call
-            action = np.array(model.infer(observation)).reshape(-1)
-
-            position = action[: len(ACTUATOR_LIST)]
-            velocity = action[len(ACTUATOR_LIST) :]
-            observation, _ = await asyncio.gather(
-                get_observation(kos, prev_action),
-                send_actions(kos, position, velocity),
-            )
-            prev_action = action
-
-            if time.time() < target_time:
-                await asyncio.sleep(max(0, target_time - time.time()))
-            else:
-                logger.info("Loop overran by %s seconds", time.time() - target_time)
-
-            target_time += DT
-
-    except asyncio.CancelledError:
-        logger.info("Exiting...")
-        if no_render:
-            save_path = await kos.process_manager.stop_kclip("deployment")
-            logger.info("KClip saved to %s", save_path)
-
-        if cleanup_fn:
-            cleanup_fn()
-
-        raise KeyboardInterrupt
-
-    logger.info("Episode finished!")
+    while time.time() < end_time:
+        action = np.array(model.infer(full_obs.reshape(1, -1))).reshape(-1)
+        history = update_history(history, obs, OBS_SIZE, CMD_SIZE, HIST_LEN)
+        pos = action[: len(ACTUATOR_LIST)] + DEFAULT_POSITIONS
+        vel = action[len(ACTUATOR_LIST) :]
+        obs, full_obs, phase = (
+            await asyncio.gather(get_observation(kos, prev_action, cmd, phase, history), send_actions(kos, pos, vel))
+        )[0]
+        prev_action = action
+        await asyncio.sleep(max(0, target_time - time.time()))
+        target_time += DT
 
     if no_render:
         await kos.process_manager.stop_kclip("deployment")
+    if "cleanup" in locals():
+        cleanup()
 
-    if cleanup_fn:
-        cleanup_fn()
 
-
-# (optionally) start the KOS-Sim server before running this script
-# `kos-sim kbot-v2-feet`
-
+# Run with:
+# python -m ksim_kbot.deploy.sim --model_path ksim_kbot/deploy/assets/mlp_example
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_path", type=str, required=True)
-    parser.add_argument("--debug", action="store_true")
     parser.add_argument("--ip", type=str, default="localhost")
-    parser.add_argument("--episode_length", type=int, default=5)  # seconds
+    parser.add_argument("--episode_length", type=int, default=5)
     parser.add_argument("--no-render", action="store_true")
-    parser.add_argument("--log-file", type=str, help="Path to write log output")
+    parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 
     log_level = logging.DEBUG if args.debug else logging.INFO
-    log_format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-
-    if args.log_file:
-        logging.basicConfig(
-            level=log_level,
-            format=log_format,
-            filename=args.log_file,
-            filemode="w",
-        )
-    else:
-        logging.basicConfig(level=log_level, format=log_format)
-
+    logging.basicConfig(level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     asyncio.run(main(args.model_path, args.ip, args.no_render, args.episode_length))
