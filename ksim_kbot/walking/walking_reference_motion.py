@@ -29,9 +29,6 @@ from ksim_kbot import common, rewards as kbot_rewards
 from ksim_kbot.walking.walking import NaiveForwardReward
 from ksim_kbot.walking.walking_rnn import RnnModel, WalkingRnnTask, WalkingRnnTaskConfig
 
-HISTORY_LENGTH = 0
-SINGLE_STEP_HISTORY_SIZE = 0
-
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
@@ -93,6 +90,10 @@ class WalkingRnnRefMotionTaskConfig(WalkingRnnTaskConfig):
         value=1.0,
         help="The scale to apply to the naive reward.",
     )
+    match_reward_scale: float = xax.field(
+        value=0.01,
+        help="The scale to apply to the match reward.",
+    )
 
 
 Config = TypeVar("Config", bound=WalkingRnnRefMotionTaskConfig)
@@ -151,7 +152,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
             MatchReferenceMotionReward(
                 reference_motion=self.reference_motion,
                 ctrl_dt=self.config.ctrl_dt,
-                scale=0.05,
+                scale=self.config.match_reward_scale,
             ),
             kbot_rewards.OrientationPenalty(scale=self.config.orientation_penalty),
             ksim.ActionSmoothnessPenalty(scale=-0.01),
@@ -177,7 +178,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 default_targets=(
                     0.0,
                     0.0,
-                    0.9,
+                    1.01,
                     # quat
                     1.0,
                     0.0,
@@ -323,21 +324,21 @@ if __name__ == "__main__":
             # Training parameters.
             num_envs=2048,
             batch_size=256,
-            num_passes=10,
+            num_passes=4,
             epochs_per_log_step=1,
             rollout_length_seconds=10.0,
             # Simulation parameters.
-            dt=0.002,
+            dt=0.005,
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
-            # PPO parameters
-            gamma=0.97,
-            lam=0.95,
-            entropy_coef=0.005,
-            learning_rate=1e-4,
-            clip_param=0.3,
-            max_grad_norm=0.5,
+            # # PPO parameters
+            # gamma=0.97,
+            # lam=0.95,
+            # entropy_coef=0.005,
+            # learning_rate=1e-4,
+            # clip_param=0.3,
+            # max_grad_norm=0.5,
             # Reference motion parameters
             rotate_bvh_euler=(0, np.pi / 2, 0),
             bvh_scaling_factor=1 / 100,
