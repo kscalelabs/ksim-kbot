@@ -218,6 +218,19 @@ class ResetDefaultJointPosition(ksim.Reset):
         return ksim.utils.mujoco.update_data_field(data, "qpos", qpos)
 
 
+@attrs.define(frozen=True, kw_only=True)
+class FarFromOriginTermination(ksim.Termination):
+    """Terminates the episode if the robot is too far from the origin.
+
+    This is treated as a positive termination.
+    """
+
+    max_dist: float = attrs.field()
+
+    def __call__(self, state: ksim.PhysicsData, curriculum_level: Array) -> Array:
+        return jnp.linalg.norm(state.qpos[..., :2], axis=-1) > self.max_dist
+
+
 @attrs.define(frozen=True)
 class LinearVelocityCommand(ksim.Command):
     """Command to move the robot in a straight line.
