@@ -16,6 +16,8 @@ import pykos
 import tensorflow as tf
 from scipy.spatial.transform import Rotation as R
 
+from ksim_kbot.deploy.keyboard_controller import KeyboardController
+
 logger = logging.getLogger(__name__)
 DT = 0.02  # time step (50Hz)
 
@@ -44,9 +46,30 @@ DEFAULT_POSITIONS = np.array(
     ]
 )
 
+class CommandState:
+    def __init__(self) -> None:
+        self.cmd = np.array([0.3, 0.0])
+        self.step_size = 0.01
+
+    async def update_from_key(self, key: str) -> None:
+        if key == "a":
+            self.cmd[0] -= self.step_size
+        elif key == "d":
+            self.cmd[0] += self.step_size
+        elif key == "w":
+            self.cmd[1] += self.step_size
+        elif key == "s":
+            self.cmd[1] -= self.step_size
+
+        logger.debug("Command updated to: %s", self.cmd)
+
+    def get_command(self) -> np.ndarray:
+        return self.cmd.copy()
+
 OBS_SIZE = 20 + 20 + 3 + 3 + 3 + 40 + 4  # pos_diff (20) + vel_obs (20) + imu (6) - adjust if needed
 CMD_SIZE = 2
 HIST_LEN = 5
+
 
 
 @dataclass
@@ -192,11 +215,16 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
     await configure_actuators(kos)
     await reset(kos)
 
+    command_state = CommandState()
+    keyboard_controller = KeyboardController(command_state.update_from_key)\
+    
+    await keyboard_controller.start()
+
     history = np.zeros(HIST_LEN * (OBS_SIZE + CMD_SIZE))
-    cmd = np.array([0.3, 0.0])
+    # cmd = np.array([0.3, 0.0])
     phase = np.array([0, np.pi])
     prev_action = np.zeros(len(ACTUATOR_LIST) * 2)
-    obs, full_obs, phase = await get_observation(kos, prev_action, cmd, phase, history)
+    obs, full_obs, phase = await get_observation(kos, prev_action, command_state.get_command(), phase, history)
     if no_render:
         await kos.process_manager.start_kclip("deployment")
 
@@ -211,7 +239,7 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
         pos = action[: len(ACTUATOR_LIST)] + DEFAULT_POSITIONS
         vel = action[len(ACTUATOR_LIST) :]
         obs, full_obs, phase = (
-            await asyncio.gather(get_observation(kos, prev_action, cmd, phase, history), send_actions(kos, pos, vel))
+            await asyncio.gather(get_observation(kos, prev_action, command_state.get_command(), phase, history), send_actions(kos, pos, vel))
         )[0]
         prev_action = action
         await asyncio.sleep(max(0, target_time - time.time()))
