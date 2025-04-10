@@ -2,24 +2,21 @@
 
 import argparse
 import asyncio
-import atexit
 import logging
-import select
 import signal
 import subprocess
 import sys
-import termios
-import threading
 import time
 import types
-from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Callable, Generator
+from typing import Callable
 
 # import keyboard
 import numpy as np
 import pykos
 import tensorflow as tf
+
+from ksim_kbot.deploy.keyboard_controller import KeyboardController
 
 logger = logging.getLogger(__name__)
 
@@ -91,55 +88,10 @@ class TargetState:
             self.xyz_target[2] -= self.step_size
         elif key == "e":
             self.xyz_target[2] += self.step_size
+        logger.debug("Target position updated to: %s", self.xyz_target)
 
     def get_target(self) -> np.ndarray:
         return self.xyz_target.copy()
-
-
-async def keyboard_input(target_state: TargetState) -> None:
-
-    @contextmanager
-    def cbreak() -> Generator[None, None, None]:
-        """Context manager for terminal cbreak mode - allows char-by-char input without echo."""
-        try:
-            # Save original terminal settings
-            fd = sys.stdin.fileno()
-            old_settings = termios.tcgetattr(fd)
-
-            # Configure terminal for cbreak mode (not full raw mode)
-            new_settings = termios.tcgetattr(fd)
-            new_settings[3] = new_settings[3] & ~termios.ECHO  # Disable echo
-            new_settings[3] = new_settings[3] & ~termios.ICANON  # Disable canonical mode
-            new_settings[6][termios.VMIN] = 0  # No blocking
-            new_settings[6][termios.VTIME] = 0  # No timeout
-            termios.tcsetattr(fd, termios.TCSADRAIN, new_settings)
-
-            # Make sure we restore terminal settings no matter what
-            yield
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-
-    # Print instructions
-    logger.info("\nKeyboard control active:")
-    logger.info("  w/s: forward/backward")
-    logger.info("  a/d: left/right")
-    logger.info("  q/e: down/up")
-    logger.info("  Press Ctrl+C to exit\n")
-
-    with cbreak():
-        try:
-            while True:
-                # Check if input is available
-                if select.select([sys.stdin], [], [], 0.1)[0]:
-                    key = sys.stdin.read(1)
-                    if key == "\x03":  # Ctrl+C
-                        raise KeyboardInterrupt
-                    await target_state.update_from_key(key)
-
-                # Yield to other tasks
-                await asyncio.sleep(0.01)
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            logger.info("Keyboard input stopping...")
 
 
 async def get_observation(kos: pykos.KOS, prev_action: np.ndarray, target_state: TargetState) -> np.ndarray:
@@ -267,10 +219,11 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
     await reset(kos)
 
     target_state = TargetState()
-    # Start keyboard input task
-    keyboard_task = asyncio.create_task(keyboard_input(target_state))
+    # Instantiate the KeyboardController
+    keyboard_controller = KeyboardController(target_state.update_from_key)
 
-    keyboard_task.add_done_callback(lambda _: logger.info("Keyboard task done"))
+    # Start keyboard input task using the controller
+    await keyboard_controller.start()
 
     # prev_action = np.zeros(len(ACTUATOR_LIST) * 2)
     prev_action = np.zeros(len(ACTIVE_ACTUATOR_LIST) * 2)
@@ -325,26 +278,55 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
             target_time += DT
 
     except asyncio.CancelledError:
-        keyboard_task.cancel()  # Make sure to cancel the keyboard task
-        logger.info("Exiting...")
+        # Stop the keyboard controller
+        await keyboard_controller.stop()
+        logger.info("Exiting due to CancelledError...")
         if no_render:
-            save_path = await kos.process_manager.stop_kclip("deployment")
-            logger.info("KClip saved to %s", save_path)
+            try:
+                save_path = await kos.process_manager.stop_kclip("deployment")
+                logger.info("KClip saved to %s", save_path)
+            except Exception as e:
+                logger.warning("Could not stop kclip: %s", e)
 
         if cleanup_fn:
             cleanup_fn()
 
-        raise KeyboardInterrupt
+    except KeyboardInterrupt:
+        logger.info("Keyboard interrupt received...")
+        # Stop the keyboard controller
+        await keyboard_controller.stop()
+        if no_render:
+            try:
+                save_path = await kos.process_manager.stop_kclip("deployment")
+                logger.info("KClip saved to %s", save_path)
+            except Exception as e:
+                logger.warning(f"Could not stop kclip: {e}")
+        if cleanup_fn:
+             cleanup_fn()
+        # Reraise to ensure clean exit
+        raise
     finally:
-        await kos.sim.remove_marker(name="target")
+        # Ensure keyboard controller is stopped on any exit path
+        await keyboard_controller.stop()
+        try:
+             await kos.sim.remove_marker(name="target")
+             logger.info("Target marker removed.")
+        except Exception as e:
+            logger.warning("Could not remove target marker: %s", e)
+        # Ensure cleanup function is called if it exists
+        if cleanup_fn:
+            logger.debug("Calling cleanup function in finally block.")
+            cleanup_fn()
 
     logger.info("Episode finished!")
 
+    # Stop kclip if still running (e.g., normal loop finish)
     if no_render:
-        await kos.process_manager.stop_kclip("deployment")
-
-    if cleanup_fn:
-        cleanup_fn()
+        try:
+            save_path = await kos.process_manager.stop_kclip("deployment")
+            logger.info("KClip saved to %s after episode finish.", save_path)
+        except Exception as e:
+            logger.debug("Could not stop kclip after episode finish (may already be stopped): %s", e)
 
 
 # (optionally) start the KOS-Sim server before running this script

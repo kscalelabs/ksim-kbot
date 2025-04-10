@@ -3,14 +3,11 @@
 import argparse
 import asyncio
 import logging
-import select
-import sys
-import termios
 import time
-from contextlib import contextmanager
+from ksim_kbot.deploy.keyboard_controller import KeyboardController
 from dataclasses import dataclass
 from enum import Enum
-from typing import Generator
+from typing import Awaitable, Generator
 
 import numpy as np
 import pykos
@@ -98,51 +95,6 @@ class TargetState:
 
     def get_target(self) -> tuple[np.ndarray, np.ndarray]:
         return self.xyz_target.copy(), self.quat_target.copy()
-
-
-async def keyboard_input(target_state: TargetState) -> None:
-    @contextmanager
-    def cbreak() -> Generator[None, None, None]:
-        """Context manager for terminal cbreak mode - allows char-by-char input without echo."""
-        try:
-            # Save original terminal settings
-            fd = sys.stdin.fileno()
-            old_settings = termios.tcgetattr(fd)
-
-            # Configure terminal for cbreak mode (not full raw mode)
-            new_settings = termios.tcgetattr(fd)
-            new_settings[3] = new_settings[3] & ~termios.ECHO  # Disable echo
-            new_settings[3] = new_settings[3] & ~termios.ICANON  # Disable canonical mode
-            new_settings[6][termios.VMIN] = 0  # No blocking
-            new_settings[6][termios.VTIME] = 0  # No timeout
-            termios.tcsetattr(fd, termios.TCSADRAIN, new_settings)
-
-            # Make sure we restore terminal settings no matter what
-            yield
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-
-    # Print instructions
-    logger.info("\nKeyboard control active:")
-    logger.info("  w/s: forward/backward")
-    logger.info("  a/d: left/right")
-    logger.info("  q/e: down/up")
-    logger.info("  Press Ctrl+C to exit\n")
-
-    with cbreak():
-        try:
-            while True:
-                # Check if input is available
-                if select.select([sys.stdin], [], [], 0.1)[0]:
-                    key = sys.stdin.read(1)
-                    if key == "\x03":  # Ctrl+C
-                        raise KeyboardInterrupt
-                    await target_state.update_from_key(key)
-
-                # Yield to other tasks
-                await asyncio.sleep(0.01)
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            logger.info("Keyboard input stopping...")
 
 
 async def get_observation(
@@ -255,6 +207,9 @@ async def main(model_path: str, episode_length: int, mode: Mode) -> None:
     if not kos_dict:
         raise ValueError("No KOS instances configured for the selected mode")
 
+    # Instantiate the KeyboardController
+    keyboard_controller = KeyboardController(target_state.update_from_key)
+
     await disable(kos_dict)
     time.sleep(1)
     logger.info("Configuring actuators...")
@@ -263,9 +218,8 @@ async def main(model_path: str, episode_length: int, mode: Mode) -> None:
     logger.info("Resetting...")
     await reset(kos_dict)
 
-    # Start keyboard input task
-    keyboard_task = asyncio.create_task(keyboard_input(target_state))
-    keyboard_task.add_done_callback(lambda _: logger.info("Keyboard task done"))
+    # Start keyboard input task using the controller
+    await keyboard_controller.start()
 
     prev_action = np.zeros(len(ACTIVE_ACTUATOR_LIST) * 2)
     observation = (await get_observation(kos_dict, prev_action, target_state)).reshape(1, -1)
@@ -302,25 +256,25 @@ async def main(model_path: str, episode_length: int, mode: Mode) -> None:
             target_time += DT
 
     except asyncio.CancelledError:
-        logger.info("Exiting...")
-        keyboard_task.cancel()  # Make sure to cancel the keyboard task
-        await disable(kos_dict)
-        logger.info("Actuators disabled")
-        raise KeyboardInterrupt
+        logger.info("Exiting due to CancelledError...")
     except KeyboardInterrupt:
         logger.info("Keyboard interrupt received...")
-        keyboard_task.cancel()  # Make sure to cancel the keyboard task
-        await disable(kos_dict)
-        logger.info("Actuators disabled")
         raise
     finally:
-        await kos_dict["sim"].sim.remove_marker(name="target")
+        logger.info("Entering finally block for cleanup...")
+        await keyboard_controller.stop()
+
+        if "sim" in kos_dict and kos_dict["sim"] is not None:
+            try:
+                await kos_dict["sim"].sim.remove_marker(name="target")
+                logger.info("Target marker removed.")
+            except Exception as e:
+                logger.warning("Could not remove target marker: %s", e)
+        # Ensure actuators are disabled
+        await disable(kos_dict)
+        logger.info("Actuators disabled in finally block.")
 
     logger.info("Episode finished!")
-    # Clean up keyboard task
-    keyboard_task.cancel()
-    # Disable actuators
-    await disable(kos_dict)
 
 
 if __name__ == "__main__":
