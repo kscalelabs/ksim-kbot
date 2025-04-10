@@ -163,8 +163,8 @@ class ContinuousCartesianBodyTargetReward(ksim.Reward):
         )
 
         # time_bonus = jnp.exp(consecutive_steps * self.time_sensitivity) * self.time_bonus_scale
-        time_bonus = consecutive_steps * self.time_bonus_scale
-        return (base_reward + time_bonus).mean(axis=-1)
+        time_bonus = 1 + consecutive_steps * self.time_bonus_scale
+        return (base_reward * time_bonus).mean(axis=-1)
 
     @classmethod
     def create(
@@ -568,66 +568,75 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
         return [
             ksim.PositionCommand.create(
                 model=physics_model,
-                box_min=(-0.3, -0.3, -0.3),
-                box_max=(0.3, 0.3, 0.3),
-                base_body_name="floating_base_link",
+                box_min=(0.0, -0.2, -0.2),
+                box_max=(0.3, 0.2, 0.2),
+                vis_target_name="floating_base_link",
                 vis_radius=0.05,
                 vis_color=(1.0, 0.0, 0.0, 0.8),
                 unique_name="target",
-                min_speed=0.0,
-                max_speed=0.0,
+                min_speed=0.2,
+                max_speed=4.0,
+                switch_prob=self.config.ctrl_dt * 10,
+                jump_prob=self.config.ctrl_dt * 5,
             ),  # type: ignore[call-arg]
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ContinuousCartesianBodyTargetReward.create(
+            ksim.PositionTrackingReward.create(
                 model=physics_model,
                 tracked_body_name="ik_target",
                 base_body_name="floating_base_link",
-                norm="l2",
-                scale=2.5,
-                sensitivity=1.0,
-                threshold=0.000025,  # with l2 xax norm, this is 0.5cm
-                time_bonus_scale=0.3,
+                scale=10.0,
                 command_name="target_position_command",
             ),
-            # ksim.GlobalBodyQuaternionReward.create(
+            # ContinuousCartesianBodyTargetReward.create(
             #     model=physics_model,
-            #     command_name="global_body_quaternion_command_KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
-            #     tracked_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
+            #     tracked_body_name="ik_target",
             #     base_body_name="floating_base_link",
             #     norm="l2",
-            #     scale=0.1,
+            #     scale=2.5,
             #     sensitivity=1.0,
+            #     threshold=0.000025,  # with l2 xax norm, this is 0.5cm
+            #     time_bonus_scale=0.3,
+            #     command_name="target_position_command",
             # ),
-            # ksim_kbot.common.JointDeviationPenalty(
-            #     joint_targets=(0.0,
-            #                    0.0,
-            #                    0.0,
-            #                    1.57, # right elbow
-            #                    0.0),
-            #     scale=-0.05,
-            #     freejoint_first=False,
+            # # ksim.GlobalBodyQuaternionReward.create(
+            # #     model=physics_model,
+            # #     command_name="global_body_quaternion_command_KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
+            # #     tracked_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
+            # #     base_body_name="floating_base_link",
+            # #     norm="l2",
+            # #     scale=0.1,
+            # #     sensitivity=1.0,
+            # # ),
+            # # ksim_kbot.common.JointDeviationPenalty(
+            # #     joint_targets=(0.0,
+            # #                    0.0,
+            # #                    0.0,
+            # #                    1.57, # right elbow
+            # #                    0.0),
+            # #     scale=-0.05,
+            # #     freejoint_first=False,
+            # # ),
+            # CartesianBodyTargetVectorReward.create(
+            #     model=physics_model,
+            #     command_name="target_position_command",
+            #     tracked_body_name="ik_target",
+            #     base_body_name="floating_base_link",
+            #     scale=3.0,
+            #     normalize_velocity=True,
+            #     distance_threshold=0.1,
+            #     dt=self.config.dt,
             # ),
-            CartesianBodyTargetVectorReward.create(
-                model=physics_model,
-                command_name="target_position_command",
-                tracked_body_name="ik_target",
-                base_body_name="floating_base_link",
-                scale=3.0,
-                normalize_velocity=True,
-                distance_threshold=0.1,
-                dt=self.config.dt,
-            ),
-            CartesianBodyTargetPenalty.create(
-                model=physics_model,
-                command_name="target_position_command",
-                tracked_body_name="ik_target",
-                base_body_name="floating_base_link",
-                norm="l2",
-                scale=-6.0,
-            ),
+            # CartesianBodyTargetPenalty.create(
+            #     model=physics_model,
+            #     command_name="target_position_command",
+            #     tracked_body_name="ik_target",
+            #     base_body_name="floating_base_link",
+            #     norm="l2",
+            #     scale=-6.0,
+            # ),
             ksim.ObservationMeanPenalty(observation_name="contact_observation_arms", scale=-0.1),
             ksim.ActuatorForcePenalty(scale=-0.000001, norm="l1"),
             ksim.ActionSmoothnessPenalty(scale=-0.02, norm="l2"),
@@ -732,7 +741,7 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
         return ksim.RewardLevelCurriculum(
-            reward_name="continuous_cartesian_body_target_reward",
+            reward_name="ik_target_position_tracking_reward",
             increase_threshold=0.1,
             decrease_threshold=0.05,
             min_level_steps=10,
@@ -808,8 +817,8 @@ if __name__ == "__main__":
     KbotPseudoIKWesleyTask.launch(
         KbotPseudoIKTaskConfig(
             # Training parameters.
-            num_envs=2048,
-            batch_size=256,
+            num_envs=8192,
+            batch_size=1024,
             num_passes=10,
             epochs_per_log_step=1,
             # Logging parameters.
