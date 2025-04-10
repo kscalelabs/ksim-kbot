@@ -216,3 +216,85 @@ class ResetDefaultJointPosition(ksim.Reset):
             case mjx.Data:
                 qpos = qpos.at[:].set(self.default_targets)
         return ksim.utils.mujoco.update_data_field(data, "qpos", qpos)
+
+
+@attrs.define(frozen=True)
+class LinearVelocityCommand(ksim.Command):
+    """Command to move the robot in a straight line.
+
+    By convention, X is forward and Y is left. The switching probability is the
+    probability of resampling the command at each step. The zero probability is
+    the probability of the command being zero - this can be used to turn off
+    any command.
+    """
+
+    range: tuple[float, float] = attrs.field()
+    index: int | str | None = attrs.field(default=None)
+    zero_prob: float = attrs.field(default=0.0)
+    switch_prob: float = attrs.field(default=0.0)
+    vis_height: float = attrs.field(default=1.0)
+    vis_scale: float = attrs.field(default=0.05)
+
+    def initial_command(
+        self,
+        physics_data: ksim.PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        rng, rng_zero = jax.random.split(rng)
+        minval, maxval = self.range
+        value = jax.random.uniform(rng, (1,), minval=minval, maxval=maxval)
+        zero_mask = jax.random.bernoulli(rng_zero, self.zero_prob)
+        return jnp.where(zero_mask, 0.0, value)
+
+    def __call__(
+        self,
+        prev_command: Array,
+        physics_data: ksim.PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        rng_a, rng_b = jax.random.split(rng)
+        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
+        return jnp.where(switch_mask, new_commands, prev_command)
+
+    def get_name(self) -> str:
+        return f"{super().get_name()}{'' if self.index is None else f'_{self.index}'}"
+
+
+@attrs.define(frozen=True)
+class AngularVelocityCommand(ksim.Command):
+    """Command to turn the robot."""
+
+    scale: float = attrs.field()
+    index: int | str | None = attrs.field(default=None)
+    zero_prob: float = attrs.field(default=0.0)
+    switch_prob: float = attrs.field(default=0.0)
+
+    def initial_command(
+        self,
+        physics_data: ksim.PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        """Returns (1,) array with angular velocity."""
+        rng_a, rng_b = jax.random.split(rng)
+        zero_mask = jax.random.bernoulli(rng_a, self.zero_prob)
+        cmd = jax.random.uniform(rng_b, (1,), minval=-self.scale, maxval=self.scale)
+        return jnp.where(zero_mask, jnp.zeros_like(cmd), cmd)
+
+    def __call__(
+        self,
+        prev_command: Array,
+        physics_data: ksim.PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        rng_a, rng_b = jax.random.split(rng)
+        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
+        return jnp.where(switch_mask, new_commands, prev_command)
+
+    def get_name(self) -> str:
+        return f"{super().get_name()}{'' if self.index is None else f'_{self.index}'}"

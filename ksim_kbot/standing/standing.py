@@ -355,14 +355,14 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         else:
             return ksim.TorqueActuators()
 
-    def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
+    def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
         if self.config.domain_randomize:
             return [
-                ksim.StaticFrictionRandomization(scale_lower=0.5, scale_upper=2.0),
-                ksim.JointZeroPositionRandomization(scale_lower=-0.01, scale_upper=0.01),
-                ksim.ArmatureRandomization(scale_lower=1.0, scale_upper=1.05),
-                ksim.MassMultiplicationRandomization.from_body_name(physics_model, "Torso_Side_Right"),
-                ksim.JointDampingRandomization(scale_lower=0.95, scale_upper=1.05),
+                ksim.StaticFrictionRandomizer(scale_lower=0.5, scale_upper=2.0),
+                ksim.JointZeroPositionRandomizer(scale_lower=-0.01, scale_upper=0.01),
+                ksim.ArmatureRandomizer(scale_lower=1.0, scale_upper=1.05),
+                ksim.MassMultiplicationRandomizer.from_body_name(physics_model, "Torso_Side_Right"),
+                ksim.JointDampingRandomizer(scale_lower=0.95, scale_upper=1.05),
             ]
         else:
             return []
@@ -526,9 +526,9 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         switch_prob = 0.0
         return [
-            ksim.LinearVelocityCommand(index="x", range=(0.0, 0.0), zero_prob=1.0, switch_prob=switch_prob),
-            ksim.LinearVelocityCommand(index="y", range=(0.0, 0.0), zero_prob=1.0, switch_prob=switch_prob),
-            ksim.AngularVelocityCommand(index="z", scale=0.0, zero_prob=1.0, switch_prob=switch_prob),
+            ksim.LinearVelocityCommand(index="x", range=(0.0, 0.0), zero_prob=1.0, switch_prob=switch_prob),  # type: ignore[attr-defined]
+            ksim.LinearVelocityCommand(index="y", range=(0.0, 0.0), zero_prob=1.0, switch_prob=switch_prob),  # type: ignore[attr-defined]
+            ksim.AngularVelocityCommand(index="z", scale=0.0, zero_prob=1.0, switch_prob=switch_prob),  # type: ignore[attr-defined]
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
