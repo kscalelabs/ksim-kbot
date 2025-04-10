@@ -109,6 +109,10 @@ class MatchReferenceMotionReward(ksim.Reward):
     ctrl_dt: float
     norm: xax.NormType = attrs.field(default="l1")
     sensitivity: float = attrs.field(default=5.0)
+    body_name: str | int
+
+    def get_name(self) -> str:
+        return f"{self.body_name}_{super().get_name()}"
 
     @property
     def num_frames(self) -> int:
@@ -118,11 +122,11 @@ class MatchReferenceMotionReward(ksim.Reward):
         assert isinstance(trajectory.aux_outputs, MotionAuxOutputs)
         reference_motion: xax.FrozenDict[int, Array] = jax.tree.map(lambda x: x.array, self.reference_motion)
         step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
-        target_pos = jax.tree.map(lambda x: jnp.take(x, step_number, axis=0), reference_motion)
-        tracked_pos = trajectory.aux_outputs.tracked_pos
-        error = jax.tree.map(lambda target, tracked: xax.get_norm(target - tracked, self.norm), target_pos, tracked_pos)
-        mean_error_over_bodies = jax.tree.reduce(jnp.add, error) / len(error)
-        mean_error = mean_error_over_bodies.mean(axis=-1)
+        target_pos_dict = jax.tree.map(lambda x: jnp.take(x, step_number, axis=0), reference_motion)
+        tracked_pos = trajectory.aux_outputs.tracked_pos[self.body_name]
+        target_pos_array = target_pos_dict[self.body_name]
+        mean_error = xax.get_norm(target_pos_array - tracked_pos, self.norm).mean(axis=-1)
+
         reward = jnp.exp(-mean_error * self.sensitivity)
         return reward
 
@@ -136,15 +140,19 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 success_reward=1.0,
                 scale=1.0,
             ),
-            MatchReferenceMotionReward(
-                reference_motion=self.reference_motion,
-                ctrl_dt=self.config.ctrl_dt,
-                scale=self.config.match_reward_scale,
-            ),
             kbot_rewards.OrientationPenalty(scale=self.config.orientation_penalty),
-            # ksim.AccelerationPenalty(scale=self.config.acceleration_penalty),
-            # kbot_rewards.FeetSlipPenalty(scale=-0.25),
         ]
+
+        # Add separate reward for each body
+        for body_id in self.tracked_body_ids:
+            rewards.append(
+                MatchReferenceMotionReward(
+                    reference_motion=xax.FrozenDict({body_id: self.reference_motion[body_id]}),
+                    ctrl_dt=self.config.ctrl_dt,
+                    scale=self.config.match_reward_scale,
+                    body_name=body_id,
+                ),
+            )
 
         if self.config.use_naive_reward:
             rewards += [
@@ -299,7 +307,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m ksim_kbot.walking.walking_reference_motion
+    #   python -m ksim_kbot.walking.walking_reference_motion num_envs=2 batch_size=2
     # To visualize the environment, use the following command:
     #   python -m ksim_kbot.walking.walking_reference_motion run_environment=True
     # To visualize the reference gait, use the following command:
