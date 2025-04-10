@@ -12,16 +12,7 @@ import ksim
 import xax
 from jaxtyping import Array, PRNGKeyArray
 
-from .walking import NUM_INPUTS, NUM_JOINTS, WalkingTask, WalkingTaskConfig
-
-
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class AuxOutputs:
-    log_probs: Array
-    values: Array
-    actor_carry: Array
-    critic_carry: Array
+from ksim_kbot.walking.walking import NUM_INPUTS, NUM_JOINTS, WalkingTask, WalkingTaskConfig
 
 
 class RnnActor(eqx.Module):
