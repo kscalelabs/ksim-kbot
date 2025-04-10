@@ -39,7 +39,7 @@ class CartesianBodyTargetPenalty(ksim.Reward):
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         body_pos = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
-        target_pos = trajectory.command[self.command_name]
+        target_pos = trajectory.command[self.command_name][..., :3]
         return xax.get_norm(body_pos - target_pos, self.norm).mean(axis=-1)
 
     @classmethod
@@ -85,7 +85,7 @@ class CartesianBodyTargetVectorReward(ksim.Reward):
 
         body_vel_TL = (body_pos_TL - body_pos_right_shifted_TL) / self.dt
 
-        target_vector = trajectory.command[self.command_name] - body_pos_TL
+        target_vector = trajectory.command[self.command_name][..., :3] - body_pos_TL
         normalized_target_vector = target_vector / (
             jnp.linalg.norm(target_vector, axis=-1, keepdims=True) + self.epsilon
         )
@@ -146,7 +146,7 @@ class ContinuousCartesianBodyTargetReward(ksim.Reward):
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         body_pos = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
-        target_pos = trajectory.command[self.command_name]
+        target_pos = trajectory.command[self.command_name][..., :3]
 
         error = xax.get_norm(body_pos - target_pos, self.norm)
         base_reward = jnp.exp(-error * self.sensitivity)
@@ -221,7 +221,7 @@ class CartesianBodyPositionObservation(ksim.Observation):
 
 
 NUM_OUTPUTS = NUM_JOINTS * 2
-NUM_INPUTS = NUM_JOINTS + NUM_JOINTS + 3 + 4 + NUM_OUTPUTS
+NUM_INPUTS = NUM_JOINTS + NUM_JOINTS + 3 + NUM_OUTPUTS
 
 
 @jax.tree_util.register_dataclass
@@ -269,7 +269,6 @@ class KbotActor(eqx.Module):
         joint_pos_n: Array,
         joint_vel_n: Array,
         xyz_target_3: Array,
-        quat_target_4: Array,
         prev_action_n: Array,
     ) -> distrax.Normal:
         obs_n = jnp.concatenate(
@@ -277,7 +276,6 @@ class KbotActor(eqx.Module):
                 joint_pos_n,  # NUM_JOINTS
                 joint_vel_n,  # NUM_JOINTS
                 xyz_target_3,  # 3
-                quat_target_4,  # 4
                 prev_action_n,  # NUM_OUTPUTS
             ],
             axis=-1,
@@ -322,7 +320,6 @@ class KbotCritic(eqx.Module):
         joint_vel_n: Array,
         actuator_force_n: Array,
         xyz_target_3: Array,
-        quat_target_4: Array,
         end_effector_pos_3: Array,
         prev_action_n: Array,
     ) -> Array:
@@ -332,7 +329,6 @@ class KbotCritic(eqx.Module):
                 joint_vel_n,  # NUM_JOINTS
                 actuator_force_n,  # NUM_JOINTS
                 xyz_target_3,  # 3
-                quat_target_4,  # 4
                 end_effector_pos_3,  # 3
                 prev_action_n,  # NUM_OUTPUTS
             ],
@@ -518,13 +514,13 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
         else:
             return ksim.TorqueActuators()
 
-    def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
+    def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
         return [
-            ksim.StaticFrictionRandomization(scale_lower=0.5, scale_upper=2.0, freejoint_first=False),
+            ksim.StaticFrictionRandomizer(scale_lower=0.5, scale_upper=2.0, freejoint_first=False),
             # ksim.JointZeroPositionRandomization(scale_lower=-0.01, scale_upper=0.01, freejoint_first=False),
-            ksim.ArmatureRandomization(scale_lower=1.0, scale_upper=1.05, freejoint_first=False),
-            ksim.MassMultiplicationRandomization.from_body_name(physics_model, "KC_C_104R_PitchHardstopDriven"),
-            ksim.JointDampingRandomization(scale_lower=0.95, scale_upper=1.05, freejoint_first=False),
+            ksim.ArmatureRandomizer(scale_lower=1.0, scale_upper=1.05, freejoint_first=False),
+            ksim.MassMultiplicationRandomizer.from_body_name(physics_model, "KC_C_104R_PitchHardstopDriven"),
+            ksim.JointDampingRandomizer(scale_lower=0.95, scale_upper=1.05, freejoint_first=False),
         ]
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
@@ -570,28 +566,16 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            ksim.CartesianBodyTargetCommand.create(
+            ksim.PositionCommand.create(
                 model=physics_model,
-                # pivot_name="KC_C_104R_PitchHardstopDriven",
-                pivot_point=(0.3, 0.0, 0.0),
-                base_name="floating_base_link",
-                curriculum_scale=1.5,
-                sample_sphere_radius=0.25,
-                positive_x=False,  # forward + backward
-                positive_y=False,
-                positive_z=False,
-                switch_prob=self.config.ctrl_dt / 2,  # will last 2 seconds in expectation
+                box_min=(-0.3, -0.3, -0.3),
+                box_max=(0.3, 0.3, 0.3),
+                base_body_name="floating_base_link",
                 vis_radius=0.05,
                 vis_color=(1.0, 0.0, 0.0, 0.8),
-            ),  # type: ignore[call-arg]
-            ksim.GlobalBodyQuaternionCommand.create(
-                model=physics_model,
-                base_name="ik_target",
-                switch_prob=self.config.ctrl_dt / 1,  # will last 1 seconds in expectation
-                vis_size=0.02,
-                null_prob=1.0,
-                vis_magnitude=0.5,
-                vis_color=(0.0, 0.0, 1.0, 0.5),
+                unique_name="target",
+                min_speed=0.0,
+                max_speed=0.0,
             ),  # type: ignore[call-arg]
         ]
 
@@ -606,7 +590,7 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
                 sensitivity=1.0,
                 threshold=0.000025,  # with l2 xax norm, this is 0.5cm
                 time_bonus_scale=0.3,
-                command_name="cartesian_body_target_command_floating_base_link_(0.3, 0.0, 0.0)",
+                command_name="target_position_command",
             ),
             # ksim.GlobalBodyQuaternionReward.create(
             #     model=physics_model,
@@ -628,7 +612,7 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
             # ),
             CartesianBodyTargetVectorReward.create(
                 model=physics_model,
-                command_name="cartesian_body_target_command_floating_base_link_(0.3, 0.0, 0.0)",
+                command_name="target_position_command",
                 tracked_body_name="ik_target",
                 base_body_name="floating_base_link",
                 scale=3.0,
@@ -638,7 +622,7 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
             ),
             CartesianBodyTargetPenalty.create(
                 model=physics_model,
-                command_name="cartesian_body_target_command_floating_base_link_(0.3, 0.0, 0.0)",
+                command_name="target_position_command",
                 tracked_body_name="ik_target",
                 base_body_name="floating_base_link",
                 norm="l2",
@@ -660,7 +644,7 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
     def get_model(self, key: PRNGKeyArray) -> KbotModel:
         return KbotModel(key, hidden_size=self.config.hidden_size, depth=self.config.depth)
 
-    def get_initial_carry(self, rng: PRNGKeyArray) -> None:
+    def get_initial_model_carry(self, rng: PRNGKeyArray) -> None:
         return None
 
     def _run_actor(
@@ -671,14 +655,12 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
     ) -> distrax.Normal:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"] / 50.0
-        xyz_target_3 = commands["cartesian_body_target_command_floating_base_link_(0.3, 0.0, 0.0)"]
-        quat_target_4 = commands["global_body_quaternion_command_ik_target"]
+        xyz_target_3 = commands["target_position_command"][..., :3]
         prev_action_n = observations["last_action_observation"]
         return model.actor(
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
             xyz_target_3=xyz_target_3,
-            quat_target_4=quat_target_4,
             prev_action_n=prev_action_n,
         )
 
@@ -691,8 +673,7 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
         joint_pos_n = observations["joint_position_observation"]  # 26
         joint_vel_n = observations["joint_velocity_observation"] / 100.0  # 27
         actuator_force_n = observations["actuator_force_observation"]  # 27
-        xyz_target_3 = commands["cartesian_body_target_command_floating_base_link_(0.3, 0.0, 0.0)"]  # 3
-        quat_target_4 = commands["global_body_quaternion_command_ik_target"]  # 4
+        xyz_target_3 = commands["target_position_command"][..., :3]  # 3
         end_effector_pos_3 = observations["cartesian_body_position_observation_KC_C_104R_PitchHardstopDriven"]  # 3
         prev_action_n = observations["last_action_observation"]  # 5
 
@@ -701,7 +682,6 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
             joint_vel_n=joint_vel_n,
             actuator_force_n=actuator_force_n,
             xyz_target_3=xyz_target_3,
-            quat_target_4=quat_target_4,
             end_effector_pos_3=end_effector_pos_3,
             prev_action_n=prev_action_n,
         )
@@ -713,16 +693,20 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
         carry: None,
         rng: PRNGKeyArray,
     ) -> tuple[ksim.PPOVariables, None]:
-        action_dist_n = self._run_actor(model, trajectories.obs, trajectories.command)
-        log_probs_n = action_dist_n.log_prob(trajectories.action / model.actor.mean_scale)
-        entropy_n = action_dist_n.entropy()
 
-        values_1 = self._run_critic(model, trajectories.obs, trajectories.command)
+        # vectorize over the time dimensions
+        def get_log_prob(transition: ksim.Trajectory) -> Array:
+            action_dist_n = self._run_actor(model, transition.obs, transition.command)
+            log_probs_n = action_dist_n.log_prob(transition.action / model.actor.mean_scale)
+            return log_probs_n
+
+        log_probs_tn = jax.vmap(get_log_prob)(trajectories)
+
+        values_tn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))(model, trajectories.obs, trajectories.command)
 
         ppo_variables = ksim.PPOVariables(
-            log_probs=log_probs_n,
-            values=values_1.squeeze(-1),
-            entropy=entropy_n,
+            log_probs=log_probs_tn,
+            values=values_tn.squeeze(-1),
         )
 
         return ppo_variables, None
@@ -730,7 +714,7 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
     def sample_action(
         self,
         model: KbotModel,
-        carry: None,
+        model_carry: None,
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, Array],
