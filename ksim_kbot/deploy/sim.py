@@ -19,7 +19,7 @@ from scipy.spatial.transform import Rotation as R
 
 logger = logging.getLogger(__name__)
 DT = 0.02  # time step (50Hz)
-
+GAIT_DT = 1.25
 DEFAULT_POSITIONS = np.array(
     [
         0,
@@ -130,7 +130,7 @@ async def get_observation(
     # During training gravity vector is taken from the first torso frame
     gvec = np.array([gvec[1], -gvec[2], -gvec[0]])
 
-    phase += 2 * np.pi * 1.2550827 * DT
+    phase += 2 * np.pi * GAIT_DT * DT
     phase = np.fmod(phase + np.pi, 2 * np.pi) - np.pi
     phase_vec = np.array([np.cos(phase), np.sin(phase)]).flatten()
 
