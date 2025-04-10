@@ -219,188 +219,95 @@ class ResetDefaultJointPosition(ksim.Reset):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class JointDeviationPenalty(ksim.Reward):
-    """Penalty for joint deviations."""
+class FarFromOriginTermination(ksim.Termination):
+    """Terminates the episode if the robot is too far from the origin.
 
-    norm: xax.NormType = attrs.field(default="l2")
-    joint_targets: tuple[float, ...] = attrs.field()
-    freejoint_first: bool = attrs.field(default=True)
+    This is treated as a positive termination.
+    """
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        if self.freejoint_first:
-            diff = trajectory.qpos[..., 7:] - jnp.array(self.joint_targets)
-        else:
-            diff = trajectory.qpos[..., :] - jnp.array(self.joint_targets)
-        return xax.get_norm(diff, self.norm).sum(axis=-1)
+    max_dist: float = attrs.field()
+
+    def __call__(self, state: ksim.PhysicsData, curriculum_level: Array) -> Array:
+        return jnp.linalg.norm(state.qpos[..., :2], axis=-1) > self.max_dist
 
 
-@attrs.define(frozen=True, kw_only=True)
-class DHForwardReward(ksim.Reward):
-    """Incentives forward movement."""
+@attrs.define(frozen=True)
+class LinearVelocityCommand(ksim.Command):
+    """Command to move the robot in a straight line.
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        # Take just the x velocity component
-        x_delta = -jnp.clip(trajectory.qvel[..., 1], -1.0, 1.0)
-        return x_delta
+    By convention, X is forward and Y is left. The switching probability is the
+    probability of resampling the command at each step. The zero probability is
+    the probability of the command being zero - this can be used to turn off
+    any command.
+    """
 
+    range: tuple[float, float] = attrs.field()
+    index: int | str | None = attrs.field(default=None)
+    zero_prob: float = attrs.field(default=0.0)
+    switch_prob: float = attrs.field(default=0.0)
+    vis_height: float = attrs.field(default=1.0)
+    vis_scale: float = attrs.field(default=0.05)
 
-@attrs.define(frozen=True, kw_only=True)
-class DHControlPenalty(ksim.Reward):
-    """Legacy default humanoid control cost that penalizes squared action magnitude."""
+    def initial_command(
+        self,
+        physics_data: ksim.PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        rng, rng_zero = jax.random.split(rng)
+        minval, maxval = self.range
+        value = jax.random.uniform(rng, (1,), minval=minval, maxval=maxval)
+        zero_mask = jax.random.bernoulli(rng_zero, self.zero_prob)
+        return jnp.where(zero_mask, 0.0, value)
 
-    norm: xax.NormType = attrs.field(default="l2")
+    def __call__(
+        self,
+        prev_command: Array,
+        physics_data: ksim.PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        rng_a, rng_b = jax.random.split(rng)
+        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
+        return jnp.where(switch_mask, new_commands, prev_command)
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        return xax.get_norm(trajectory.action, self.norm).sum(axis=-1)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class DHHealthyReward(ksim.Reward):
-    """Legacy default humanoid healthy reward that gives binary reward based on height."""
-
-    healthy_z_lower: float = attrs.field(default=0.5)
-    healthy_z_upper: float = attrs.field(default=1.5)
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        height = trajectory.qpos[..., 2]
-        is_healthy = jnp.where(height < self.healthy_z_lower, 0.0, 1.0)
-        is_healthy = jnp.where(height > self.healthy_z_upper, 0.0, is_healthy)
-        return is_healthy
-
-
-@attrs.define(frozen=True, kw_only=True)
-class FeetSlipPenalty(ksim.Reward):
-    """Penalty for feet slipping."""
-
-    scale: float = -1.0
-    com_vel_obs_name: str = attrs.field(default="center_of_mass_velocity_observation")
-    feet_contact_obs_name: str = attrs.field(default="feet_contact_observation")
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        if self.feet_contact_obs_name not in trajectory.obs:
-            raise ValueError(
-                f"Observation {self.feet_contact_obs_name} not found; add it as an observation in your task."
-            )
-        contact = trajectory.obs[self.feet_contact_obs_name]
-        body_vel = trajectory.obs[self.com_vel_obs_name][..., :2]
-        return jnp.sum(jnp.linalg.norm(body_vel, axis=-1, keepdims=True) * contact, axis=-1)
+    def get_name(self) -> str:
+        return f"{super().get_name()}{'' if self.index is None else f'_{self.index}'}"
 
 
-@attrs.define(frozen=True, kw_only=True)
-class OrientationPenalty(ksim.Reward):
-    """Penalty for the orientation of the robot."""
+@attrs.define(frozen=True)
+class AngularVelocityCommand(ksim.Command):
+    """Command to turn the robot."""
 
-    norm: xax.NormType = attrs.field(default="l2")
-    obs_name: str = attrs.field(default="upvector_torso_obs")
+    scale: float = attrs.field()
+    index: int | str | None = attrs.field(default=None)
+    zero_prob: float = attrs.field(default=0.0)
+    switch_prob: float = attrs.field(default=0.0)
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        return xax.get_norm(trajectory.obs[self.obs_name][..., :2], self.norm).sum(axis=-1)
+    def initial_command(
+        self,
+        physics_data: ksim.PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        """Returns (1,) array with angular velocity."""
+        rng_a, rng_b = jax.random.split(rng)
+        zero_mask = jax.random.bernoulli(rng_a, self.zero_prob)
+        cmd = jax.random.uniform(rng_b, (1,), minval=-self.scale, maxval=self.scale)
+        return jnp.where(zero_mask, jnp.zeros_like(cmd), cmd)
 
+    def __call__(
+        self,
+        prev_command: Array,
+        physics_data: ksim.PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        rng_a, rng_b = jax.random.split(rng)
+        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
+        return jnp.where(switch_mask, new_commands, prev_command)
 
-@attrs.define(frozen=True, kw_only=True)
-class LinearVelocityTrackingReward(ksim.Reward):
-    """Reward for tracking the linear velocity."""
-
-    error_scale: float = attrs.field(default=0.25)
-    linvel_obs_name: str = attrs.field(default="local_linvel_torso_obs")
-    command_name: str = attrs.field(default="linear_velocity_command")
-    norm: xax.NormType = attrs.field(default="l2")
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        lin_vel_error = xax.get_norm(
-            trajectory.command[self.command_name][..., :2] - trajectory.obs[self.linvel_obs_name][..., :2], self.norm
-        ).sum(axis=-1)
-        return jnp.exp(-lin_vel_error / self.error_scale)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class AngularVelocityTrackingReward(ksim.Reward):
-    """Reward for tracking the angular velocity."""
-
-    error_scale: float = attrs.field(default=0.25)
-    angvel_obs_name: str = attrs.field(default="gyro_torso_obs")
-    command_name: str = attrs.field(default="angular_velocity_command")
-    norm: xax.NormType = attrs.field(default="l2")
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        ang_vel_error = trajectory.command[self.command_name][..., 2] - trajectory.obs[self.angvel_obs_name][..., 2]
-        return jnp.exp(-ang_vel_error / self.error_scale)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class AngularVelocityXYPenalty(ksim.Reward):
-    """Penalty for the angular velocity."""
-
-    tracking_sigma: float = attrs.field(default=0.25)
-    angvel_obs_name: str = attrs.field(default="global_angvel_torso_obs")
-    norm: xax.NormType = attrs.field(default="l2")
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        ang_vel = trajectory.obs[self.angvel_obs_name][..., :2]
-        return xax.get_norm(ang_vel, self.norm).sum(axis=-1)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class HipDeviationPenalty(ksim.Reward):
-    """Penalty for hip joint deviations."""
-
-    norm: xax.NormType = attrs.field(default="l2")
-    hip_indices: tuple[int, ...] = attrs.field()
-    joint_targets: tuple[float, ...] = attrs.field()
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        diff = (
-            trajectory.qpos[..., jnp.array(self.hip_indices)]
-            - jnp.array(self.joint_targets)[jnp.array(self.hip_indices)]
-        )
-        return xax.get_norm(diff, self.norm).sum(axis=-1)
-
-    @classmethod
-    def create(
-        cls,
-        physics_model: ksim.PhysicsModel,
-        hip_names: tuple[str, ...],
-        joint_targets: tuple[float, ...],
-        scale: float = -1.0,
-    ) -> Self:
-        """Create a sensor observation from a physics model."""
-        mappings = ksim.get_qpos_data_idxs_by_name(physics_model)
-        hip_indices = tuple([int(mappings[name][0]) - 7 for name in hip_names])
-        return cls(
-            hip_indices=hip_indices,
-            joint_targets=joint_targets,
-            scale=scale,
-        )
-
-
-@attrs.define(frozen=True, kw_only=True)
-class KneeDeviationPenalty(ksim.Reward):
-    """Penalty for knee joint deviations."""
-
-    norm: xax.NormType = attrs.field(default="l2")
-    knee_indices: tuple[int, ...] = attrs.field()
-    joint_targets: tuple[float, ...] = attrs.field()
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        diff = (
-            trajectory.qpos[..., jnp.array(self.knee_indices)]
-            - jnp.array(self.joint_targets)[jnp.array(self.knee_indices)]
-        )
-        return xax.get_norm(diff, self.norm).sum(axis=-1)
-
-    @classmethod
-    def create(
-        cls,
-        physics_model: ksim.PhysicsModel,
-        knee_names: tuple[str, ...],
-        joint_targets: tuple[float, ...],
-        scale: float = -1.0,
-    ) -> Self:
-        """Create a sensor observation from a physics model."""
-        mappings = ksim.get_qpos_data_idxs_by_name(physics_model)
-        knee_indices = tuple([int(mappings[name][0]) - 7 for name in knee_names])
-        return cls(
-            knee_indices=knee_indices,
-            joint_targets=joint_targets,
-            scale=scale,
-        )
+    def get_name(self) -> str:
+        return f"{super().get_name()}{'' if self.index is None else f'_{self.index}'}"

@@ -1,43 +1,28 @@
+# mypy: ignore-errors
 """Defines simple task for training a standing policy for K-Bot."""
 
-import asyncio
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generic, TypeVar
+from typing import Callable, Generic, TypeVar
 
 import distrax
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import ksim
-import mujoco
-import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from ksim.curriculum import ConstantCurriculum, Curriculum
-from mujoco import mjx
+from xax.nn.export import export
 
-from ksim_kbot import common, rewards
+from ksim_kbot import common, rewards as kbot_rewards
+from ksim_kbot.standing.standing import MAX_TORQUE, KbotStandingTask, KbotStandingTaskConfig
 
 OBS_SIZE = 20 * 2 + 2 + 3 + 3 + 3 + 40  # = position + velocity + imu_acc + imu_gyro + projected_gravity + last_action
 CMD_SIZE = 3
 NUM_OUTPUTS = 20 * 2  # position + velocity
-
-SINGLE_STEP_HISTORY_SIZE = NUM_OUTPUTS + OBS_SIZE + CMD_SIZE
-
-HISTORY_LENGTH = 0
-
-NUM_INPUTS = (OBS_SIZE + CMD_SIZE) + SINGLE_STEP_HISTORY_SIZE * HISTORY_LENGTH
-
-MAX_TORQUE = {
-    "00": 1.0,
-    "02": 17.0,
-    "03": 60.0,
-    "04": 80.0,
-}
-
-Config = TypeVar("Config", bound="KbotStandingTaskConfig")
+NUM_INPUTS = OBS_SIZE + CMD_SIZE
 
 
 class KbotActor(eqx.Module):
@@ -127,7 +112,7 @@ class KbotCritic(eqx.Module):
 
     def __init__(self, key: PRNGKeyArray) -> None:
         self.mlp = eqx.nn.MLP(
-            in_size=NUM_INPUTS + 2 + 3 + 4 + 3 + 3 + 20,
+            in_size=NUM_INPUTS + 3 + 2 + 2 + 6 + 20 + 3 + 4 + 3 + 3 + 1,
             out_size=1,  # Always output a single critic value.
             width_size=256,
             depth=5,
@@ -196,92 +181,22 @@ class KbotModel(eqx.Module):
 
 
 @dataclass
-class KbotStandingTaskConfig(ksim.PPOConfig):
-    """Config for the KBot standing task."""
+class KbotWalkingTaskConfig(KbotStandingTaskConfig):
+    """Config for the K-Bot walking task."""
 
-    robot_urdf_path: str = xax.field(
-        value="ksim_kbot/kscale-assets/kbot-v2-feet/",
-        help="The path to the assets directory for the robot.",
-    )
+    use_gait_rewards: bool = xax.field(value=False)
 
-    action_scale: float = xax.field(
-        value=1.0,
-        help="The scale to apply to the actions.",
-    )
+    light_domain_randomize: bool = xax.field(value=False)
 
-    # Optimizer parameters.
-    learning_rate: float = xax.field(
-        value=1e-4,
-        help="Learning rate for PPO.",
-    )
-    max_grad_norm: float = xax.field(
-        value=0.5,
-        help="Maximum gradient norm for clipping.",
-    )
-    adam_weight_decay: float = xax.field(
-        value=0.0,
-        help="Weight decay for the Adam optimizer.",
-    )
-
-    # Mujoco parameters.
-    use_mit_actuators: bool = xax.field(
-        value=False,
-        help="Whether to use the MIT actuator model, where the actions are position + velocity commands",
-    )
-
-    domain_randomize: bool = xax.field(
-        value=True,
-        help="Whether to domain randomize the model.",
-    )
-
-    # Rendering parameters.
-    render_track_body_id: int | None = xax.field(
-        value=None,
-        help="The body id to track with the render camera.",
-    )
-
-    # Checkpointing parameters.
-    export_for_inference: bool = xax.field(
-        value=False,
-        help="Whether to export the model for inference.",
-    )
+    gait_freq_lower: float = xax.field(value=1.25)
+    gait_freq_upper: float = xax.field(value=1.25)
 
 
-class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
-    def get_optimizer(self) -> optax.GradientTransformation:
-        """Builds the optimizer.
+Config = TypeVar("Config", bound=KbotWalkingTaskConfig)
 
-        This provides a reasonable default optimizer for training PPO models,
-        but can be overridden by subclasses who want to do something different.
-        """
-        optimizer = optax.chain(
-            optax.clip_by_global_norm(self.config.max_grad_norm),
-            (
-                optax.adam(self.config.learning_rate)
-                if self.config.adam_weight_decay == 0.0
-                else optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay)
-            ),
-        )
 
-        return optimizer
-
-    def get_mujoco_model(self) -> mujoco.MjModel:
-        mjcf_path = (Path(self.config.robot_urdf_path) / "scene.mjcf").resolve().as_posix()
-        mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
-
-        mj_model.opt.timestep = jnp.array(self.config.dt)
-        mj_model.opt.iterations = 6
-        mj_model.opt.ls_iterations = 6
-        mj_model.opt.disableflags = mjx.DisableBit.EULERDAMP
-        mj_model.opt.solver = mjx.SolverType.CG
-
-        return mj_model
-
-    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, JointMetadataOutput]:
-        metadata = asyncio.run(ksim.get_mujoco_model_metadata(self.config.robot_urdf_path, cache=False))
-        if metadata.joint_name_to_metadata is None:
-            raise ValueError("Joint metadata is not available")
-        return metadata.joint_name_to_metadata
+class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
+    config: Config
 
     def get_actuators(
         self,
@@ -352,17 +267,15 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                 ],
                 action_scale=self.config.action_scale,
             )
-        else:
-            return ksim.TorqueActuators()
 
     def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
         if self.config.domain_randomize:
             return [
-                ksim.StaticFrictionRandomizer(scale_lower=0.5, scale_upper=2.0),
-                ksim.JointZeroPositionRandomizer(scale_lower=-0.01, scale_upper=0.01),
-                ksim.ArmatureRandomizer(scale_lower=1.0, scale_upper=1.05),
+                ksim.StaticFrictionRandomizer(),
+                ksim.ArmatureRandomizer(),
                 ksim.MassMultiplicationRandomizer.from_body_name(physics_model, "Torso_Side_Right"),
-                ksim.JointDampingRandomizer(scale_lower=0.95, scale_upper=1.05),
+                ksim.JointDampingRandomizer(),
+                ksim.JointZeroPositionRandomizer(),
             ]
         else:
             return []
@@ -377,7 +290,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                 default_targets=(
                     0.0,
                     0.0,
-                    0.9,
+                    1.01,
                     # quat
                     1.0,
                     0.0,
@@ -414,14 +327,15 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         if self.config.domain_randomize:
             return [
+                # TODO - update this for angular values
                 ksim.PushEvent(
-                    x_force=1.0,
-                    y_force=1.0,
+                    x_force=0.8,
+                    y_force=0.8,
                     z_force=0.0,
                     x_angular_force=0.0,
                     y_angular_force=0.0,
                     z_angular_force=0.0,
-                    interval_range=(4.0, 7.0),
+                    interval_range=(5.0, 10.0),
                 ),
             ]
         else:
@@ -526,16 +440,14 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         switch_prob = 0.0
         return [
-            ksim.LinearVelocityCommand(index="x", range=(0.0, 0.0), zero_prob=1.0, switch_prob=switch_prob),  # type: ignore[attr-defined]
-            ksim.LinearVelocityCommand(index="y", range=(0.0, 0.0), zero_prob=1.0, switch_prob=switch_prob),  # type: ignore[attr-defined]
-            ksim.AngularVelocityCommand(index="z", scale=0.0, zero_prob=1.0, switch_prob=switch_prob),  # type: ignore[attr-defined]
+            ksim.LinearVelocityCommand(index="x", range=(0.0, 0.0), zero_prob=1.0, switch_prob=switch_prob),
+            ksim.LinearVelocityCommand(index="y", range=(0.0, 0.0), zero_prob=1.0, switch_prob=switch_prob),
+            ksim.AngularVelocityCommand(index="z", scale=0.0, zero_prob=1.0, switch_prob=switch_prob),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
-        return [
-            rewards.XYPositionPenalty(target_x=0.0, target_y=0.0, scale=-0.1),
-            ksim.ActionSmoothnessPenalty(scale=-0.001),
-            rewards.JointDeviationPenalty(
+        rewards: list[ksim.Reward] = [
+            kbot_rewards.JointDeviationPenalty(
                 scale=-0.02,
                 joint_targets=(
                     # right arm
@@ -565,13 +477,13 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                 ),
                 joint_weights=(
                     # right arm
-                    0.1,
+                    1.2,
                     1.0,
                     1.0,
                     1.0,
                     1.0,
                     # left arm
-                    0.1,
+                    1.2,
                     1.0,
                     1.0,
                     1.0,
@@ -590,24 +502,72 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                     1.0,
                 ),
             ),
-            rewards.FeetSlipPenalty(scale=-0.05),
-            ksim.StayAliveReward(scale=1.0),
-            # common.TerminationPenalty(scale=-5.0),
+            kbot_rewards.KneeDeviationPenalty.create(
+                physics_model=physics_model,
+                knee_names=("dof_left_knee_04", "dof_right_knee_04"),
+                joint_targets=(
+                    # right arm
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    # left arm
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    # right leg
+                    -0.23,
+                    0.0,
+                    0.0,
+                    -0.441,
+                    0.195,
+                    # left leg
+                    0.23,
+                    0.0,
+                    0.0,
+                    0.441,
+                    -0.195,
+                ),
+                scale=-0.1,
+            ),
+            kbot_rewards.LinearVelocityTrackingReward(scale=1.0),
+            kbot_rewards.AngularVelocityTrackingReward(scale=0.5),
+            kbot_rewards.AngularVelocityXYPenalty(scale=-0.15),
+            kbot_rewards.TerminationPenalty(scale=-1.0),
+            kbot_rewards.FarFromOriginTerminationReward(max_dist=5.0, scale=1.0),
+            kbot_rewards.OrientationPenalty(scale=-2.0),
         ]
+        if self.config.use_gait_rewards:
+            rewards += [
+                # Stateful rewards
+                kbot_rewards.FeetSlipPenalty(scale=-0.25),
+                kbot_rewards.FeetAirTimeReward(
+                    scale=2.0,
+                    # threshold_min=0.0,
+                    # threshold_max=0.4,
+                ),
+                kbot_rewards.FeetPhaseReward(
+                    # foot_default_height=0.0,
+                    max_foot_height=0.11,
+                    scale=1.0,
+                ),
+            ]
+        return rewards
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
             common.GVecTermination.create(physics_model, sensor_name="upvector_origin"),
+            common.FarFromOriginTermination(max_dist=5.0),
         ]
 
     def get_model(self, key: PRNGKeyArray) -> KbotModel:
         return KbotModel(key)
 
     def get_initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
-        return (
-            jnp.zeros(HISTORY_LENGTH * SINGLE_STEP_HISTORY_SIZE),
-            jnp.zeros(HISTORY_LENGTH * SINGLE_STEP_HISTORY_SIZE),
-        )
+        return None, None
 
     def run_actor(
         self,
@@ -616,11 +576,11 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
         carry: Array,
     ) -> distrax.Normal:
-        timestep_phase_2 = observations["timestep_phase_observation"]
+        timestep_phase_4 = observations["timestep_phase_observation"]
         joint_pos_n = observations["joint_position_observation"]
-        joint_vel_n = observations["joint_velocity_observation"] / 10.0
-        imu_acc_3 = observations["sensor_observation_imu_acc"] / 50.0
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"] / 3.0
+        joint_vel_n = observations["joint_velocity_observation"]
+        imu_acc_3 = observations["sensor_observation_imu_acc"]
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         projected_gravity_3 = observations["projected_gravity_observation"]
         lin_vel_cmd_x = commands["linear_velocity_command_x"]
         lin_vel_cmd_y = commands["linear_velocity_command_y"]
@@ -629,7 +589,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         history_n = carry
 
         return model.forward(
-            timestep_phase_2=timestep_phase_2,
+            timestep_phase_4=timestep_phase_4,
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
             imu_acc_3=imu_acc_3,
@@ -651,9 +611,9 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     ) -> Array:
         timestep_phase_2 = observations["timestep_phase_observation"]
         joint_pos_n = observations["joint_position_observation"]
-        joint_vel_n = observations["joint_velocity_observation"] / 10.0
-        imu_acc_3 = observations["sensor_observation_imu_acc"] / 50.0
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"] / 3.0
+        joint_vel_n = observations["joint_velocity_observation"]
+        imu_acc_3 = observations["sensor_observation_imu_acc"]
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         projected_gravity_3 = observations["projected_gravity_observation"]
         lin_vel_cmd_x = commands["linear_velocity_command_x"]
         lin_vel_cmd_y = commands["linear_velocity_command_y"]
@@ -661,11 +621,15 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         last_action_n = observations["last_action_observation"]
         # critic observations
         feet_contact_2 = observations["feet_contact_observation"]
+        feet_position_6 = observations["feet_position_observation"]
+        feet_air_time_2 = observations["feet_air_time_observation"]
+        true_height_1 = observations["true_height_observation"]
+
+        actuator_force_n = observations["actuator_force_observation"]
         base_position_3 = observations["base_position_observation"]
         base_orientation_4 = observations["base_orientation_observation"]
         base_linear_velocity_3 = observations["base_linear_velocity_observation"]
         base_angular_velocity_3 = observations["base_angular_velocity_observation"]
-        actuator_force_n = observations["actuator_force_observation"] / 100.0
 
         history_n = carry
 
@@ -681,6 +645,9 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ang_vel_cmd_z=ang_vel_cmd_z,
             last_action_n=last_action_n,
             feet_contact_2=feet_contact_2,
+            feet_position_6=feet_position_6,
+            feet_air_time_2=feet_air_time_2,
+            true_height_1=true_height_1,
             actuator_force_n=actuator_force_n,
             base_position_3=base_position_3,
             base_orientation_4=base_orientation_4,
@@ -706,7 +673,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             log_probs=log_probs_j,
             values=values_1.squeeze(-1),
         )
-        # TODO: update the carry properly
+
         return ppo_variables, (actor_carry, critic_carry)
 
     def sample_action(
@@ -719,59 +686,135 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> ksim.Action:
-        actor_carry, _ = carry
-        action_dist_n = self.run_actor(model.actor, observations, commands, actor_carry)
+        action_dist_n = self.run_actor(model.actor, observations, commands, carry)
         action_j = action_dist_n.sample(seed=rng)
 
-        timestep_phase_2 = observations["timestep_phase_observation"]
-        joint_pos_n = observations["joint_position_observation"]
-        joint_vel_n = observations["joint_velocity_observation"] / 10.0
-        imu_acc_3 = observations["sensor_observation_imu_acc"] / 50.0
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"] / 3.0
-        projected_gravity_3 = observations["projected_gravity_observation"]
-        lin_vel_cmd_x = commands["linear_velocity_command_x"]
-        lin_vel_cmd_y = commands["linear_velocity_command_y"]
-        ang_vel_cmd_z = commands["angular_velocity_command_z"]
-        last_action_n = observations["last_action_observation"]
-        current_history_data = jnp.concatenate(
-            [
-                timestep_phase_2,
-                joint_pos_n,
-                joint_vel_n,
-                imu_acc_3,
-                imu_gyro_3,
-                projected_gravity_3,
-                lin_vel_cmd_x,
-                lin_vel_cmd_y,
-                ang_vel_cmd_z,
-                last_action_n,
-                action_j,
-            ],
-            axis=-1,
+        return ksim.Action(action=action_j, carry=None, aux_outputs=None)
+
+    def make_export_model(self, model: KbotModel, stochastic: bool = False, batched: bool = False) -> Callable:
+        """Makes a callable inference function that directly takes a flattened input vector and returns an action.
+
+        Returns:
+            A tuple containing the inference function and the size of the input vector.
+        """
+
+        def deterministic_model_fn(obs: Array) -> Array:
+            return model.actor.call_flat_obs(obs).mode()
+
+        def stochastic_model_fn(obs: Array) -> Array:
+            dist = model.actor.call_flat_obs(obs)
+            return dist.sample(seed=jax.random.PRNGKey(0))
+
+        if stochastic:
+            model_fn = stochastic_model_fn
+        else:
+            model_fn = deterministic_model_fn
+
+        if batched:
+
+            def batched_model_fn(obs: Array) -> Array:
+                return jax.vmap(model_fn)(obs)
+
+            return batched_model_fn
+
+        return model_fn
+
+    def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
+        if not self.config.export_for_inference:
+            return state
+
+        model: KbotModel = self.load_checkpoint(ckpt_path, part="model")
+
+        model_fn = self.make_export_model(model, stochastic=False, batched=True)
+
+        input_shapes = [(NUM_INPUTS,)]
+
+        tf_path = (
+            ckpt_path.parent / "tf_model"
+            if self.config.only_save_most_recent
+            else ckpt_path.parent / f"tf_model_{state.num_steps}"
         )
 
-        if HISTORY_LENGTH > 0:
-            # Roll the history by shifting the existing history and adding the new data
-            carry_reshaped = actor_carry.reshape(HISTORY_LENGTH, SINGLE_STEP_HISTORY_SIZE)
-            shifted_history = jnp.roll(carry_reshaped, shift=-1, axis=0)
-            new_history = shifted_history.at[HISTORY_LENGTH - 1].set(current_history_data)
-            history_array = new_history.reshape(-1)
-            next_carry = (history_array, history_array)
-        else:
-            next_carry = (jnp.zeros(0), jnp.zeros(0))
+        export(
+            model_fn,
+            input_shapes,  # type: ignore [arg-type]
+            tf_path,
+        )
 
-        return ksim.Action(action=action_j, carry=next_carry, aux_outputs=None)
+        return state
+
+    def reset_reward_carry(self, rng: PRNGKeyArray) -> xax.FrozenDict[str, Array]:
+        key, _ = jax.random.split(rng)
+        gait_freq = jax.random.uniform(
+            key, (1,), minval=self.config.gait_freq_lower, maxval=self.config.gait_freq_upper
+        )
+        phase_dt = 2 * jnp.pi * gait_freq * self.config.ctrl_dt
+        phase = jnp.array([0, jnp.pi])  # trotting gait
+        reward_carry = xax.FrozenDict(
+            {
+                "first_contact": jnp.zeros(2, dtype=bool),
+                "feet_air_time": jnp.zeros(2),
+                "last_contact": jnp.zeros(2, dtype=bool),
+                "swing_peak": jnp.zeros(2),
+                "phase_dt": phase_dt,
+                "phase": phase,
+            }
+        )
+
+        return reward_carry
+
+    def update_reward_carry(
+        self,
+        reward_carry: xax.FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, Array],
+        physics_state: ksim.PhysicsState,
+        commands: xax.FrozenDict[str, Array],
+    ) -> xax.FrozenDict[str, Array]:
+        # Phase:
+        phase_tp1 = reward_carry["phase"] + reward_carry["phase_dt"]
+        phase = jnp.fmod(phase_tp1 + jnp.pi, 2 * jnp.pi) - jnp.pi
+
+        # Contact dependency:
+        contact = observations["feet_contact_observation"]
+        contact_bool = contact.astype(bool)
+
+        # Current or the last contact to factor in randomness:
+        contact_filt = contact_bool | reward_carry["last_contact"]
+        first_contact = (reward_carry["feet_air_time"] > 0.0) * contact_filt
+        last_contact = contact_bool
+
+        # Feet air time:
+        feet_air_time = reward_carry["feet_air_time"] + self.config.ctrl_dt
+        feet_air_time *= ~contact_bool
+
+        # Swing peak:
+        position_feet = observations["feet_position_observation"]
+        position_feet_z = jnp.array([position_feet[2], position_feet[5]])
+        swing_peak = jnp.maximum(reward_carry["swing_peak"], position_feet_z)
+        swing_peak = swing_peak * ~contact_bool  # And here
+
+        # Last contact:
+        reward_carry = xax.FrozenDict(
+            {
+                "first_contact": first_contact,
+                "feet_air_time": feet_air_time,
+                "last_contact": last_contact,
+                "swing_peak": swing_peak,
+                "phase_dt": reward_carry["phase_dt"],  # constant across the rollout
+                "phase": phase,
+            }
+        )
 
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    # python -m ksim_kbot.standing.standing disable_multiprocessing=True
+    # python -m ksim_kbot.walking.joystick_walking disable_multiprocessing=True
     # To visualize the environment, use the following command:
-    # python -m ksim_kbot.standing.standing run_environment=True \
+    # python -m ksim_kbot.walking.joystick_walking run_environment=True \
     #  run_environment_num_seconds=1 \
     #  run_environment_save_path=videos/test.mp4
-    KbotStandingTask.launch(
-        KbotStandingTaskConfig(
+    KbotWalkingTask.launch(
+        KbotWalkingTaskConfig(
             num_envs=8192,
             batch_size=256,
             num_passes=10,
@@ -790,10 +833,17 @@ if __name__ == "__main__":
             learning_rate=1e-4,
             clip_param=0.3,
             max_grad_norm=0.5,
-            use_mit_actuators=True,
             log_full_trajectory_every_n_steps=5,
             save_every_n_steps=25,
             export_for_inference=True,
+            only_save_most_recent=False,
+            # Task parameters
+            use_gait_rewards=False,
             domain_randomize=True,
+            light_domain_randomize=False,
+            gait_freq_lower=1.25,
+            gait_freq_upper=1.5,
+            reward_clip_min=0.0,
+            reward_clip_max=1000.0,
         ),
     )

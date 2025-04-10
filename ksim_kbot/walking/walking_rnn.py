@@ -12,21 +12,7 @@ import ksim
 import xax
 from jaxtyping import Array, PRNGKeyArray
 
-from .walking import (
-    NUM_INPUTS,
-    NUM_JOINTS,
-    WalkingTask,
-    WalkingTaskConfig,
-)
-
-
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class AuxOutputs:
-    log_probs: Array
-    values: Array
-    actor_carry: Array
-    critic_carry: Array
+from ksim_kbot.walking.walking import NUM_INPUTS, NUM_JOINTS, WalkingTask, WalkingTaskConfig
 
 
 class RnnActor(eqx.Module):
@@ -312,27 +298,46 @@ class WalkingRnnTask(WalkingTask[Config], Generic[Config]):
     def get_ppo_variables(
         self,
         model: RnnModel,
-        trajectories: ksim.Trajectory,
-        carry: tuple[Array, Array],
+        trajectory: ksim.Trajectory,
+        model_carry: tuple[Array, Array],
         rng: PRNGKeyArray,
     ) -> tuple[ksim.PPOVariables, tuple[Array, Array]]:
-        actor_carry, critic_carry = carry
+        def scan_fn(
+            actor_critic_carry: tuple[Array, Array], transition: ksim.Trajectory
+        ) -> tuple[tuple[Array, Array], ksim.PPOVariables]:
+            actor_carry, critic_carry = actor_critic_carry
+            actor_dist, next_actor_carry = self.run_actor(
+                model=model.actor,
+                observations=transition.obs,
+                commands=transition.command,
+                carry=actor_carry,
+            )
+            log_probs = actor_dist.log_prob(transition.action)
+            assert isinstance(log_probs, Array)
+            value, next_critic_carry = self.run_critic(
+                model=model.critic,
+                observations=transition.obs,
+                commands=transition.command,
+                carry=critic_carry,
+            )
 
-        # Vectorize over the time dimensions.
-        action_dist_tj, actor_carry = self.run_actor(model.actor, trajectories.obs, trajectories.command, actor_carry)
-        log_probs_tj = action_dist_tj.log_prob(trajectories.action)
+            transition_ppo_variables = ksim.PPOVariables(
+                log_probs=log_probs,
+                values=value.squeeze(-1),
+            )
 
-        # Gets the value by calling the critic.
-        values_t1, critic_carry = self.run_critic(model.critic, trajectories.obs, trajectories.command, critic_carry)
+            initial_carry = self.get_initial_model_carry(rng)
+            next_carry = jax.tree.map(
+                lambda x, y: jnp.where(transition.done, x, y), initial_carry, (next_actor_carry, next_critic_carry)
+            )
 
-        ppo_variables = ksim.PPOVariables(
-            log_probs=log_probs_tj,
-            values=values_t1.squeeze(-1),
-        )
+            return next_carry, transition_ppo_variables
 
-        return ppo_variables, (actor_carry, critic_carry)
+        next_model_carry, ppo_variables = jax.lax.scan(scan_fn, model_carry, trajectory)
 
-    def get_initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
+        return ppo_variables, next_model_carry
+
+    def get_initial_model_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
         return (
             jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
             jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
@@ -341,14 +346,14 @@ class WalkingRnnTask(WalkingTask[Config], Generic[Config]):
     def sample_action(
         self,
         model: RnnModel,
-        carry: tuple[Array, Array],
+        model_carry: tuple[Array, Array],
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> ksim.Action:
-        actor_carry_in, critic_carry_in = carry
+        actor_carry_in, critic_carry_in = model_carry
 
         # Runs the actor model to get the action distribution.
         action_dist_j, actor_carry = self.run_actor(
@@ -385,5 +390,6 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
+            use_naive_reward=True,
         ),
     )
