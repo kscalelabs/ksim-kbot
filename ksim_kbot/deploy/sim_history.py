@@ -46,6 +46,7 @@ DEFAULT_POSITIONS = np.array(
 
 OBS_SIZE = 20 + 20 + 3 + 3 + 3 + 40 + 4  # pos_diff (20) + vel_obs (20) + imu (6) - adjust if needed
 CMD_SIZE = 2
+HIST_LEN = 5
 
 
 @dataclass
@@ -87,8 +88,8 @@ ACTUATOR_LIST: list[Actuator] = [
 
 
 async def get_observation(
-    kos: pykos.KOS, prev_action: np.ndarray, cmd: np.ndarray, phase: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
+    kos: pykos.KOS, prev_action: np.ndarray, cmd: np.ndarray, phase: np.ndarray, history: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     ids = [ac.actuator_id for ac in ACTUATOR_LIST]
     act_states, imu, raw_quat = await asyncio.gather(
         kos.actuator.get_actuators_state(ids), kos.imu.get_imu_values(), kos.imu.get_quaternion()
@@ -111,8 +112,17 @@ async def get_observation(
     phase = np.fmod(phase + np.pi, 2 * np.pi) - np.pi
     phase_vec = np.array([np.cos(phase), np.sin(phase)]).flatten()
 
-    obs = np.concatenate([pos_diff, vel_obs, imu_obs, cmd, prev_action, phase_vec])
-    return obs, phase
+    obs = np.concatenate([pos_diff, vel_obs, imu_obs, gvec, cmd, prev_action, phase_vec])
+    full_obs = np.concatenate([obs, history])
+    return obs, full_obs, phase
+
+
+def update_history(history: np.ndarray, obs: np.ndarray, obs_size: int, cmd_size: int, hist_len: int) -> np.ndarray:
+    step_size = obs_size + cmd_size
+    history = history.reshape(hist_len, step_size)
+    history = np.roll(history, shift=-1, axis=0)
+    history[-1] = obs
+    return history.flatten()
 
 
 async def send_actions(kos: pykos.KOS, position: np.ndarray, velocity: np.ndarray) -> None:
@@ -182,26 +192,30 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
     await configure_actuators(kos)
     await reset(kos)
 
+    history = np.zeros(HIST_LEN * (OBS_SIZE + CMD_SIZE))
     cmd = np.array([0.3, 0.0])
     phase = np.array([0, np.pi])
     prev_action = np.zeros(len(ACTUATOR_LIST) * 2)
-    obs, phase = await get_observation(kos, prev_action, cmd, phase)
+    obs, full_obs, phase = await get_observation(kos, prev_action, cmd, phase, history)
     if no_render:
         await kos.process_manager.start_kclip("deployment")
 
     # warm-up
-    model.infer(obs.reshape(1, -1))
+    model.infer(full_obs.reshape(1, -1))
 
     target_time = time.time() + DT
     end_time = time.time() + episode_length
     while time.time() < end_time:
-        action = np.array(model.infer(obs.reshape(1, -1))).reshape(-1)
+        action = np.array(model.infer(full_obs.reshape(1, -1))).reshape(-1)
+        history = update_history(history, obs, OBS_SIZE, CMD_SIZE, HIST_LEN)
         pos = action[: len(ACTUATOR_LIST)] + DEFAULT_POSITIONS
         vel = action[len(ACTUATOR_LIST) :]
-        (obs, phase), _ = await asyncio.gather(
-            get_observation(kos, prev_action, cmd, phase),
-            send_actions(kos, pos, vel),
-        )
+        obs, full_obs, phase = (
+            await asyncio.gather(
+                get_observation(kos, prev_action, cmd, phase, history),
+                send_actions(kos, pos, vel),
+            )
+        )[0]
         prev_action = action
         await asyncio.sleep(max(0, target_time - time.time()))
         target_time += DT
@@ -213,7 +227,7 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
 
 
 # Run with:
-# python -m ksim_kbot.deploy.sim --model_path ksim_kbot/deploy/assets/mlp_example
+# python -m ksim_kbot.deploy.sim_history --model_path ksim_kbot/deploy/assets/mlp_example_history
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_path", type=str, required=True)
