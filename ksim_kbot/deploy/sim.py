@@ -14,9 +14,8 @@ from typing import Callable
 import numpy as np
 import pykos
 import tensorflow as tf
+from askin import KeyboardController
 from scipy.spatial.transform import Rotation as R
-
-from ksim_kbot.deploy.keyboard_controller import KeyboardController
 
 logger = logging.getLogger(__name__)
 DT = 0.02  # time step (50Hz)
@@ -207,7 +206,7 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
     await reset(kos)
 
     command_state = CommandState()
-    keyboard_controller = KeyboardController(command_state.update_from_key)
+    keyboard_controller = KeyboardController(command_state.update_from_key, timeout=0.001)
     await keyboard_controller.start()
 
     phase = np.array([0, np.pi])
