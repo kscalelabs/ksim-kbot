@@ -299,17 +299,17 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
                 save_path = await kos.process_manager.stop_kclip("deployment")
                 logger.info("KClip saved to %s", save_path)
             except Exception as e:
-                logger.warning(f"Could not stop kclip: {e}")
+                logger.warning("Could not stop kclip: %s", e)
         if cleanup_fn:
-             cleanup_fn()
+            cleanup_fn()
         # Reraise to ensure clean exit
         raise
     finally:
         # Ensure keyboard controller is stopped on any exit path
         await keyboard_controller.stop()
         try:
-             await kos.sim.remove_marker(name="target")
-             logger.info("Target marker removed.")
+            await kos.sim.remove_marker(name="target")
+            logger.info("Target marker removed.")
         except Exception as e:
             logger.warning("Could not remove target marker: %s", e)
         # Ensure cleanup function is called if it exists

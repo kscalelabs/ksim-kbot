@@ -378,7 +378,7 @@ class KbotPseudoIKRNNTask(KbotPseudoIKTask[Config], Generic[Config]):
         if not self.config.export_for_inference:
             return state
 
-        model: KbotRNNModel = self.load_checkpoint(ckpt_path, part="model", model_template=KbotRNNModel)
+        model: KbotRNNModel = self.load_ckpt_with_template(ckpt_path, part="model", model_template=KbotRNNModel)
 
         model_fn = self.make_export_model(model, stochastic=False, batched=True)
 

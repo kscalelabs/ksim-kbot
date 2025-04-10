@@ -4,14 +4,14 @@ import argparse
 import asyncio
 import logging
 import time
-from ksim_kbot.deploy.keyboard_controller import KeyboardController
 from dataclasses import dataclass
 from enum import Enum
-from typing import Awaitable, Generator
 
 import numpy as np
 import pykos
 import tensorflow as tf
+
+from ksim_kbot.deploy.keyboard_controller import KeyboardController
 
 logger = logging.getLogger(__name__)
 

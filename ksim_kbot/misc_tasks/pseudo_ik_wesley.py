@@ -19,7 +19,7 @@ import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
-from ksim.utils.mujoco import remove_mujoco_joints_except, add_new_mujoco_body
+from ksim.utils.mujoco import add_new_mujoco_body, remove_mujoco_joints_except
 from mujoco import mjx
 from xax.nn.export import export
 
@@ -27,6 +27,7 @@ import ksim_kbot.common
 from ksim_kbot.standing.standing import MAX_TORQUE
 
 NUM_JOINTS = 5  # disabling all DoFs except for the right arm.
+
 
 @attrs.define(frozen=True, kw_only=True)
 class CartesianBodyTargetPenalty(ksim.Reward):
@@ -76,16 +77,16 @@ class CartesianBodyTargetVectorReward(ksim.Reward):
     epsilon: float = attrs.field(default=1e-6)
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        body_pos_TL = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
+        body_pos_tl = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
 
-        body_pos_right_shifted_TL = jnp.roll(body_pos_TL, shift=1, axis=0)
+        body_pos_right_shifted_tl = jnp.roll(body_pos_tl, shift=1, axis=0)
 
         # Zero out the first velocity
-        body_pos_right_shifted_TL = body_pos_right_shifted_TL.at[0].set(body_pos_TL[0])
+        body_pos_right_shifted_tl = body_pos_right_shifted_tl.at[0].set(body_pos_tl[0])
 
-        body_vel_TL = (body_pos_TL - body_pos_right_shifted_TL) / self.dt
+        body_vel_tl = (body_pos_tl - body_pos_right_shifted_tl) / self.dt
 
-        target_vector = trajectory.command[self.command_name][..., :3] - body_pos_TL
+        target_vector = trajectory.command[self.command_name][..., :3] - body_pos_tl
         normalized_target_vector = target_vector / (
             jnp.linalg.norm(target_vector, axis=-1, keepdims=True) + self.epsilon
         )
@@ -94,14 +95,14 @@ class CartesianBodyTargetVectorReward(ksim.Reward):
         distance_scalar = jnp.linalg.norm(target_vector, axis=-1)
         far_from_target = distance_scalar > self.distance_threshold
 
-        velocity_scalar = jnp.linalg.norm(body_vel_TL, axis=-1)
+        velocity_scalar = jnp.linalg.norm(body_vel_tl, axis=-1)
         high_velocity = velocity_scalar > 0.1
 
         if self.normalize_velocity:
-            normalized_body_vel = body_vel_TL / (jnp.linalg.norm(body_vel_TL, axis=-1, keepdims=True) + self.epsilon)
+            normalized_body_vel = body_vel_tl / (jnp.linalg.norm(body_vel_tl, axis=-1, keepdims=True) + self.epsilon)
             original_products = normalized_body_vel * normalized_target_vector
         else:
-            original_products = body_vel_TL * normalized_target_vector
+            original_products = body_vel_tl * normalized_target_vector
 
         # This will give maximum reward if near the target (and velocity is normalized)
         return jnp.where(far_from_target & high_velocity, jnp.sum(original_products, axis=-1), 1.1)
@@ -131,6 +132,7 @@ class CartesianBodyTargetVectorReward(ksim.Reward):
             epsilon=epsilon,
             distance_threshold=distance_threshold,
         )
+
 
 @attrs.define(frozen=True, kw_only=True)
 class ContinuousCartesianBodyTargetReward(ksim.Reward):
@@ -344,7 +346,7 @@ class KbotModel(eqx.Module):
     def __init__(self, key: PRNGKeyArray, *, hidden_size: int, depth: int) -> None:
         self.actor = KbotActor(
             key,
-            min_std=0.0, #0.001,
+            min_std=0.0,  # 0.001,
             max_std=1.0,
             var_scale=1.0,
             mean_scale=1.0,
@@ -702,7 +704,6 @@ class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
         carry: None,
         rng: PRNGKeyArray,
     ) -> tuple[ksim.PPOVariables, None]:
-
         # vectorize over the time dimensions
         def get_log_prob(transition: ksim.Trajectory) -> Array:
             action_dist_n = self._run_actor(model, transition.obs, transition.command)
