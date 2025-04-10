@@ -15,8 +15,7 @@ from typing import Callable
 import numpy as np
 import pykos
 import tensorflow as tf
-
-from ksim_kbot.deploy.keyboard_controller import KeyboardController
+from askin import KeyboardController
 
 logger = logging.getLogger(__name__)
 
@@ -220,7 +219,7 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
 
     target_state = TargetState()
     # Instantiate the KeyboardController
-    keyboard_controller = KeyboardController(target_state.update_from_key)
+    keyboard_controller = KeyboardController(target_state.update_from_key, timeout=0.001)
 
     # Start keyboard input task using the controller
     await keyboard_controller.start()
