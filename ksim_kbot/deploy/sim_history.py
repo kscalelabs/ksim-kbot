@@ -18,7 +18,7 @@ from scipy.spatial.transform import Rotation as R
 
 logger = logging.getLogger(__name__)
 DT = 0.02  # time step (50Hz)
-
+GAIT_DT = 1.25
 DEFAULT_POSITIONS = np.array(
     [
         0,
@@ -108,7 +108,7 @@ async def get_observation(
     # During training gravity vector is taken from the first torso frame
     gvec = np.array([gvec[1], -gvec[2], -gvec[0]])
 
-    phase += 2 * np.pi * 1.2550827 * DT
+    phase += 2 * np.pi * GAIT_DT * DT
     phase = np.fmod(phase + np.pi, 2 * np.pi) - np.pi
     phase_vec = np.array([np.cos(phase), np.sin(phase)]).flatten()
 
@@ -192,13 +192,9 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
     await configure_actuators(kos)
     await reset(kos)
 
-    # command_state = CommandState()
-    # keyboard_controller = KeyboardController(command_state.update_from_key)
-    # await keyboard_controller.start()
-
     history = np.zeros(HIST_LEN * (OBS_SIZE + CMD_SIZE))
-    cmd = np.array([0.3, 0.0])
-    # cmd = command_state.get_command()
+    cmd = np.array([0.0, 0.0])
+
     phase = np.array([0, np.pi])
     prev_action = np.zeros(len(ACTUATOR_LIST) * 2)
     obs, full_obs, phase = await get_observation(kos, prev_action, cmd, phase, history)
