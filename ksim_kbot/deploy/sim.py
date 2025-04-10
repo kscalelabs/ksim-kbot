@@ -88,8 +88,8 @@ ACTUATOR_LIST: list[Actuator] = [
 
 
 async def get_observation(
-    kos: pykos.KOS, prev_action: np.ndarray, cmd: np.ndarray, phase: float, history: np.ndarray
-) -> tuple[np.ndarray, np.ndarray, float]:
+    kos: pykos.KOS, prev_action: np.ndarray, cmd: np.ndarray, phase: np.ndarray, history: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     ids = [ac.actuator_id for ac in ACTUATOR_LIST]
     act_states, imu, raw_quat = await asyncio.gather(
         kos.actuator.get_actuators_state(ids), kos.imu.get_imu_values(), kos.imu.get_quaternion()
@@ -132,7 +132,7 @@ async def send_actions(kos: pykos.KOS, position: np.ndarray, velocity: np.ndarra
         {"actuator_id": ac.actuator_id, "position": position[ac.nn_id], "velocity": velocity[ac.nn_id]}
         for ac in ACTUATOR_LIST
     ]
-    await kos.actuator.command_actuators(commands)
+    await kos.actuator.command_actuators(commands)  # type: ignore[arg-type]
 
 
 async def configure_actuators(kos: pykos.KOS) -> None:

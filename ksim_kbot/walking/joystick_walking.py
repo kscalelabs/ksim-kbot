@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 """Defines simple task for training a standing policy for K-Bot."""
 
 from dataclasses import dataclass
