@@ -453,7 +453,7 @@ class KbotPseudoIKTaskConfig(ksim.PPOConfig):
     """Config for the KBot pseudo-IK task."""
 
     robot_urdf_path: str = xax.field(
-        value="ksim_kbot/kscale-assets/kbot-v2-lw-feet/",
+        value="ksim_kbot/kscale-assets/kbot-v2-feet/",
         help="The path to the assets directory for the robot.",
     )
     # Optimizer parameters.
@@ -695,16 +695,16 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 tracked_body_name="ik_target",
                 scale=0.1,
             ),
-            # CartesianBodyTargetVectorReward.create(
-            #     model=physics_model,
-            #     command_name="target_position_command",
-            #     tracked_body_name="ik_target",
-            #     base_body_name="floating_base_link",
-            #     scale=3.0,
-            #     normalize_velocity=True,
-            #     distance_threshold=0.1,
-            #     dt=self.config.dt,
-            # ),
+            CartesianBodyTargetVectorReward.create(
+                model=physics_model,
+                command_name="target_position_command",
+                tracked_body_name="ik_target",
+                base_body_name="floating_base_link",
+                scale=3.0,
+                normalize_velocity=True,
+                distance_threshold=0.1,
+                dt=self.config.dt,
+            ),
             ksim.ObservationMeanPenalty(observation_name="contact_observation_arms", scale=-0.1),
             ksim.ActuatorForcePenalty(scale=-0.000001, norm="l1"),
             ksim.ActionSmoothnessPenalty(scale=-0.02, norm="l2"),
