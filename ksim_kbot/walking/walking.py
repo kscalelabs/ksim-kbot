@@ -1,4 +1,4 @@
-"""Defines simple task for training a walking policy for the default humanoid."""
+"""Defines simple task for training a walking policy for the K-Bot."""
 
 import asyncio
 import math

@@ -1,5 +1,5 @@
 # mypy: disable-error-code="override"
-"""Defines simple task for training a walking policy for the K-Bot using an RNN actor."""
+"""Defines simple task for training a standing policy for K-Bot."""
 
 from dataclasses import dataclass
 from typing import Generic, TypeVar
@@ -12,10 +12,24 @@ import ksim
 import xax
 from jaxtyping import Array, PRNGKeyArray
 
-from ksim_kbot.walking.walking import NUM_INPUTS, NUM_JOINTS, WalkingTask, WalkingTaskConfig
+from ksim_kbot.standing.standing import NUM_INPUTS, KbotStandingTask, KbotStandingTaskConfig
+
+OBS_SIZE = 20 * 2 + 2 + 3 + 3 + 3 + 40  # = position + velocity + imu_acc + imu_gyro + projected_gravity + last_action
+CMD_SIZE = 3
+NUM_JOINTS = 20 * 2  # position + velocity
+ADDITIONAL_CRITIC_INPUT_SIZE = 2 + 3 + 4 + 3 + 3 + 20
 
 
-class RnnActor(eqx.Module):
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class AuxOutputs:
+    log_probs: Array
+    values: Array
+    actor_carry: Array
+    critic_carry: Array
+
+
+class KbotRNNActor(eqx.Module):
     """RNN-based actor for the walking task."""
 
     input_proj: eqx.nn.Linear
@@ -92,7 +106,7 @@ class RnnActor(eqx.Module):
         return dist_n, jnp.stack(out_carries, axis=0)
 
 
-class RnnCritic(eqx.Module):
+class KbotRNNCritic(eqx.Module):
     """RNN-based critic for the walking task."""
 
     input_proj: eqx.nn.Linear
@@ -148,9 +162,9 @@ class RnnCritic(eqx.Module):
         return out_n, jnp.stack(out_carries, axis=0)
 
 
-class RnnModel(eqx.Module):
-    actor: RnnActor
-    critic: RnnCritic
+class KbotRNNModel(eqx.Module):
+    actor: KbotRNNActor
+    critic: KbotRNNCritic
 
     def __init__(
         self,
@@ -163,7 +177,7 @@ class RnnModel(eqx.Module):
         hidden_size: int,
         depth: int,
     ) -> None:
-        self.actor = RnnActor(
+        self.actor = KbotRNNActor(
             key,
             num_inputs=num_inputs,
             num_outputs=num_joints,
@@ -173,25 +187,41 @@ class RnnModel(eqx.Module):
             hidden_size=hidden_size,
             depth=depth,
         )
-        self.critic = RnnCritic(
+        self.critic = KbotRNNCritic(
             key,
-            num_inputs=num_inputs,
+            num_inputs=num_inputs + ADDITIONAL_CRITIC_INPUT_SIZE,
             hidden_size=hidden_size,
             depth=depth,
         )
 
 
 @dataclass
-class WalkingRnnTaskConfig(WalkingTaskConfig):
-    pass
+class KbotStandingRNNTaskConfig(KbotStandingTaskConfig):
+    """Config for the KBot standing task."""
+
+    # Model parameters.
+    hidden_size: int = xax.field(
+        value=128,
+        help="The hidden size for the MLPs.",
+    )
+    depth: int = xax.field(
+        value=5,
+        help="The depth for the MLPs.",
+    )
+    num_mixtures: int = xax.field(
+        value=5,
+        help="The number of mixtures for the actor.",
+    )
 
 
-Config = TypeVar("Config", bound=WalkingRnnTaskConfig)
+Config = TypeVar("Config", bound=KbotStandingRNNTaskConfig)
 
 
-class WalkingRnnTask(WalkingTask[Config], Generic[Config]):
-    def get_model(self, key: PRNGKeyArray) -> RnnModel:
-        return RnnModel(
+class KbotStandingRNNTask(KbotStandingTask[Config], Generic[Config]):
+    config: Config
+
+    def get_model(self, key: PRNGKeyArray) -> KbotRNNModel:
+        return KbotRNNModel(
             key,
             num_inputs=NUM_INPUTS,
             num_joints=NUM_JOINTS,
@@ -203,45 +233,34 @@ class WalkingRnnTask(WalkingTask[Config], Generic[Config]):
 
     def run_actor(
         self,
-        model: RnnActor,
+        model: KbotRNNActor,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         carry: Array,
-    ) -> tuple[distrax.Distribution, Array]:
-        timestep_1 = observations["timestep_observation"]
-        dh_joint_pos_j = observations["joint_position_observation"]
-        dh_joint_vel_j = observations["joint_velocity_observation"]
-        com_inertia_n = observations["center_of_mass_inertia_observation"]
-        com_vel_n = observations["center_of_mass_velocity_observation"]
-        imu_acc_3 = observations["sensor_observation_imu_acc"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
-        act_frc_obs_n = observations["actuator_force_observation"]
-        base_pos_3 = observations["base_position_observation"]
-        base_quat_4 = observations["base_orientation_observation"]
-        lin_vel_obs_3 = observations["base_linear_velocity_observation"]
-        ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        lin_vel_cmd_x_1 = commands["linear_velocity_command_x"]
-        lin_vel_cmd_y_1 = commands["linear_velocity_command_y"]
-        ang_vel_cmd_z_1 = commands["angular_velocity_command_z"]
+    ) -> distrax.Normal:
+        timestep_phase_2 = observations["timestep_phase_observation"]
+        joint_pos_n = observations["joint_position_observation"]
+        joint_vel_n = observations["joint_velocity_observation"] / 10.0
+        imu_acc_3 = observations["sensor_observation_imu_acc"] / 50.0
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"] / 3.0
+        projected_gravity_3 = observations["projected_gravity_observation"]
+        lin_vel_cmd_x = commands["linear_velocity_command_x"]
+        lin_vel_cmd_y = commands["linear_velocity_command_y"]
+        ang_vel_cmd_z = commands["angular_velocity_command_z"]
+        last_action_n = observations["last_action_observation"]
 
         obs_n = jnp.concatenate(
             [
-                jnp.cos(timestep_1),  # 1
-                jnp.sin(timestep_1),  # 1
-                dh_joint_pos_j,  # NUM_JOINTS
-                dh_joint_vel_j / 10.0,  # NUM_JOINTS
-                com_inertia_n,  # 160
-                com_vel_n,  # 96
-                imu_acc_3 / 50.0,  # 3
-                imu_gyro_3 / 3.0,  # 3
-                act_frc_obs_n / 100.0,  # NUM_JOINTS
-                base_pos_3,  # 3
-                base_quat_4,  # 4
-                lin_vel_obs_3,  # 3
-                ang_vel_obs_3,  # 3
-                lin_vel_cmd_x_1,  # 1
-                lin_vel_cmd_y_1,  # 1
-                ang_vel_cmd_z_1,  # 1
+                timestep_phase_2,
+                joint_pos_n,
+                joint_vel_n,
+                imu_acc_3,
+                imu_gyro_3,
+                projected_gravity_3,
+                lin_vel_cmd_x,
+                lin_vel_cmd_y,
+                ang_vel_cmd_z,
+                last_action_n,
             ],
             axis=-1,
         )
@@ -250,94 +269,76 @@ class WalkingRnnTask(WalkingTask[Config], Generic[Config]):
 
     def run_critic(
         self,
-        model: RnnCritic,
+        model: KbotRNNCritic,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         carry: Array,
     ) -> tuple[Array, Array]:
-        timestep_1 = observations["timestep_observation"]
-        dh_joint_pos_j = observations["joint_position_observation"]
-        dh_joint_vel_j = observations["joint_velocity_observation"]
-        com_inertia_n = observations["center_of_mass_inertia_observation"]
-        com_vel_n = observations["center_of_mass_velocity_observation"]
-        imu_acc_3 = observations["sensor_observation_imu_acc"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
-        act_frc_obs_n = observations["actuator_force_observation"]
-        base_pos_3 = observations["base_position_observation"]
-        base_quat_4 = observations["base_orientation_observation"]
-        lin_vel_obs_3 = observations["base_linear_velocity_observation"]
-        ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        lin_vel_cmd_x_1 = commands["linear_velocity_command_x"]
-        lin_vel_cmd_y_1 = commands["linear_velocity_command_y"]
-        ang_vel_cmd_z_1 = commands["angular_velocity_command_z"]
+        timestep_phase_2 = observations["timestep_phase_observation"]
+        joint_pos_n = observations["joint_position_observation"]
+        joint_vel_n = observations["joint_velocity_observation"] / 10.0
+        imu_acc_3 = observations["sensor_observation_imu_acc"] / 50.0
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"] / 3.0
+        projected_gravity_3 = observations["projected_gravity_observation"]
+        lin_vel_cmd_x = commands["linear_velocity_command_x"]
+        lin_vel_cmd_y = commands["linear_velocity_command_y"]
+        ang_vel_cmd_z = commands["angular_velocity_command_z"]
+        last_action_n = observations["last_action_observation"]
+
+        feet_contact_2 = observations["feet_contact_observation"]
+        base_position_3 = observations["base_position_observation"]
+        base_orientation_4 = observations["base_orientation_observation"]
+        base_linear_velocity_3 = observations["base_linear_velocity_observation"]
+        base_angular_velocity_3 = observations["base_angular_velocity_observation"]
+        actuator_force_n = observations["actuator_force_observation"] / 100.0
 
         obs_n = jnp.concatenate(
             [
-                jnp.cos(timestep_1),  # 1
-                jnp.sin(timestep_1),  # 1
-                dh_joint_pos_j,  # NUM_JOINTS
-                dh_joint_vel_j / 10.0,  # NUM_JOINTS
-                com_inertia_n,  # 160
-                com_vel_n,  # 96
-                imu_acc_3 / 50.0,  # 3
-                imu_gyro_3 / 3.0,  # 3
-                act_frc_obs_n / 100.0,  # NUM_JOINTS
-                base_pos_3,  # 3
-                base_quat_4,  # 4
-                lin_vel_obs_3,  # 3
-                ang_vel_obs_3,  # 3
-                lin_vel_cmd_x_1,  # 1
-                lin_vel_cmd_y_1,  # 1
-                ang_vel_cmd_z_1,  # 1
+                timestep_phase_2,
+                joint_pos_n,
+                joint_vel_n,
+                imu_acc_3,
+                imu_gyro_3,
+                projected_gravity_3,
+                lin_vel_cmd_x,
+                lin_vel_cmd_y,
+                ang_vel_cmd_z,
+                last_action_n,
+                feet_contact_2,
+                actuator_force_n,
+                base_position_3,
+                base_orientation_4,
+                base_linear_velocity_3,
+                base_angular_velocity_3,
             ],
             axis=-1,
         )
-
         return model.forward(obs_n, carry)
 
     def get_ppo_variables(
         self,
-        model: RnnModel,
-        trajectory: ksim.Trajectory,
-        model_carry: tuple[Array, Array],
+        model: KbotRNNModel,
+        trajectories: ksim.Trajectory,
+        carry: tuple[Array, Array],
         rng: PRNGKeyArray,
     ) -> tuple[ksim.PPOVariables, tuple[Array, Array]]:
-        def scan_fn(
-            actor_critic_carry: tuple[Array, Array], transition: ksim.Trajectory
-        ) -> tuple[tuple[Array, Array], ksim.PPOVariables]:
-            actor_carry, critic_carry = actor_critic_carry
-            actor_dist, next_actor_carry = self.run_actor(
-                model=model.actor,
-                observations=transition.obs,
-                commands=transition.command,
-                carry=actor_carry,
-            )
-            log_probs = actor_dist.log_prob(transition.action)
-            assert isinstance(log_probs, Array)
-            value, next_critic_carry = self.run_critic(
-                model=model.critic,
-                observations=transition.obs,
-                commands=transition.command,
-                carry=critic_carry,
-            )
+        actor_carry, critic_carry = carry
 
-            transition_ppo_variables = ksim.PPOVariables(
-                log_probs=log_probs,
-                values=value.squeeze(-1),
-            )
+        # Vectorize over the time dimensions.
+        action_dist_tj, actor_carry = self.run_actor(model.actor, trajectories.obs, trajectories.command, actor_carry)
+        log_probs_tj = action_dist_tj.log_prob(trajectories.action)
 
-            initial_carry = self.get_initial_model_carry(rng)
-            next_carry = jax.tree.map(
-                lambda x, y: jnp.where(transition.done, x, y), initial_carry, (next_actor_carry, next_critic_carry)
-            )
+        # Gets the value by calling the critic.
+        values_t1, critic_carry = self.run_critic(model.critic, trajectories.obs, trajectories.command, critic_carry)
 
-            return next_carry, transition_ppo_variables
+        ppo_variables = ksim.PPOVariables(
+            log_probs=log_probs_tj,
+            values=values_t1.squeeze(-1),
+        )
 
-        next_model_carry, ppo_variables = jax.lax.scan(scan_fn, model_carry, trajectory)
+        return ppo_variables, (actor_carry, critic_carry)
 
-        return ppo_variables, next_model_carry
-
-    def get_initial_model_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
+    def get_initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
         return (
             jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
             jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
@@ -345,15 +346,15 @@ class WalkingRnnTask(WalkingTask[Config], Generic[Config]):
 
     def sample_action(
         self,
-        model: RnnModel,
-        model_carry: tuple[Array, Array],
+        model: KbotRNNModel,
+        carry: tuple[Array, Array],
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> ksim.Action:
-        actor_carry_in, critic_carry_in = model_carry
+        actor_carry_in, critic_carry_in = carry
 
         # Runs the actor model to get the action distribution.
         action_dist_j, actor_carry = self.run_actor(
@@ -374,22 +375,35 @@ class WalkingRnnTask(WalkingTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m ksim_kbot.walking.walking_rnn
+    # python -m ksim_kbot.standing.standing_rnn disable_multiprocessing=True
     # To visualize the environment, use the following command:
-    #   python -m ksim_kbot.walking.walking_rnn run_environment=True
-    WalkingRnnTask.launch(
-        WalkingRnnTaskConfig(
-            # Training parameters.
-            num_envs=2048,
+    # python -m ksim_kbot.standing.standing_rnn run_environment=True \
+    #  run_environment_num_seconds=1 \
+    #  run_environment_save_path=videos/test.mp4
+    KbotStandingRNNTask.launch(
+        KbotStandingRNNTaskConfig(
+            num_envs=8192,
             batch_size=256,
-            num_passes=4,
+            num_passes=10,
             epochs_per_log_step=1,
-            rollout_length_seconds=10.0,
             # Simulation parameters.
-            dt=0.005,
+            dt=0.002,
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
-            use_naive_reward=True,
+            rollout_length_seconds=1.25,
+            # PPO parameters
+            action_scale=0.5,
+            gamma=0.97,
+            lam=0.95,
+            entropy_coef=0.005,
+            learning_rate=1e-4,
+            clip_param=0.3,
+            max_grad_norm=0.5,
+            use_mit_actuators=True,
+            log_full_trajectory_every_n_steps=5,
+            save_every_n_steps=25,
+            export_for_inference=True,
+            domain_randomize=True,
         ),
     )

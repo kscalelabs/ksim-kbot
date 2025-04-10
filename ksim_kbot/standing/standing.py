@@ -508,7 +508,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="upvector_origin", noise=0.0),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="orientation_origin", noise=0.0),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="gyro_origin", noise=0.0),
-            ksim.FeetContactObservation.create(
+            common.FeetContactObservation.create(
                 physics_model=physics_model,
                 foot_left_geom_names="KB_D_501L_L_LEG_FOOT_collision_box",
                 foot_right_geom_names="KB_D_501R_R_LEG_FOOT_collision_box",
@@ -533,6 +533,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
+            rewards.XYPositionPenalty(target_x=0.0, target_y=0.0, scale=-0.1),
+            ksim.ActionSmoothnessPenalty(scale=-0.001),
             rewards.JointDeviationPenalty(
                 scale=-0.02,
                 joint_targets=(
@@ -561,14 +563,35 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
                     0.441,
                     -0.195,
                 ),
+                joint_weights=(
+                    # right arm
+                    0.1,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    # left arm
+                    0.1,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    # right leg
+                    0.01,  # pitch
+                    1.0,
+                    1.0,
+                    0.01,  # knee
+                    1.0,
+                    # left leg
+                    0.01,  # pitch
+                    1.0,
+                    1.0,
+                    0.01,  # knee
+                    1.0,
+                ),
             ),
-            ksim.BaseHeightRangeReward(z_lower=0.6, z_upper=1.4, dropoff=10.0, scale=0.01),
+            rewards.FeetSlipPenalty(scale=-0.05),
             ksim.StayAliveReward(scale=1.0),
-            ksim.ActuatorForcePenalty(scale=-0.005),
-            ksim.LinearVelocityTrackingReward(index="x", command_name="linear_velocity_command_x", scale=0.1),  # type: ignore[attr-defined]
-            ksim.LinearVelocityTrackingReward(index="y", command_name="linear_velocity_command_y", scale=0.1),  # type: ignore[attr-defined]
-            ksim.AngularVelocityTrackingReward(index="z", command_name="angular_velocity_command_z", scale=0.1),  # type: ignore[attr-defined]
-            rewards.FeetSlipPenalty(scale=-0.25),
             # common.TerminationPenalty(scale=-5.0),
         ]
 
@@ -636,7 +659,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         lin_vel_cmd_y = commands["linear_velocity_command_y"]
         ang_vel_cmd_z = commands["angular_velocity_command_z"]
         last_action_n = observations["last_action_observation"]
-
+        # critic observations
         feet_contact_2 = observations["feet_contact_observation"]
         base_position_3 = observations["base_position_observation"]
         base_orientation_4 = observations["base_orientation_observation"]
@@ -742,7 +765,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    # python -m ksim_kbot.standing.standing
+    # python -m ksim_kbot.standing.standing disable_multiprocessing=True
     # To visualize the environment, use the following command:
     # python -m ksim_kbot.standing.standing run_environment=True \
     #  run_environment_num_seconds=1 \
@@ -750,7 +773,7 @@ if __name__ == "__main__":
     KbotStandingTask.launch(
         KbotStandingTaskConfig(
             num_envs=8192,
-            batch_size=512,
+            batch_size=256,
             num_passes=10,
             epochs_per_log_step=1,
             # Simulation parameters.
