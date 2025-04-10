@@ -75,7 +75,7 @@ ACTIVE_ACTUATOR_LIST = [
 
 class TargetState:
     def __init__(self) -> None:
-        self.xyz_target = np.array([0.0, 0.0, 0.0])
+        self.xyz_target = np.array([0.3, -0.1, 0.0])
         self.step_size = 0.01
 
     async def update_from_key(self, key: str) -> None:
@@ -157,11 +157,11 @@ async def get_observation(kos: pykos.KOS, prev_action: np.ndarray, target_state:
     )
 
     xyz_target = target_state.get_target()
-    quat_target = np.array([0.0, 0.0, 0.0, 0.0])
+    # quat_target = np.array([0.0, 0.0, 0.0, 0.0])
 
     logger.debug("xyz_target %s", xyz_target)
 
-    observation = np.concatenate([pos_obs, vel_obs, xyz_target, quat_target, prev_action], axis=-1)
+    observation = np.concatenate([pos_obs, vel_obs, xyz_target, prev_action], axis=-1)
     return observation
 
 
