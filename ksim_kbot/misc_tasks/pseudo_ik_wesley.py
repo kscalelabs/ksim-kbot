@@ -1,12 +1,12 @@
 # mypy: ignore-errors
-"""Pseudo-Inverse Kinematics task for K-Bot."""
+"""Pseudo-Inverse Kinematics task for the default humanoid."""
 
 import asyncio
 import os
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Collection, Generic, Self, TypeVar
+from typing import Callable, Generic, Self, TypeVar
 
 import attrs
 import distrax
@@ -20,8 +20,6 @@ import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from ksim.utils.mujoco import add_new_mujoco_body, remove_mujoco_joints_except
-from ksim.utils.types import norm_validator
-from ksim.vis import Marker
 from mujoco import mjx
 from xax.nn.export import export
 
@@ -29,148 +27,21 @@ import ksim_kbot.common
 from ksim_kbot.standing.standing import MAX_TORQUE
 
 NUM_JOINTS = 5  # disabling all DoFs except for the right arm.
-NUM_OUTPUTS = NUM_JOINTS * 2
-NUM_INPUTS = NUM_JOINTS + NUM_JOINTS + 3 + 4 + NUM_OUTPUTS
-
-
-@attrs.define(kw_only=True)
-class BodyOrientationMarker(Marker):
-    command_name: str = attrs.field()
-
-    def __attrs_post_init__(self) -> None:
-        if self.target_name is None or self.target_type != "body":
-            raise ValueError("Base body name must be provided. Make sure to create with `get`.")
-
-    def update(self, trajectory: ksim.Trajectory) -> None:
-        command = trajectory.command[self.command_name]
-        # Check if command is zeros (null quaternion)
-        is_null = jnp.all(jnp.isclose(command, 0.0))
-
-        # Only update orientation if command is not null
-        if not is_null:
-            self.geom = mujoco.mjtGeom.mjGEOM_ARROW
-            self.orientation = command
-        else:
-            self.geom = mujoco.mjtGeom.mjGEOM_SPHERE
-
-    @classmethod
-    def get(
-        cls,
-        command_name: str,
-        base_body_name: str,
-        size: float,
-        magnitude: float,
-        rgba: tuple[float, float, float, float],
-    ) -> Self:
-        return cls(
-            command_name=command_name,
-            target_name=base_body_name,
-            target_type="body",
-            geom=mujoco.mjtGeom.mjGEOM_ARROW,
-            scale=(size, size, magnitude),
-            rgba=rgba,
-        )
-
-
-@attrs.define(frozen=True)
-class BodyOrientationCommand(ksim.Command):
-    base_body_name: str = attrs.field()
-    base_id: int = attrs.field()
-    switch_prob: float = attrs.field()
-    null_prob: float = attrs.field()  # Probability of sampling null quaternion
-    vis_magnitude: float = attrs.field()
-    vis_size: float = attrs.field()
-    vis_color: tuple[float, float, float, float] = attrs.field()
-
-    def initial_command(
-        self,
-        physics_data: ksim.PhysicsData,
-        curriculum_level: Array,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        rng_a, rng_b = jax.random.split(rng)
-        is_null = jax.random.bernoulli(rng_a, self.null_prob)
-        quat = jax.random.normal(rng_b, (4,))
-        random_quat = quat / jnp.linalg.norm(quat)
-        return jnp.where(is_null, jnp.zeros(4), random_quat)
-
-    def __call__(
-        self,
-        prev_command: Array,
-        physics_data: ksim.PhysicsData,
-        curriculum_level: Array,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        rng_a, rng_b = jax.random.split(rng)
-        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
-        return jnp.where(switch_mask, new_commands, prev_command)
-
-    def get_markers(self) -> Collection[Marker]:
-        return [
-            BodyOrientationMarker.get(
-                self.command_name, self.base_body_name, self.vis_size, self.vis_magnitude, self.vis_color
-            )
-        ]
-
-    def get_name(self) -> str:
-        return f"{self.base_body_name}_{super().get_name()}"
-
-    @classmethod
-    def create(
-        cls,
-        model: ksim.PhysicsModel,
-        base_body_name: str,
-        switch_prob: float = 0.1,
-        null_prob: float = 0.1,
-        vis_magnitude: float = 0.5,
-        vis_size: float = 0.05,
-        vis_color: tuple[float, float, float, float] = (0.0, 0.0, 1.0, 0.8),
-    ) -> Self:
-        base_id = ksim.get_body_data_idx_from_name(model, base_body_name)
-        return cls(
-            base_body_name=base_body_name,
-            base_id=base_id,
-            switch_prob=switch_prob,
-            null_prob=null_prob,
-            vis_magnitude=vis_magnitude,
-            vis_size=vis_size,
-            vis_color=vis_color,
-        )
 
 
 @attrs.define(frozen=True, kw_only=True)
-class BodyOrientationTrackingReward(ksim.Reward):
-    """Rewards the closeness of the body orientation to the target quaternion."""
+class CartesianBodyTargetPenalty(ksim.Reward):
+    """Penalizes larger distances between the body and the target position."""
 
     tracked_body_idx: int = attrs.field()
+    base_body_idx: int = attrs.field()
     command_name: str = attrs.field()
-    norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
-    eps: float = attrs.field(default=1e-6)
+    norm: xax.NormType = attrs.field()
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        body_quat = trajectory.xquat[..., self.tracked_body_idx, :]
-        target_quat = trajectory.command[self.command_name]
-
-        # Ensure unit quaternions (safe for numerical drift).
-        body_quat = body_quat / jnp.linalg.norm(body_quat, axis=-1, keepdims=True).clip(min=self.eps)
-        target_quat = target_quat / jnp.linalg.norm(target_quat, axis=-1, keepdims=True).clip(min=self.eps)
-
-        # Compute absolute dot product to handle antipodal symmetry.
-        dot = jnp.sum(body_quat * target_quat, axis=-1)
-        dot = jnp.clip(jnp.abs(dot), self.eps, 1.0 - self.eps)
-
-        # Quaternion angular distance (geodesic distance on S^3).
-        angle_error = 2.0 * jnp.arccos(dot)
-
-        # Previous angle error.
-        prev_error = jnp.concatenate([angle_error[..., :1], angle_error[..., :-1]], axis=-1)
-        error_diff = angle_error - prev_error
-
-        # Negative delta error as reward: improving alignment yields positive reward.
-        reward = -error_diff
-
-        return reward
+        body_pos = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
+        target_pos = trajectory.command[self.command_name][..., :3]
+        return xax.get_norm(body_pos - target_pos, self.norm).mean(axis=-1)
 
     @classmethod
     def create(
@@ -178,15 +49,18 @@ class BodyOrientationTrackingReward(ksim.Reward):
         model: ksim.PhysicsModel,
         command_name: str,
         tracked_body_name: str,
-        norm: xax.NormType = "l1",
+        base_body_name: str,
+        norm: xax.NormType = "l2",
         scale: float = 1.0,
     ) -> Self:
         body_idx = ksim.get_body_data_idx_from_name(model, tracked_body_name)
+        base_idx = ksim.get_body_data_idx_from_name(model, base_body_name)
         return cls(
             tracked_body_idx=body_idx,
+            base_body_idx=base_idx,
             norm=norm,
-            command_name=command_name,
             scale=scale,
+            command_name=command_name,
         )
 
 
@@ -261,7 +135,68 @@ class CartesianBodyTargetVectorReward(ksim.Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class BodyPositionObservation(ksim.Observation):
+class ContinuousCartesianBodyTargetReward(ksim.Reward):
+    """Rewards the closeness of the body to the target position more for the longer it has been doing so."""
+
+    tracked_body_idx: int = attrs.field()
+    base_body_idx: int = attrs.field()
+    command_name: str = attrs.field()
+    norm: xax.NormType = attrs.field()
+    sensitivity: float = attrs.field()
+    threshold: float = attrs.field()
+    time_bonus_scale: float = attrs.field()
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        body_pos = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
+        target_pos = trajectory.command[self.command_name][..., :3]
+
+        error = xax.get_norm(body_pos - target_pos, self.norm)
+        base_reward = jnp.exp(-error * self.sensitivity)
+        under_threshold = error < self.threshold
+
+        def count_scan_fn(carry: Array, x: Array) -> tuple[Array, Array]:
+            x = x.astype(jnp.int32)
+            # Reset counter to 0 if not under threshold, otherwise increment
+            count = jnp.where(x, carry + 1, 0)
+            return count, count
+
+        _, consecutive_steps = jax.lax.scan(
+            count_scan_fn, init=jnp.zeros_like(under_threshold[0], dtype=jnp.int32), xs=under_threshold
+        )
+
+        # time_bonus = jnp.exp(consecutive_steps * self.time_sensitivity) * self.time_bonus_scale
+        time_bonus = 1 + consecutive_steps * self.time_bonus_scale
+        return (base_reward * time_bonus).mean(axis=-1)
+
+    @classmethod
+    def create(
+        cls,
+        model: ksim.PhysicsModel,
+        command_name: str,
+        tracked_body_name: str,
+        base_body_name: str,
+        norm: xax.NormType = "l2",
+        scale: float = 1.0,
+        sensitivity: float = 1.0,
+        threshold: float = 0.25,
+        time_bonus_scale: float = 0.1,
+    ) -> Self:
+        body_idx = ksim.get_body_data_idx_from_name(model, tracked_body_name)
+        base_idx = ksim.get_body_data_idx_from_name(model, base_body_name)
+        return cls(
+            tracked_body_idx=body_idx,
+            base_body_idx=base_idx,
+            norm=norm,
+            scale=scale,
+            sensitivity=sensitivity,
+            command_name=command_name,
+            threshold=threshold,
+            time_bonus_scale=time_bonus_scale,
+        )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class CartesianBodyPositionObservation(ksim.Observation):
     body_idx: int = attrs.field()
     body_name: str = attrs.field()
 
@@ -284,34 +219,11 @@ class BodyPositionObservation(ksim.Observation):
         return state.physics_state.data.xpos[self.body_idx]
 
     def get_name(self) -> str:
-        return f"{self.body_name}_{super().get_name()}"
+        return f"{super().get_name()}_{self.body_name}"
 
 
-@attrs.define(frozen=True, kw_only=True)
-class BodyOrientationObservation(ksim.Observation):
-    body_idx: int = attrs.field()
-    body_name: str = attrs.field()
-
-    @classmethod
-    def create(
-        cls,
-        *,
-        physics_model: ksim.PhysicsModel,
-        body_name: str,
-        noise: float = 0.0,
-    ) -> Self:
-        body_idx = ksim.get_body_data_idx_from_name(physics_model, body_name)
-        return cls(
-            body_idx=body_idx,
-            body_name=body_name,
-            noise=noise,
-        )
-
-    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
-        return state.physics_state.data.xquat[self.body_idx]
-
-    def get_name(self) -> str:
-        return f"{self.body_name}_{super().get_name()}"
+NUM_OUTPUTS = NUM_JOINTS * 2
+NUM_INPUTS = NUM_JOINTS + NUM_JOINTS + 3 + NUM_OUTPUTS
 
 
 @jax.tree_util.register_dataclass
@@ -359,7 +271,6 @@ class KbotActor(eqx.Module):
         joint_pos_n: Array,
         joint_vel_n: Array,
         xyz_target_3: Array,
-        quat_target_4: Array,
         prev_action_n: Array,
     ) -> distrax.Normal:
         obs_n = jnp.concatenate(
@@ -367,7 +278,6 @@ class KbotActor(eqx.Module):
                 joint_pos_n,  # NUM_JOINTS
                 joint_vel_n,  # NUM_JOINTS
                 xyz_target_3,  # 3
-                quat_target_4,  # 4
                 prev_action_n,  # NUM_OUTPUTS
             ],
             axis=-1,
@@ -394,7 +304,7 @@ class KbotCritic(eqx.Module):
     mlp: eqx.nn.MLP
 
     def __init__(self, key: PRNGKeyArray, *, hidden_size: int, depth: int) -> None:
-        num_inputs = NUM_INPUTS + NUM_JOINTS + 3 + 4
+        num_inputs = NUM_INPUTS + NUM_JOINTS + 3
         num_outputs = 1
 
         self.mlp = eqx.nn.MLP(
@@ -412,9 +322,7 @@ class KbotCritic(eqx.Module):
         joint_vel_n: Array,
         actuator_force_n: Array,
         xyz_target_3: Array,
-        quat_target_4: Array,
         end_effector_pos_3: Array,
-        end_effector_quat_4: Array,
         prev_action_n: Array,
     ) -> Array:
         x_n = jnp.concatenate(
@@ -423,9 +331,7 @@ class KbotCritic(eqx.Module):
                 joint_vel_n,  # NUM_JOINTS
                 actuator_force_n,  # NUM_JOINTS
                 xyz_target_3,  # 3
-                quat_target_4,  # 4
                 end_effector_pos_3,  # 3
-                end_effector_quat_4,  # 4
                 prev_action_n,  # NUM_OUTPUTS
             ],
             axis=-1,
@@ -455,7 +361,7 @@ class KbotPseudoIKTaskConfig(ksim.PPOConfig):
     """Config for the KBot pseudo-IK task."""
 
     robot_urdf_path: str = xax.field(
-        value="ksim_kbot/kscale-assets/kbot-v2-feet/",
+        value="ksim_kbot/kscale-assets/kbot-v2-lw-feet/",
         help="The path to the assets directory for the robot.",
     )
     # Optimizer parameters.
@@ -502,7 +408,7 @@ class KbotPseudoIKTaskConfig(ksim.PPOConfig):
 Config = TypeVar("Config", bound=KbotPseudoIKTaskConfig)
 
 
-class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
+class KbotPseudoIKWesleyTask(ksim.PPOTask[Config], Generic[Config]):
     def get_optimizer(self) -> optax.GradientTransformation:
         """Builds the optimizer.
 
@@ -625,6 +531,14 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
         return [
             ksim.RandomJointPositionReset(scale=1.0),
+            # ksim_kbot.common.ResetDefaultJointPosition(
+            #     default_targets=(0.0,
+            #                     0.0,
+            #                     0.0,
+            #                     1.57,
+            #                     0.0),
+            # ),
+            # ksim.RandomJointVelocityReset(),
         ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
@@ -645,13 +559,9 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                     "legs_collision",
                 ],
             ),
-            BodyPositionObservation.create(
+            CartesianBodyPositionObservation.create(
                 physics_model=physics_model,
-                body_name="ik_target",
-            ),
-            BodyOrientationObservation.create(
-                physics_model=physics_model,
-                body_name="ik_target",
+                body_name="KC_C_104R_PitchHardstopDriven",
             ),
             ksim_kbot.common.LastActionObservation(noise=0.0),
         ]
@@ -671,15 +581,6 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 switch_prob=self.config.ctrl_dt * 10,
                 jump_prob=self.config.ctrl_dt * 5,
             ),  # type: ignore[call-arg]
-            BodyOrientationCommand.create(
-                model=physics_model,
-                base_body_name="ik_target",
-                switch_prob=self.config.ctrl_dt,
-                null_prob=self.config.ctrl_dt * 5,
-                vis_magnitude=0.5,
-                vis_size=0.05,
-                vis_color=(0.0, 1.0, 0.0, 0.8),
-            ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
@@ -691,22 +592,53 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 scale=10.0,
                 command_name="target_position_command",
             ),
-            BodyOrientationTrackingReward.create(
-                model=physics_model,
-                command_name="ik_target_body_orientation_command",
-                tracked_body_name="ik_target",
-                scale=0.1,
-            ),
-            CartesianBodyTargetVectorReward.create(
-                model=physics_model,
-                command_name="target_position_command",
-                tracked_body_name="ik_target",
-                base_body_name="floating_base_link",
-                scale=3.0,
-                normalize_velocity=True,
-                distance_threshold=0.1,
-                dt=self.config.dt,
-            ),
+            # ContinuousCartesianBodyTargetReward.create(
+            #     model=physics_model,
+            #     tracked_body_name="ik_target",
+            #     base_body_name="floating_base_link",
+            #     norm="l2",
+            #     scale=2.5,
+            #     sensitivity=1.0,
+            #     threshold=0.000025,  # with l2 xax norm, this is 0.5cm
+            #     time_bonus_scale=0.3,
+            #     command_name="target_position_command",
+            # ),
+            # # ksim.GlobalBodyQuaternionReward.create(
+            # #     model=physics_model,
+            # #     command_name="global_body_quaternion_command_KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
+            # #     tracked_body_name="KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
+            # #     base_body_name="floating_base_link",
+            # #     norm="l2",
+            # #     scale=0.1,
+            # #     sensitivity=1.0,
+            # # ),
+            # # ksim_kbot.common.JointDeviationPenalty(
+            # #     joint_targets=(0.0,
+            # #                    0.0,
+            # #                    0.0,
+            # #                    1.57, # right elbow
+            # #                    0.0),
+            # #     scale=-0.05,
+            # #     freejoint_first=False,
+            # # ),
+            # CartesianBodyTargetVectorReward.create(
+            #     model=physics_model,
+            #     command_name="target_position_command",
+            #     tracked_body_name="ik_target",
+            #     base_body_name="floating_base_link",
+            #     scale=3.0,
+            #     normalize_velocity=True,
+            #     distance_threshold=0.1,
+            #     dt=self.config.dt,
+            # ),
+            # CartesianBodyTargetPenalty.create(
+            #     model=physics_model,
+            #     command_name="target_position_command",
+            #     tracked_body_name="ik_target",
+            #     base_body_name="floating_base_link",
+            #     norm="l2",
+            #     scale=-6.0,
+            # ),
             ksim.ObservationMeanPenalty(observation_name="contact_observation_arms", scale=-0.1),
             ksim.ActuatorForcePenalty(scale=-0.000001, norm="l1"),
             ksim.ActionSmoothnessPenalty(scale=-0.02, norm="l2"),
@@ -717,6 +649,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
             ksim.FastAccelerationTermination(),
+            # TODO: add for collisions
         ]
 
     def get_model(self, key: PRNGKeyArray) -> KbotModel:
@@ -734,13 +667,11 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"] / 50.0
         xyz_target_3 = commands["target_position_command"][..., :3]
-        quat_target_4 = commands["ik_target_body_orientation_command"]
         prev_action_n = observations["last_action_observation"]
         return model.actor(
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
             xyz_target_3=xyz_target_3,
-            quat_target_4=quat_target_4,
             prev_action_n=prev_action_n,
         )
 
@@ -751,12 +682,10 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
     ) -> Array:
         joint_pos_n = observations["joint_position_observation"]  # 26
-        joint_vel_n = observations["joint_velocity_observation"] / 50.0  # 27
+        joint_vel_n = observations["joint_velocity_observation"] / 100.0  # 27
         actuator_force_n = observations["actuator_force_observation"]  # 27
         xyz_target_3 = commands["target_position_command"][..., :3]  # 3
-        quat_target_4 = commands["ik_target_body_orientation_command"]  # 4
-        end_effector_pos_3 = observations["ik_target_body_position_observation"]  # 3
-        end_effector_quat_4 = observations["ik_target_body_orientation_observation"]  # 4
+        end_effector_pos_3 = observations["cartesian_body_position_observation_KC_C_104R_PitchHardstopDriven"]  # 3
         prev_action_n = observations["last_action_observation"]  # 5
 
         return model.critic(
@@ -764,9 +693,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             joint_vel_n=joint_vel_n,
             actuator_force_n=actuator_force_n,
             xyz_target_3=xyz_target_3,
-            quat_target_4=quat_target_4,
             end_effector_pos_3=end_effector_pos_3,
-            end_effector_quat_4=end_effector_quat_4,
             prev_action_n=prev_action_n,
         )
 
@@ -816,8 +743,8 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
         return ksim.RewardLevelCurriculum(
             reward_name="ik_target_position_tracking_reward",
-            increase_threshold=0.15,
-            decrease_threshold=0.12,
+            increase_threshold=0.1,
+            decrease_threshold=0.05,
             min_level_steps=10,
             num_levels=10,
         )
@@ -888,7 +815,7 @@ if __name__ == "__main__":
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
     #   python -m ksim_kbot.misc_tasks.psuedo_ik num_envs=8 batch_size=4
-    KbotPseudoIKTask.launch(
+    KbotPseudoIKWesleyTask.launch(
         KbotPseudoIKTaskConfig(
             # Training parameters.
             num_envs=8192,
@@ -916,3 +843,235 @@ if __name__ == "__main__":
             use_mit_actuators=True,
         ),
     )
+
+"""
+
+@attrs.define(kw_only=True)
+class CartesianBodyTargetMarker(Marker):
+    command_name: str = attrs.field()
+
+    def __attrs_post_init__(self) -> None:
+        if self.target_name is None or self.target_type != "body":
+            raise ValueError("Base body name must be provided. Make sure to create with `get`.")
+
+    def update(self, trajectory: Trajectory) -> None:
+        self.pos = trajectory.command[self.command_name]
+
+    @classmethod
+    def get(
+        cls, command_name: str, base_body_name: str, radius: float, rgba: tuple[float, float, float, float]
+    ) -> Self:
+        return cls(
+            command_name=command_name,
+            target_name=base_body_name,
+            target_type="body",
+            geom=mujoco.mjtGeom.mjGEOM_SPHERE,
+            scale=(radius, radius, radius),
+            rgba=rgba,
+        )
+
+@attrs.define(frozen=True)
+class CartesianBodyTargetCommand(Command):
+
+    pivot_point: tuple[float, float, float] = attrs.field()
+    base_body_name: str = attrs.field()
+    base_id: int = attrs.field()
+    sample_sphere_radius: float = attrs.field()
+    positive_x: bool = attrs.field()
+    positive_y: bool = attrs.field()
+    positive_z: bool = attrs.field()
+    switch_prob: float = attrs.field()
+    vis_radius: float = attrs.field()
+    vis_color: tuple[float, float, float, float] = attrs.field()
+    curriculum_scale: float = attrs.field(default=1.0)
+
+    def _sample_sphere(self, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
+        # Sample a random unit vector symmetrically.
+        rng, rng_vec, rng_u = jax.random.split(rng, 3)
+        vec = jax.random.normal(rng_vec, (3,))
+        vec /= jnp.linalg.norm(vec)
+
+        # Generate a random radius with the proper distribution, ensuring scalar u.
+        u = jax.random.uniform(rng_u, ())  # Sample u as a scalar
+        r_scale = u ** (1 / 3)  # r_scale is scalar
+        r = self.sample_sphere_radius * r_scale * (curriculum_level * self.curriculum_scale + 1.0)  # r is scalar
+
+        # Scale the unit vector by the scalar radius.
+        scaled_vec = vec * r  # (3,) * () -> (3,)
+
+        # Apply sign constraints (original logic was slightly off, needed to unpack first)
+        x, y, z = scaled_vec
+        x = jnp.where(self.positive_x, jnp.abs(x), -jnp.abs(x))
+        y = jnp.where(self.positive_y, jnp.abs(y), -jnp.abs(y))
+        z = jnp.where(self.positive_z, jnp.abs(z), -jnp.abs(z))
+
+        return jnp.array([x, y, z])
+
+    def initial_command(
+        self,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        sphere_sample = self._sample_sphere(rng, curriculum_level)
+        pivot_pos = jnp.array(self.pivot_point)
+        return pivot_pos + sphere_sample
+
+    def __call__(
+        self,
+        prev_command: Array,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        rng_a, rng_b = jax.random.split(rng)
+        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
+        return jnp.where(switch_mask, new_commands, prev_command)
+
+    def get_markers(self) -> Collection[Marker]:
+        return [CartesianBodyTargetMarker.get(self.command_name, self.base_body_name, self.vis_radius, self.vis_color)]
+
+    def get_name(self) -> str:
+        return f"{super().get_name()}_{self.base_body_name}_{self.pivot_point}"
+
+    @classmethod
+    def create(
+        cls,
+        model: PhysicsModel,
+        pivot_point: tuple[float, float, float],
+        base_name: str,
+        sample_sphere_radius: float,
+        curriculum_scale: float = 1.0,
+        positive_x: bool = True,
+        positive_y: bool = True,
+        positive_z: bool = True,
+        switch_prob: float = 0.1,
+        vis_radius: float = 0.05,
+        vis_color: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.8),
+    ) -> Self:
+        base_id = get_body_data_idx_from_name(model, base_name)
+        return cls(
+            pivot_point=pivot_point,
+            base_body_name=base_name,
+            base_id=base_id,
+            sample_sphere_radius=sample_sphere_radius,
+            curriculum_scale=curriculum_scale,
+            positive_x=positive_x,
+            positive_y=positive_y,
+            positive_z=positive_z,
+            switch_prob=switch_prob,
+            vis_radius=vis_radius,
+            vis_color=vis_color,
+        )
+
+
+
+
+@attrs.define(kw_only=True)
+class GlobalBodyQuaternionMarker(Marker):
+    command_name: str = attrs.field()
+
+    def __attrs_post_init__(self) -> None:
+        if self.target_name is None or self.target_type != "body":
+            raise ValueError("Base body name must be provided. Make sure to create with `get`.")
+
+    def update(self, trajectory: Trajectory) -> None:
+        command = trajectory.command[self.command_name]
+        # Check if command is zeros (null quaternion)
+        is_null = jnp.all(jnp.isclose(command, 0.0))
+
+        # Only update orientation if command is not null
+        if not is_null:
+            self.geom = mujoco.mjtGeom.mjGEOM_ARROW
+            self.orientation = command
+        else:
+            self.geom = mujoco.mjtGeom.mjGEOM_SPHERE
+
+    @classmethod
+    def get(
+        cls,
+        command_name: str,
+        base_body_name: str,
+        size: float,
+        magnitude: float,
+        rgba: tuple[float, float, float, float],
+    ) -> Self:
+        return cls(
+            command_name=command_name,
+            target_name=base_body_name,
+            target_type="body",
+            geom=mujoco.mjtGeom.mjGEOM_ARROW,
+            scale=(size, size, magnitude),
+            rgba=rgba,
+        )
+
+
+@attrs.define(frozen=True)
+class GlobalBodyQuaternionCommand(Command):
+
+    base_body_name: str = attrs.field()
+    base_id: int = attrs.field()
+    switch_prob: float = attrs.field()
+    null_prob: float = attrs.field()  # Probability of sampling null quaternion
+    vis_magnitude: float = attrs.field()
+    vis_size: float = attrs.field()
+    vis_color: tuple[float, float, float, float] = attrs.field()
+
+    def initial_command(
+        self,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        rng_a, rng_b = jax.random.split(rng)
+        is_null = jax.random.bernoulli(rng_a, self.null_prob)
+        quat = jax.random.normal(rng_b, (4,))
+        random_quat = quat / jnp.linalg.norm(quat)
+        return jnp.where(is_null, jnp.zeros(4), random_quat)
+
+    def __call__(
+        self,
+        prev_command: Array,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        rng_a, rng_b = jax.random.split(rng)
+        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
+        return jnp.where(switch_mask, new_commands, prev_command)
+
+    def get_markers(self) -> Collection[Marker]:
+        return [
+            GlobalBodyQuaternionMarker.get(
+                self.command_name, self.base_body_name, self.vis_size, self.vis_magnitude, self.vis_color
+            )
+        ]
+
+    def get_name(self) -> str:
+        return f"{super().get_name()}_{self.base_body_name}"
+
+    @classmethod
+    def create(
+        cls,
+        model: PhysicsModel,
+        base_name: str,
+        switch_prob: float = 0.1,
+        null_prob: float = 0.1,
+        vis_magnitude: float = 0.5,
+        vis_size: float = 0.05,
+        vis_color: tuple[float, float, float, float] = (0.0, 0.0, 1.0, 0.8),
+    ) -> Self:
+        base_id = get_body_data_idx_from_name(model, base_name)
+        return cls(
+            base_body_name=base_name,
+            base_id=base_id,
+            switch_prob=switch_prob,
+            null_prob=null_prob,
+            vis_magnitude=vis_magnitude,
+            vis_size=vis_size,
+            vis_color=vis_color,
+        )
+
+"""

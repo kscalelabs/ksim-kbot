@@ -1,4 +1,5 @@
 """Example script to deploy a SavedModel on K-Bot."""
+"""Example script to deploy a SavedModel on K-Bot."""
 
 import argparse
 import asyncio
@@ -162,10 +163,33 @@ async def disable(kos: pykos.KOS) -> None:
             actuator_id=ac.actuator_id,
             torque_enabled=False,
         )
+    zero_commands: list[pykos.services.actuator.ActuatorCommand] = [
+        {
+            "actuator_id": ac.actuator_id,
+            "position": 0.0,
+            "velocity": 0.0,
+        }
+        for ac in ACTUATOR_LIST
+    ]
+
+    await kos.actuator.command_actuators(zero_commands)
+
+
+async def disable(kos: pykos.KOS) -> None:
+    for ac in ACTUATOR_LIST:
+        await kos.actuator.configure_actuator(
+            actuator_id=ac.actuator_id,
+            torque_enabled=False,
+        )
 
 
 async def main(model_path: str, ip: str, episode_length: int) -> None:
+async def main(model_path: str, ip: str, episode_length: int) -> None:
     model = tf.saved_model.load(model_path)
+    kos = pykos.KOS(ip=ip)
+    await disable(kos)
+    time.sleep(1)
+    logger.info("Configuring actuators...")
     kos = pykos.KOS(ip=ip)
     await disable(kos)
     time.sleep(1)
@@ -173,7 +197,10 @@ async def main(model_path: str, ip: str, episode_length: int) -> None:
     await configure_actuators(kos)
     await asyncio.sleep(1)
     logger.info("Resetting...")
+    await asyncio.sleep(1)
+    logger.info("Resetting...")
     await reset(kos)
+
 
     prev_action = np.zeros(len(ACTUATOR_LIST) * 2)
     obs = await get_observation(kos, prev_action)
@@ -186,6 +213,7 @@ async def main(model_path: str, ip: str, episode_length: int) -> None:
         await asyncio.sleep(1)
 
     target_time = time.time() + DT
+    observation = await get_observation(kos, prev_action)
     observation = await get_observation(kos, prev_action)
 
     end_time = time.time() + episode_length
@@ -214,11 +242,15 @@ async def main(model_path: str, ip: str, episode_length: int) -> None:
         logger.info("Exiting...")
         await disable(kos)
         logger.info("Actuators disabled")
+        await disable(kos)
+        logger.info("Actuators disabled")
 
         raise KeyboardInterrupt
 
     logger.info("Episode finished!")
 
+
+# python -m ksim_kbot.deploy.real --model_path /path/to/model
 
 # python -m ksim_kbot.deploy.real --model_path /path/to/model
 if __name__ == "__main__":
@@ -227,7 +259,10 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--ip", type=str, default="localhost")
     parser.add_argument("--episode_length", type=int, default=60)  # seconds
+    parser.add_argument("--episode_length", type=int, default=60)  # seconds
     args = parser.parse_args()
 
+    logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO)
+    asyncio.run(main(args.model_path, args.ip, args.episode_length))
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO)
     asyncio.run(main(args.model_path, args.ip, args.episode_length))

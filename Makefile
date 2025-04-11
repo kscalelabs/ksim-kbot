@@ -41,15 +41,15 @@ push-to-pypi: build-for-pypi
 # ------------------------ #
 
 format:
-	@black ksim_kbot
-	@ruff format ksim_kbot
-	@ruff check --fix ksim_kbot
+	@black ksim_kbot --exclude "run_*"
+	@ruff format ksim_kbot --exclude "run_*"
+	@ruff check --fix ksim_kbot --exclude "run_*"
 .PHONY: format
 
 static-checks:
-	@black --diff --check ksim_kbot
-	@ruff check ksim_kbot
-	@mypy --install-types --non-interactive ksim_kbot
+	@black --diff --check ksim_kbot --exclude "run_*"
+	@ruff check ksim_kbot --exclude "run_*"
+	@mypy --install-types --non-interactive ksim_kbot --exclude "run_*"
 .PHONY: static-checks
 
 # ------------------------ #
