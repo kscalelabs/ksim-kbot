@@ -683,16 +683,17 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             # ),
             ksim.PositionCommand.create(
                 model=physics_model,
-                box_min=(0.0, -0.3, -0.2),
-                box_max=(0.2, 0.3, 0.2),
+                box_min=(0.05, -0.1, -0.15),
+                box_max=(0.15, 0.1, 0.1),
                 vis_target_name="floating_base_link",
                 vis_radius=0.05,
-                vis_color=(1.0, 0.0, 0.0, 0.8),
+                vis_color=(1.0, 0.0, 1.0, 0.8),
                 unique_name="elbow_target",
                 min_speed=0.2,
                 max_speed=4.0,
                 switch_prob=self.config.ctrl_dt * 10,
                 jump_prob=self.config.ctrl_dt * 5,
+                curriculum_scale=0.0,
             ),  # type: ignore[call-arg]
         ]
 
