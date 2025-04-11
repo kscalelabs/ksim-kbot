@@ -9,9 +9,8 @@ import attrs
 import jax.numpy as jnp
 import ksim
 import xax
-from jaxtyping import Array, PyTree
+from jaxtyping import Array, PyTree, PRNGKeyArray
 from ksim.utils.mujoco import get_qpos_data_idxs_by_name
-import jax
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -306,7 +305,7 @@ class FeetHeightPenalty(ksim.Reward):
     scale: float = -1.0
     max_foot_height: float = 0.1
 
-    def initial_carry(self, rng: jax.random.PRNGKeyArray) -> PyTree:
+    def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
         return xax.FrozenDict({"swing_peak": jnp.zeros(2), "first_contact": jnp.zeros(2)})
 
     def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
@@ -325,7 +324,7 @@ class FeetAirTimeReward(ksim.Reward):
     threshold_min: float = 0.1
     threshold_max: float = 0.4
 
-    def initial_carry(self, rng: jax.random.PRNGKeyArray) -> PyTree:
+    def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
         return xax.FrozenDict({"feet_air_time": jnp.zeros(2)})
 
     def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
@@ -345,7 +344,7 @@ class FeetPhaseReward(ksim.Reward):
     feet_pos_obs_name: str = attrs.field(default="feet_position_observation")
     max_foot_height: float = 0.12
 
-    def initial_carry(self, rng: jax.random.PRNGKeyArray) -> PyTree:
+    def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
         return xax.FrozenDict({"phase": jnp.zeros(2)})
 
     def __call__(self, trajectory: ksim.Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
