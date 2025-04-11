@@ -1,5 +1,4 @@
 """Example script to deploy a SavedModel on K-Bot."""
-"""Example script to deploy a SavedModel on K-Bot."""
 
 import argparse
 import asyncio
@@ -14,6 +13,7 @@ import tensorflow as tf
 logger = logging.getLogger(__name__)
 
 DT = 0.02  # Policy time step (50Hz)
+GAIT_DT = 1.25
 GRAVITY = 9.81  # m/s
 ACTION_SCALE = 0.3
 
@@ -107,7 +107,7 @@ async def get_observation(kos: pykos.KOS, prev_action: np.ndarray) -> np.ndarray
     imu_obs = np.concatenate([accel, gyro], axis=-1)
 
     phase = np.array([0, np.pi])
-    phase += 2 * np.pi * 1.2550827 * DT
+    phase += 2 * np.pi * GAIT_DT * DT
     phase = np.fmod(phase + np.pi, 2 * np.pi) - np.pi
     phase_vec = np.array([np.cos(phase), np.sin(phase)]).flatten()
 
@@ -183,7 +183,6 @@ async def disable(kos: pykos.KOS) -> None:
         )
 
 
-async def main(model_path: str, ip: str, episode_length: int) -> None:
 async def main(model_path: str, ip: str, episode_length: int) -> None:
     model = tf.saved_model.load(model_path)
     kos = pykos.KOS(ip=ip)
