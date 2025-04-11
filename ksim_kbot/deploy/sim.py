@@ -14,6 +14,8 @@ from typing import Callable
 import numpy as np
 import pykos
 import tensorflow as tf
+from askin import KeyboardController
+from scipy.spatial.transform import Rotation as R
 
 logger = logging.getLogger(__name__)
 DT = 0.02  # time step (50Hz)
@@ -198,16 +200,14 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
     await configure_actuators(kos)
     await reset(kos)
 
-    # TODO - add keyboard controller when it's fast enough
-    # command_state = CommandState()
-    # keyboard_controller = KeyboardController(command_state.update_from_key)
-    # await keyboard_controller.start()
+    command_state = CommandState()
+    keyboard_controller = KeyboardController(command_state.update_from_key, timeout=0.001)
+    await keyboard_controller.start()
 
     phase = np.array([0, np.pi])
     prev_action = np.zeros(len(ACTUATOR_LIST) * 2)
-    cmd = np.array([0.3, 0.0])
 
-    obs, phase = await get_observation(kos, prev_action, cmd, phase)
+    obs, phase = await get_observation(kos, prev_action, command_state.get_command(), phase)
     if no_render:
         await kos.process_manager.start_kclip("deployment")
 
@@ -221,7 +221,7 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
         pos = action[: len(ACTUATOR_LIST)] + DEFAULT_POSITIONS
         vel = action[len(ACTUATOR_LIST) :]
         (obs, phase), _ = await asyncio.gather(
-            get_observation(kos, prev_action, cmd, phase),
+            get_observation(kos, prev_action, command_state.get_command(), phase),
             send_actions(kos, pos, vel),
         )
         prev_action = action
