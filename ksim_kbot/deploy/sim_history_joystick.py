@@ -1,4 +1,4 @@
-"""Example script to deploy a SavedModel in KOS-Sim."""
+"""Script to Deploy Sim-History Model in KOS-Sim."""
 
 import argparse
 import asyncio
@@ -15,6 +15,8 @@ import numpy as np
 import pykos
 import tensorflow as tf
 from scipy.spatial.transform import Rotation as R
+
+from ksim_kbot.deploy.keyboard_controller import KeyboardController
 
 logger = logging.getLogger(__name__)
 DT = 0.02  # time step (50Hz)
@@ -85,6 +87,28 @@ ACTUATOR_LIST: list[Actuator] = [
     Actuator(34, 18, 85.0, 5.0, 80.0, "dof_left_knee_04"),
     Actuator(35, 19, 30.0, 1.0, 17.0, "dof_left_ankle_02"),
 ]
+
+
+
+class CommandState:
+    def __init__(self) -> None:
+        self.cmd = np.array([0.3, 0.0])
+        self.step_size = 0.01
+
+    async def update_from_key(self, key: str) -> None:
+        if key == "a":
+            self.cmd[0] -= self.step_size
+        elif key == "d":
+            self.cmd[0] += self.step_size
+        elif key == "w":
+            self.cmd[1] += self.step_size
+        elif key == "s":
+            self.cmd[1] -= self.step_size
+
+        logger.debug("Command updated to: %s", self.cmd)
+
+    def get_command(self) -> np.ndarray:
+        return self.cmd.copy()
 
 
 async def get_observation(
@@ -177,7 +201,7 @@ def spawn_kos_sim(no_render: bool) -> tuple[subprocess.Popen, Callable]:
     return proc, cleanup
 
 
-async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -> None:
+async def main(model_path: str, ip: str, no_render: bool, episode_length: int, enable_key: bool) -> None:
     model = tf.saved_model.load(model_path)
     try:
         kos = pykos.KOS(ip=ip)
@@ -197,16 +221,24 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
     await configure_actuators(kos)
     await reset(kos)
 
-    # command_state = CommandState()
-    # keyboard_controller = KeyboardController(command_state.update_from_key)
-    # await keyboard_controller.start()
+    # Initialize command source
+    command_state = None
+    keyboard_controller = None
+    default_cmd = np.array([0.3, 0.0])
+    
+    if enable_key:
+        command_state = CommandState()
+        keyboard_controller = KeyboardController(command_state.update_from_key)
+        await keyboard_controller.start()
+        get_command = command_state.get_command
+    else:
+        # Use a lambda that returns a copy of the default command
+        get_command = lambda: default_cmd.copy()
 
     history = np.zeros(HIST_LEN * (OBS_SIZE + CMD_SIZE))
-    cmd = np.array([0.3, 0.0])
-    # cmd = command_state.get_command()
     phase = np.array([0, np.pi])
     prev_action = np.zeros(len(ACTUATOR_LIST) * 2)
-    obs, full_obs, phase = await get_observation(kos, prev_action, cmd, phase, history)
+    obs, full_obs, phase = await get_observation(kos, prev_action, get_command(), phase, history)
     if no_render:
         await kos.process_manager.start_kclip("deployment")
 
@@ -222,7 +254,7 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
         vel = action[len(ACTUATOR_LIST) :]
         obs, full_obs, phase = (
             await asyncio.gather(
-                get_observation(kos, prev_action, cmd, phase, history),
+                get_observation(kos, prev_action, get_command(), phase, history),
                 send_actions(kos, pos, vel),
             )
         )[0]
@@ -249,8 +281,9 @@ if __name__ == "__main__":
     parser.add_argument("--episode_length", type=int, default=5)
     parser.add_argument("--no-render", action="store_true")
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--enable-key", action="store_true")
     args = parser.parse_args()
 
     log_level = logging.DEBUG if args.debug else logging.INFO
     logging.basicConfig(level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    asyncio.run(main(args.model_path, args.ip, args.no_render, args.episode_length))
+    asyncio.run(main(args.model_path, args.ip, args.no_render, args.episode_length, args.enable_key))

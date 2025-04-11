@@ -127,11 +127,6 @@ async def get_observation(
 
     imu_obs = np.array([imu.accel_x, imu.accel_y, imu.accel_z, imu.gyro_x, imu.gyro_y, imu.gyro_z])
 
-    r = R.from_quat([raw_quat.x, raw_quat.y, raw_quat.z, raw_quat.w])
-    gvec = r.apply(np.array([0, 0, -1]), inverse=True)
-    # During training gravity vector is taken from the first torso frame
-    gvec = np.array([gvec[1], -gvec[2], -gvec[0]])
-
     phase += 2 * np.pi * GAIT_DT * DT
     phase = np.fmod(phase + np.pi, 2 * np.pi) - np.pi
     phase_vec = np.array([np.cos(phase), np.sin(phase)]).flatten()
