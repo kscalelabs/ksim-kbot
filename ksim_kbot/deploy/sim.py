@@ -15,7 +15,6 @@ import numpy as np
 import pykos
 import tensorflow as tf
 from askin import KeyboardController
-from scipy.spatial.transform import Rotation as R
 
 logger = logging.getLogger(__name__)
 DT = 0.02  # time step (50Hz)
@@ -124,11 +123,6 @@ async def get_observation(
     vel_obs = np.deg2rad([vel_dict[ac.actuator_id] for ac in sorted(ACTUATOR_LIST, key=lambda x: x.nn_id)])
 
     imu_obs = np.array([imu.accel_x, imu.accel_y, imu.accel_z, imu.gyro_x, imu.gyro_y, imu.gyro_z])
-
-    r = R.from_quat([raw_quat.x, raw_quat.y, raw_quat.z, raw_quat.w])
-    gvec = r.apply(np.array([0, 0, -1]), inverse=True)
-    # During training gravity vector is taken from the first torso frame
-    gvec = np.array([gvec[1], -gvec[2], -gvec[0]])
 
     phase += 2 * np.pi * GAIT_DT * DT
     phase = np.fmod(phase + np.pi, 2 * np.pi) - np.pi

@@ -9,7 +9,7 @@ import attrs
 import jax.numpy as jnp
 import ksim
 import xax
-from jaxtyping import Array
+from jaxtyping import Array, PRNGKeyArray, PyTree
 from ksim.utils.mujoco import get_qpos_data_idxs_by_name
 
 
@@ -21,10 +21,11 @@ class JointDeviationPenalty(ksim.Reward):
     joint_targets: tuple[float, ...] = attrs.field()
     joint_weights: tuple[float, ...] = attrs.field(default=None)
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
         diff = trajectory.qpos[..., 7:] - jnp.array(self.joint_targets)
         cost = jnp.square(diff) * jnp.array(self.joint_weights)
-        return jnp.sum(cost, axis=-1)
+        reward_value = jnp.sum(cost, axis=-1)
+        return reward_value, None
 
     @classmethod
     def create(
@@ -46,39 +47,6 @@ class JointDeviationPenalty(ksim.Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class DHForwardReward(ksim.Reward):
-    """Incentives forward movement."""
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        x_delta = -jnp.clip(trajectory.qvel[..., 1], -1.0, 1.0)
-        return x_delta
-
-
-@attrs.define(frozen=True, kw_only=True)
-class DHControlPenalty(ksim.Reward):
-    """Legacy default humanoid control cost that penalizes squared action magnitude."""
-
-    norm: xax.NormType = attrs.field(default="l2")
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        return xax.get_norm(trajectory.action, self.norm).sum(axis=-1)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class DHHealthyReward(ksim.Reward):
-    """Legacy default humanoid healthy reward that gives binary reward based on height."""
-
-    healthy_z_lower: float = attrs.field(default=0.5)
-    healthy_z_upper: float = attrs.field(default=1.5)
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        height = trajectory.qpos[..., 2]
-        is_healthy = jnp.where(height < self.healthy_z_lower, 0.0, 1.0)
-        is_healthy = jnp.where(height > self.healthy_z_upper, 0.0, is_healthy)
-        return is_healthy
-
-
-@attrs.define(frozen=True, kw_only=True)
 class FeetSlipPenalty(ksim.Reward):
     """Penalty for feet slipping."""
 
@@ -86,7 +54,7 @@ class FeetSlipPenalty(ksim.Reward):
     com_vel_obs_name: str = attrs.field(default="center_of_mass_velocity_observation")
     feet_contact_obs_name: str = attrs.field(default="feet_contact_observation")
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
         if self.feet_contact_obs_name not in trajectory.obs:
             raise ValueError(
                 f"Observation {self.feet_contact_obs_name} not found; add it as an observation in your task."
@@ -94,7 +62,8 @@ class FeetSlipPenalty(ksim.Reward):
         contact = trajectory.obs[self.feet_contact_obs_name]
         body_vel = trajectory.obs[self.com_vel_obs_name][..., :2]
         normed_body_vel = jnp.linalg.norm(body_vel, axis=-1, keepdims=True)
-        return jnp.sum(normed_body_vel * contact, axis=-1)
+        reward_value = jnp.sum(normed_body_vel * contact, axis=-1)
+        return reward_value, None
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -104,8 +73,9 @@ class OrientationPenalty(ksim.Reward):
     norm: xax.NormType = attrs.field(default="l2")
     obs_name: str = attrs.field(default="sensor_observation_upvector_origin")
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        return xax.get_norm(trajectory.obs[self.obs_name][..., :2], self.norm).sum(axis=-1)
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
+        reward_value = xax.get_norm(trajectory.obs[self.obs_name][..., :2], self.norm).sum(axis=-1)
+        return reward_value, None
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -114,19 +84,17 @@ class LinearVelocityTrackingReward(ksim.Reward):
 
     error_scale: float = attrs.field(default=0.25)
     linvel_obs_name: str = attrs.field(default="sensor_observation_local_linvel_origin")
-    command_name_x: str = attrs.field(default="linear_velocity_command_x")
-    command_name_y: str = attrs.field(default="linear_velocity_command_y")
+    command_name: str = attrs.field(default="linear_velocity_command")
     norm: xax.NormType = attrs.field(default="l2")
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
         if self.linvel_obs_name not in trajectory.obs:
             raise ValueError(f"Observation {self.linvel_obs_name} not found; add it as an observation in your task.")
 
-        command = jnp.concatenate(
-            [trajectory.command[self.command_name_x], trajectory.command[self.command_name_y]], axis=-1
-        )
+        command = trajectory.command[self.command_name]
         lin_vel_error = xax.get_norm(command - trajectory.obs[self.linvel_obs_name][..., :2], self.norm).sum(axis=-1)
-        return jnp.exp(-lin_vel_error / self.error_scale)
+        reward_value = jnp.exp(-lin_vel_error / self.error_scale)
+        return reward_value, None
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -135,17 +103,18 @@ class AngularVelocityTrackingReward(ksim.Reward):
 
     error_scale: float = attrs.field(default=0.25)
     angvel_obs_name: str = attrs.field(default="sensor_observation_gyro_origin")
-    command_name: str = attrs.field(default="angular_velocity_command_z")
+    command_name: str = attrs.field(default="angular_velocity_command")
     norm: xax.NormType = attrs.field(default="l2")
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
         if self.angvel_obs_name not in trajectory.obs:
             raise ValueError(f"Observation {self.angvel_obs_name} not found; add it as an observation in your task.")
 
         ang_vel_error = jnp.square(
             trajectory.command[self.command_name].flatten() - trajectory.obs[self.angvel_obs_name][..., 2]
         )
-        return jnp.exp(-ang_vel_error / self.error_scale)
+        reward_value = jnp.exp(-ang_vel_error / self.error_scale)
+        return reward_value, None
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -155,11 +124,12 @@ class AngularVelocityXYPenalty(ksim.Reward):
     norm: xax.NormType = attrs.field(default="l2")
     angvel_obs_name: str = attrs.field(default="sensor_observation_global_angvel_origin")
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
         if self.angvel_obs_name not in trajectory.obs:
             raise ValueError(f"Observation {self.angvel_obs_name} not found; add it as an observation in your task.")
         ang_vel = trajectory.obs[self.angvel_obs_name][..., :2]
-        return xax.get_norm(ang_vel, self.norm).sum(axis=-1)
+        reward_value = xax.get_norm(ang_vel, self.norm).sum(axis=-1)
+        return reward_value, None
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -170,12 +140,13 @@ class HipDeviationPenalty(ksim.Reward):
     hip_indices: tuple[int, ...] = attrs.field()
     joint_targets: tuple[float, ...] = attrs.field()
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
         diff = (
             trajectory.qpos[..., jnp.array(self.hip_indices) + 7]
             - jnp.array(self.joint_targets)[jnp.array(self.hip_indices)]
         )
-        return xax.get_norm(diff, self.norm).sum(axis=-1)
+        reward_value = xax.get_norm(diff, self.norm).sum(axis=-1)
+        return reward_value, None
 
     @classmethod
     def create(
@@ -203,12 +174,13 @@ class KneeDeviationPenalty(ksim.Reward):
     knee_indices: tuple[int, ...] = attrs.field()
     joint_targets: tuple[float, ...] = attrs.field()
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
         diff = (
             trajectory.qpos[..., jnp.array(self.knee_indices) + 7]
             - jnp.array(self.joint_targets)[jnp.array(self.knee_indices)]
         )
-        return xax.get_norm(diff, self.norm).sum(axis=-1)
+        reward_value = xax.get_norm(diff, self.norm).sum(axis=-1)
+        return reward_value, None
 
     @classmethod
     def create(
@@ -234,8 +206,9 @@ class TerminationPenalty(ksim.Reward):
 
     scale: float = attrs.field(default=-1.0)
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        return trajectory.done
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
+        reward_value = trajectory.done
+        return reward_value, None
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -246,12 +219,12 @@ class XYPositionPenalty(ksim.Reward):
     target_y: float = attrs.field()
     norm: xax.NormType = attrs.field(default="l2")
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
         current_pos = trajectory.qpos[..., :2]
         target_pos = jnp.array([self.target_x, self.target_y])
         diff = current_pos - target_pos
-
-        return xax.get_norm(diff, self.norm).sum(axis=-1)
+        reward_value = xax.get_norm(diff, self.norm).sum(axis=-1)
+        return reward_value, None
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -260,8 +233,9 @@ class FarFromOriginTerminationReward(ksim.Reward):
 
     max_dist: float = attrs.field()
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        return jnp.linalg.norm(trajectory.qpos[..., :2], axis=-1) > self.max_dist
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
+        reward_value = jnp.linalg.norm(trajectory.qpos[..., :2], axis=-1) > self.max_dist
+        return reward_value, None
 
 
 class KsimLinearVelocityTrackingReward(ksim.Reward):
@@ -272,12 +246,13 @@ class KsimLinearVelocityTrackingReward(ksim.Reward):
     norm: xax.NormType = attrs.field(default="l1")
     temp: float = attrs.field(default=1.0)
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
         dim = self.index
         lin_vel_cmd = trajectory.command[self.command_name].squeeze(-1)
         lin_vel = trajectory.qvel[..., dim]
         norm = xax.get_norm(lin_vel - lin_vel_cmd, self.norm)
-        return 1.0 / (norm / self.temp + 1.0)
+        reward_value = 1.0 / (norm / self.temp + 1.0)
+        return reward_value, None
 
     def get_name(self) -> str:
         return f"{self.index}_{super().get_name()}"
@@ -293,11 +268,17 @@ class FeetHeightPenalty(ksim.Reward):
     scale: float = -1.0
     max_foot_height: float = 0.1
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        swing_peak = trajectory.reward_carry["swing_peak"]  # type: ignore[attr-defined]
-        first_contact = trajectory.reward_carry["first_contact"]  # type: ignore[attr-defined]
+    def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
+        return xax.FrozenDict({"swing_peak": jnp.zeros(2), "first_contact": jnp.zeros(2)})
+
+    def __call__(
+        self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]
+    ) -> tuple[Array, xax.FrozenDict[str, PyTree]]:
+        swing_peak = reward_carry["swing_peak"]
+        first_contact = reward_carry["first_contact"]
         error = swing_peak / self.max_foot_height - 1.0
-        return jnp.sum(jnp.square(error) * first_contact, axis=-1)
+        reward_value = jnp.sum(jnp.square(error) * first_contact, axis=-1)
+        return reward_value, xax.FrozenDict({"swing_peak": swing_peak, "first_contact": first_contact})
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -308,12 +289,18 @@ class FeetAirTimeReward(ksim.Reward):
     threshold_min: float = 0.1
     threshold_max: float = 0.4
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        first_contact = trajectory.reward_carry["first_contact"]  # type: ignore[attr-defined]
-        air_time = trajectory.reward_carry["feet_air_time"]  # type: ignore[attr-defined]
+    def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
+        return xax.FrozenDict({"feet_air_time": jnp.zeros(2)})
+
+    def __call__(
+        self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]
+    ) -> tuple[Array, xax.FrozenDict[str, PyTree]]:
+        first_contact = reward_carry["first_contact"]  # Access shared carry
+        air_time = reward_carry["feet_air_time"]  # Access shared carry
         air_time = (air_time - self.threshold_min) * first_contact
         air_time = jnp.clip(air_time, max=self.threshold_max - self.threshold_min)
-        return jnp.sum(air_time, axis=-1)
+        reward_value = jnp.sum(air_time, axis=-1)
+        return reward_value, xax.FrozenDict({"feet_air_time": air_time})
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -324,11 +311,14 @@ class FeetPhaseReward(ksim.Reward):
     feet_pos_obs_name: str = attrs.field(default="feet_position_observation")
     max_foot_height: float = 0.12
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+    def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
+        return xax.FrozenDict({"phase": jnp.zeros(2)})
+
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
         if self.feet_pos_obs_name not in trajectory.obs:
             raise ValueError(f"Observation {self.feet_pos_obs_name} not found; add it as an observation in your task.")
         foot_pos = trajectory.obs[self.feet_pos_obs_name]
-        phase = trajectory.reward_carry["phase"]  # type: ignore[attr-defined]
+        phase = reward_carry["phase"]  # Access shared carry
 
         foot_z = jnp.array([foot_pos[..., 2], foot_pos[..., 5]]).T
         ideal_z = self.gait_phase(phase, swing_height=jnp.array(self.max_foot_height))
@@ -336,7 +326,7 @@ class FeetPhaseReward(ksim.Reward):
         error = jnp.sum(jnp.square(foot_z - ideal_z), axis=-1)
         reward = jnp.exp(-error / 0.01)
 
-        return reward
+        return reward, xax.FrozenDict({"phase": phase})
 
     def gait_phase(
         self,
