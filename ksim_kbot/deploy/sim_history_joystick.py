@@ -129,7 +129,11 @@ async def send_actions(kos: pykos.KOS, position: np.ndarray, velocity: np.ndarra
     position = np.rad2deg(position)
     velocity = np.rad2deg(velocity)
     commands = [
-        {"actuator_id": ac.actuator_id, "position": 0.0 if ac.actuator_id in [11, 12, 13, 14, 15, 21, 22, 23, 24, 25] else position[ac.nn_id], "velocity": velocity[ac.nn_id]}
+        {
+            "actuator_id": ac.actuator_id,
+            "position": 0.0 if ac.actuator_id in [11, 12, 13, 14, 15, 21, 22, 23, 24, 25] else position[ac.nn_id],
+            "velocity": velocity[ac.nn_id],
+        }
         for ac in ACTUATOR_LIST
     ]
     await kos.actuator.command_actuators(commands)  # type: ignore[arg-type]

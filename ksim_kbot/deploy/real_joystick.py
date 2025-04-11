@@ -122,7 +122,9 @@ async def send_actions(kos: pykos.KOS, position: np.ndarray, velocity: np.ndarra
     actuator_commands: list[pykos.services.actuator.ActuatorCommand] = [
         {
             "actuator_id": ac.actuator_id,
-            "position": 0.0 if ac.actuator_id in [11, 12, 13, 14, 15, 21, 22, 23, 24, 25] else position[ac.nn_id] * ACTION_SCALE,
+            "position": (
+                0.0 if ac.actuator_id in [11, 12, 13, 14, 15, 21, 22, 23, 24, 25] else position[ac.nn_id] * ACTION_SCALE
+            ),
             "velocity": velocity[ac.nn_id] * ACTION_SCALE,
         }
         for ac in ACTUATOR_LIST
@@ -163,24 +165,6 @@ async def disable(kos: pykos.KOS) -> None:
             actuator_id=ac.actuator_id,
             torque_enabled=False,
         )
-    zero_commands: list[pykos.services.actuator.ActuatorCommand] = [
-        {
-            "actuator_id": ac.actuator_id,
-            "position": 0.0,
-            "velocity": 0.0,
-        }
-        for ac in ACTUATOR_LIST
-    ]
-
-    await kos.actuator.command_actuators(zero_commands)
-
-
-async def disable(kos: pykos.KOS) -> None:
-    for ac in ACTUATOR_LIST:
-        await kos.actuator.configure_actuator(
-            actuator_id=ac.actuator_id,
-            torque_enabled=False,
-        )
 
 
 async def main(model_path: str, ip: str, episode_length: int) -> None:
@@ -193,7 +177,6 @@ async def main(model_path: str, ip: str, episode_length: int) -> None:
     await asyncio.sleep(1)
     logger.info("Resetting...")
     await reset(kos)
-
 
     prev_action = np.zeros(len(ACTUATOR_LIST) * 2)
     obs = await get_observation(kos, prev_action)
@@ -234,12 +217,10 @@ async def main(model_path: str, ip: str, episode_length: int) -> None:
         logger.info("Exiting...")
         await disable(kos)
         logger.info("Actuators disabled")
-        await disable(kos)
-        logger.info("Actuators disabled")
-
         raise KeyboardInterrupt
 
     logger.info("Episode finished!")
+
 
 # python -m ksim_kbot.deploy.real --model_path /path/to/model
 if __name__ == "__main__":

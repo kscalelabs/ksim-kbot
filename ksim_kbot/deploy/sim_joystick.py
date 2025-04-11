@@ -136,10 +136,7 @@ async def get_observation(
     phase = np.fmod(phase + np.pi, 2 * np.pi) - np.pi
     phase_vec = np.array([np.cos(phase), np.sin(phase)]).flatten()
 
-    logger.warning(f"imu_obs: {imu_obs.shape}")
-
     obs = np.concatenate([pos_diff, vel_obs, imu_obs, cmd, prev_action, phase_vec])
-    logger.warning(f"shape: {obs.shape}")
     return obs, phase
 
 
