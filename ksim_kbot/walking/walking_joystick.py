@@ -86,7 +86,7 @@ class KbotActor(eqx.Module):
         self,
         flat_obs_n: Array,
     ) -> distrax.Normal:
-        jax.debug.breakpoint()
+        # jax.debug.breakpoint()
         prediction_n = self.mlp(flat_obs_n)
         mean_n = prediction_n[..., :NUM_OUTPUTS]
         std_n = prediction_n[..., NUM_OUTPUTS:]

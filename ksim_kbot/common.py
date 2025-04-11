@@ -338,11 +338,32 @@ class AngularVelocityCommand(ksim.Command):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class XYPushEvent(ksim.PushEvent):
+class XYPushEvent(ksim.Event):
     """Randomly push the robot after some interval."""
 
     interval_range: tuple[float, float] = attrs.field()
     force_range: tuple[float, float] = attrs.field()
+
+    def __call__(
+        self,
+        model: ksim.PhysicsModel,
+        data: ksim.PhysicsData,
+        event_state: Array,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> tuple[ksim.PhysicsData, Array]:
+        # Decrement by physics timestep.
+        dt = jnp.float32(model.opt.timestep)
+        time_remaining = event_state - dt
+
+        # Update the data if the time remaining is less than 0.
+        updated_data, time_remaining = jax.lax.cond(
+            time_remaining <= 0.0,
+            lambda: self._apply_random_force(data, curriculum_level, rng),
+            lambda: (data, time_remaining),
+        )
+
+        return updated_data, time_remaining
 
     def _apply_random_force(self, data: ksim.PhysicsData, rng: PRNGKeyArray) -> tuple[ksim.PhysicsData, Array]:
         push_theta = jax.random.uniform(rng, maxval=2 * jnp.pi)
@@ -361,3 +382,7 @@ class XYPushEvent(ksim.PushEvent):
         time_remaining = jax.random.uniform(rng, (), minval=minval, maxval=maxval)
 
         return updated_data, time_remaining
+
+    def get_initial_event_state(self, rng: PRNGKeyArray) -> Array:
+        minval, maxval = self.interval_range
+        return jax.random.uniform(rng, (), minval=minval, maxval=maxval)
