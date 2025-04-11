@@ -189,13 +189,7 @@ async def main(model_path: str, ip: str, episode_length: int) -> None:
     await disable(kos)
     time.sleep(1)
     logger.info("Configuring actuators...")
-    kos = pykos.KOS(ip=ip)
-    await disable(kos)
-    time.sleep(1)
-    logger.info("Configuring actuators...")
     await configure_actuators(kos)
-    await asyncio.sleep(1)
-    logger.info("Resetting...")
     await asyncio.sleep(1)
     logger.info("Resetting...")
     await reset(kos)
@@ -212,7 +206,6 @@ async def main(model_path: str, ip: str, episode_length: int) -> None:
         await asyncio.sleep(1)
 
     target_time = time.time() + DT
-    observation = await get_observation(kos, prev_action)
     observation = await get_observation(kos, prev_action)
 
     end_time = time.time() + episode_length
@@ -248,9 +241,6 @@ async def main(model_path: str, ip: str, episode_length: int) -> None:
 
     logger.info("Episode finished!")
 
-
-# python -m ksim_kbot.deploy.real --model_path /path/to/model
-
 # python -m ksim_kbot.deploy.real --model_path /path/to/model
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -258,10 +248,7 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--ip", type=str, default="localhost")
     parser.add_argument("--episode_length", type=int, default=60)  # seconds
-    parser.add_argument("--episode_length", type=int, default=60)  # seconds
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO)
-    asyncio.run(main(args.model_path, args.ip, args.episode_length))
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO)
     asyncio.run(main(args.model_path, args.ip, args.episode_length))

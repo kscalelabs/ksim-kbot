@@ -166,7 +166,7 @@ async def configure_actuators(kos: pykos.KOS) -> None:
 
 async def reset(kos: pykos.KOS) -> None:
     await kos.sim.reset(
-        pos={"x": 0.0, "y": 0.0, "z": 1.41},
+        pos={"x": 0.0, "y": 0.0, "z": 1.01},
         quat={"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
         joints=[{"name": ac.joint_name, "pos": pos} for ac, pos in zip(ACTUATOR_LIST, DEFAULT_POSITIONS)],
     )
@@ -211,7 +211,7 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
     await reset(kos)
 
     command_state = CommandState()
-    keyboard_controller = KeyboardController(command_state.update_from_key)
+    keyboard_controller = KeyboardController(command_state.update_from_key, timeout=0.001)
     await keyboard_controller.start()
 
     phase = np.array([0, np.pi])
