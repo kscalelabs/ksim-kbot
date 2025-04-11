@@ -15,7 +15,6 @@ import numpy as np
 import pykos
 import tensorflow as tf
 from askin import KeyboardController
-from scipy.spatial.transform import Rotation as R
 
 logger = logging.getLogger(__name__)
 DT = 0.02  # time step (50Hz)

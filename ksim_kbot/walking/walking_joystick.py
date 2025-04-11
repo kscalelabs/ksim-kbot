@@ -642,9 +642,9 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         last_action_n = observations["last_action_observation"]
         # critic observations
         feet_contact_2 = observations["feet_contact_observation"]
-        feet_position_6 = observations["feet_position_observation"]
+        # feet_position_6 = observations["feet_position_observation"]
         # feet_air_time_2 = observations["feet_air_time_observation"]
-        true_height_1 = observations["true_height_observation"]
+        # true_height_1 = observations["true_height_observation"]
 
         actuator_force_n = observations["actuator_force_observation"]
         base_position_3 = observations["base_position_observation"]
@@ -690,7 +690,9 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
 
         log_probs_tn = jax.vmap(get_log_prob)(trajectories)
 
-        values_tn = jax.vmap(self.run_critic, in_axes=(None, 0, 0))(model.critic, trajectories.obs, trajectories.command)
+        values_tn = jax.vmap(self.run_critic, in_axes=(None, 0, 0))(
+            model.critic, trajectories.obs, trajectories.command
+        )
 
         ppo_variables = ksim.PPOVariables(
             log_probs=log_probs_tn,

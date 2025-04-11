@@ -11,17 +11,15 @@ import jax.numpy as jnp
 import ksim
 import xax
 from jaxtyping import Array, PRNGKeyArray
-from kscale.web.gen.api import JointMetadataOutput
-from ksim.curriculum import ConstantCurriculum, Curriculum
 
-from ksim_kbot import common, rewards as kbot_rewards
-from ksim_kbot.standing.standing import MAX_TORQUE
 from ksim_kbot.walking.walking_joystick import KbotWalkingTask, KbotWalkingTaskConfig
 
 # Define Input/Output Sizes based on KbotWalkingTask
-# Actor Inputs: phase(4) + pos(20) + vel(20) + imu_acc(3) + imu_gyro(3) + lin_cmd(2) + ang_cmd(1) + freq_cmd(1) + last_action(40)
+# Actor Inputs: phase(4) + pos(20) + vel(20) + imu_acc(3) +
+# imu_gyro(3) + lin_cmd(2) + ang_cmd(1) + freq_cmd(1) + last_action(40)
 NUM_ACTOR_INPUTS = 4 + 20 + 20 + 3 + 3 + 2 + 1 + 1 + 40
-# Critic Inputs: actor_inputs(94) + proj_grav(3) + feet_contact(2) + base_pos(3) + base_orient(4) + base_lin_vel(3) + base_ang_vel(3) + act_force(20)
+# Critic Inputs: actor_inputs(94) + proj_grav(3) + feet_contact(2) +
+# base_pos(3) + base_orient(4) + base_lin_vel(3) + base_ang_vel(3) + act_force(20)
 # Note: Critic inputs from KbotWalkingTask forward method used here.
 NUM_CRITIC_INPUTS = NUM_ACTOR_INPUTS + 3 + 2 + 3 + 4 + 3 + 3 + 20
 # Action Outputs: pos_target(20) + vel_target(20)
@@ -209,6 +207,7 @@ class RnnModel(eqx.Module):
 @dataclass
 class WalkingRnnTaskConfig(KbotWalkingTaskConfig):
     """Config for the K-Bot RNN walking task."""
+
     hidden_size: int = xax.field(value=256, help="Hidden size for RNN layers.")
     depth: int = xax.field(value=2, help="Number of RNN layers.")
     actor_mean_scale: float = xax.field(value=1.0, help="Scaling factor for actor mean output.")
@@ -350,9 +349,7 @@ class KbotWalkingRnnTask(KbotWalkingTask[Config], Generic[Config]):
 
             initial_carry = self.get_initial_model_carry(rng)
             next_carry = jax.tree.map(
-                lambda x, y: jnp.where(transition.done, x, y),
-                initial_carry,
-                (next_actor_carry, next_critic_carry)
+                lambda x, y: jnp.where(transition.done, x, y), initial_carry, (next_actor_carry, next_critic_carry)
             )
 
             return next_carry, transition_ppo_variables
@@ -392,6 +389,7 @@ class KbotWalkingRnnTask(KbotWalkingTask[Config], Generic[Config]):
             carry=(next_actor_carry, critic_carry_in),
             aux_outputs=None,
         )
+
 
 if __name__ == "__main__":
     KbotWalkingRnnTask.launch(

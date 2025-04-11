@@ -271,7 +271,9 @@ class FeetHeightPenalty(ksim.Reward):
     def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
         return xax.FrozenDict({"swing_peak": jnp.zeros(2), "first_contact": jnp.zeros(2)})
 
-    def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
+    def __call__(
+        self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]
+    ) -> tuple[Array, xax.FrozenDict[str, PyTree]]:
         swing_peak = reward_carry["swing_peak"]
         first_contact = reward_carry["first_contact"]
         error = swing_peak / self.max_foot_height - 1.0
@@ -290,7 +292,9 @@ class FeetAirTimeReward(ksim.Reward):
     def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
         return xax.FrozenDict({"feet_air_time": jnp.zeros(2)})
 
-    def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
+    def __call__(
+        self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]
+    ) -> tuple[Array, xax.FrozenDict[str, PyTree]]:
         first_contact = reward_carry["first_contact"]  # Access shared carry
         air_time = reward_carry["feet_air_time"]  # Access shared carry
         air_time = (air_time - self.threshold_min) * first_contact
