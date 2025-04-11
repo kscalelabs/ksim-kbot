@@ -582,11 +582,11 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                     # threshold_min=0.0,
                     # threshold_max=0.4,
                 ),
-                # kbot_rewards.FeetPhaseReward(
-                #     # foot_default_height=0.0,
-                #     max_foot_height=0.11,
-                #     scale=1.0,
-                # ),
+                kbot_rewards.FeetPhaseReward(
+                    # foot_default_height=0.0,
+                    max_foot_height=0.11,
+                    scale=1.0,
+                ),
             ]
         return rewards
 

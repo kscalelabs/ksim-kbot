@@ -11,6 +11,7 @@ import ksim
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from ksim.utils.mujoco import get_qpos_data_idxs_by_name
+import jax
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -281,9 +282,6 @@ class FeetHeightPenalty(ksim.Reward):
         return reward_value, xax.FrozenDict({"swing_peak": swing_peak, "first_contact": first_contact})
 
 
-import jax
-
-
 @attrs.define(frozen=True, kw_only=True)
 class FeetAirTimeReward(ksim.Reward):
     """Reward for feet air time."""
@@ -337,16 +335,33 @@ class FeetPhaseReward(ksim.Reward):
 
     scale: float = 1.0
     feet_pos_obs_name: str = attrs.field(default="feet_position_observation")
+    gait_freq_cmd_name: str = attrs.field(default="gait_freq_command")
     max_foot_height: float = 0.12
+    gait_freq: float = 1.25
+    ctrl_dt: float = 0.02
 
     def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
-        return xax.FrozenDict({"phase": jnp.zeros(2)})
+        return xax.FrozenDict({"phase": jnp.array([0.0, jnp.pi])})
 
     def __call__(self, trajectory: ksim.Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
         if self.feet_pos_obs_name not in trajectory.obs:
             raise ValueError(f"Observation {self.feet_pos_obs_name} not found; add it as an observation in your task.")
+        # Note bring back the gait freq command
+        # if self.gait_freq_cmd_name not in trajectory.command:
+        #     raise ValueError(f"Command {self.gait_freq_cmd_name} not found; add it as a command in your task.")
+        # gait_freq_cmd = trajectory.command[self.gait_freq_cmd_name]
+        phase_dt = 2 * jnp.pi * self.gait_freq * self.ctrl_dt
+
+        def step_fn(carry, done):
+            phase_tp1 = carry["phase"] + phase_dt
+            phase = jnp.fmod(phase_tp1 + jnp.pi, 2 * jnp.pi) - jnp.pi
+            # If the episode is done, reset the phase to the initial value
+            phase = jax.lax.select(done, jnp.array([0.0, jnp.pi]), phase)
+            return xax.FrozenDict({"phase": phase}), phase
+
+        reward_carry, phase = jax.lax.scan(step_fn, reward_carry, trajectory.done)
+
         foot_pos = trajectory.obs[self.feet_pos_obs_name]
-        phase = reward_carry["phase"]  # Access shared carry
 
         foot_z = jnp.array([foot_pos[..., 2], foot_pos[..., 5]]).T
         ideal_z = self.gait_phase(phase, swing_height=jnp.array(self.max_foot_height))
@@ -354,7 +369,7 @@ class FeetPhaseReward(ksim.Reward):
         error = jnp.sum(jnp.square(foot_z - ideal_z), axis=-1)
         reward = jnp.exp(-error / 0.01)
 
-        return reward, xax.FrozenDict({"phase": phase})
+        return reward, xax.FrozenDict({"phase": phase[-1]})
 
     def gait_phase(
         self,
