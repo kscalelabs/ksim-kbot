@@ -281,6 +281,9 @@ class FeetHeightPenalty(ksim.Reward):
         return reward_value, xax.FrozenDict({"swing_peak": swing_peak, "first_contact": first_contact})
 
 
+import jax
+
+
 @attrs.define(frozen=True, kw_only=True)
 class FeetAirTimeReward(ksim.Reward):
     """Reward for feet air time."""
@@ -288,19 +291,44 @@ class FeetAirTimeReward(ksim.Reward):
     scale: float = 1.0
     threshold_min: float = 0.1
     threshold_max: float = 0.4
+    ctrl_dt: float = 0.02
 
     def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
-        return xax.FrozenDict({"feet_air_time": jnp.zeros(2)})
+        return xax.FrozenDict(
+            {
+                "first_contact": jnp.zeros(2, dtype=bool),
+                "last_contact": jnp.zeros(2, dtype=bool),
+                "feet_air_time": jnp.zeros(2),
+            }
+        )
 
     def __call__(
         self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]
     ) -> tuple[Array, xax.FrozenDict[str, PyTree]]:
-        first_contact = reward_carry["first_contact"]  # Access shared carry
-        air_time = reward_carry["feet_air_time"]  # Access shared carry
-        air_time = (air_time - self.threshold_min) * first_contact
-        air_time = jnp.clip(air_time, max=self.threshold_max - self.threshold_min)
-        reward_value = jnp.sum(air_time, axis=-1)
-        return reward_value, xax.FrozenDict({"feet_air_time": air_time})
+        # Rollout across trajectory of feet contact observations
+        def step_fn(carry, obs):
+            contact = obs
+            contact_bool = contact.astype(bool)
+            contact_filt = contact_bool | carry["last_contact"]
+            first_contact = (carry["feet_air_time"] > 0.0) * contact_filt
+            last_contact = contact_bool
+            feet_air_time = carry["feet_air_time"] + jnp.array(self.ctrl_dt)
+            feet_air_time *= ~contact_bool
+            air_time = (feet_air_time - self.threshold_min) * first_contact
+            air_time = jnp.clip(air_time, a_max=self.threshold_max - self.threshold_min)
+            reward_value = jnp.sum(air_time, axis=-1)
+            new_carry = xax.FrozenDict(
+                {
+                    "first_contact": first_contact,
+                    "last_contact": last_contact,
+                    "feet_air_time": feet_air_time,
+                }
+            )
+            return new_carry, reward_value
+
+        reward_carry, rewards = jax.lax.scan(step_fn, reward_carry, trajectory.obs["feet_contact_observation"])
+
+        return rewards, reward_carry
 
 
 @attrs.define(frozen=True, kw_only=True)

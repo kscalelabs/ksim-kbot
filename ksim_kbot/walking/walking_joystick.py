@@ -577,11 +577,11 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             rewards += [
                 # Stateful rewards
                 kbot_rewards.FeetSlipPenalty(scale=-0.25),
-                # kbot_rewards.FeetAirTimeReward(
-                #     scale=2.0,
-                #     # threshold_min=0.0,
-                #     # threshold_max=0.4,
-                # ),
+                kbot_rewards.FeetAirTimeReward(
+                    scale=2.0,
+                    # threshold_min=0.0,
+                    # threshold_max=0.4,
+                ),
                 # kbot_rewards.FeetPhaseReward(
                 #     # foot_default_height=0.0,
                 #     max_foot_height=0.11,
