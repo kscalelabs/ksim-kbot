@@ -367,8 +367,8 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 scale=1.0,
             ),
             # Penalties to incentivize learning more efficient gaits.
-            ksim.ActuatorForcePenalty(scale=1e-4),
-            ksim.BaseJerkZPenalty(scale=1e-4),
+            ksim.ActuatorForcePenalty(scale=-1e-4),
+            ksim.BaseJerkZPenalty(scale=-1e-4),
         ]
 
         return rewards
