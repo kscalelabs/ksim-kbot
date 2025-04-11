@@ -80,6 +80,7 @@ class KbotActor(eqx.Module):
             ],
             axis=-1,
         )
+        breakpoint()
         return self.call_flat_obs(x_n)
 
     def call_flat_obs(

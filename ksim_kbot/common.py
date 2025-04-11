@@ -365,7 +365,9 @@ class XYPushEvent(ksim.Event):
 
         return updated_data, time_remaining
 
-    def _apply_random_force(self, data: ksim.PhysicsData, rng: PRNGKeyArray) -> tuple[ksim.PhysicsData, Array]:
+    def _apply_random_force(
+        self, data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
+    ) -> tuple[ksim.PhysicsData, Array]:
         push_theta = jax.random.uniform(rng, maxval=2 * jnp.pi)
         push_magnitude = jax.random.uniform(
             rng,

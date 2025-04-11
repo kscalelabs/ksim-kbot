@@ -91,9 +91,7 @@ class LinearVelocityTrackingReward(ksim.Reward):
         if self.linvel_obs_name not in trajectory.obs:
             raise ValueError(f"Observation {self.linvel_obs_name} not found; add it as an observation in your task.")
 
-        command = jnp.concatenate(
-            [trajectory.command[self.command_name_x], trajectory.command[self.command_name_y]], axis=-1
-        )
+        command = trajectory.command[self.command_name]
         lin_vel_error = xax.get_norm(command - trajectory.obs[self.linvel_obs_name][..., :2], self.norm).sum(axis=-1)
         reward_value = jnp.exp(-lin_vel_error / self.error_scale)
         return reward_value, None
