@@ -6,12 +6,12 @@ If some logic will become more general, we can move it to ksim or xax.
 from typing import Self
 
 import attrs
+import jax
 import jax.numpy as jnp
 import ksim
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from ksim.utils.mujoco import get_qpos_data_idxs_by_name
-import jax
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -305,7 +305,7 @@ class FeetAirTimeReward(ksim.Reward):
     ) -> tuple[Array, xax.FrozenDict[str, PyTree]]:
         # Rollout across trajectory of feet contact observations
         def step_fn(carry, obs):
-            contact = obs
+            contact, done = obs
             contact_bool = contact.astype(bool)
             contact_filt = contact_bool | carry["last_contact"]
             first_contact = (carry["feet_air_time"] > 0.0) * contact_filt
@@ -315,16 +315,24 @@ class FeetAirTimeReward(ksim.Reward):
             air_time = (feet_air_time - self.threshold_min) * first_contact
             air_time = jnp.clip(air_time, a_max=self.threshold_max - self.threshold_min)
             reward_value = jnp.sum(air_time, axis=-1)
+
+            new_first_contact = jax.lax.select(done, jnp.zeros(2, dtype=bool), first_contact)
+            new_last_contact = jax.lax.select(done, jnp.zeros(2, dtype=bool), last_contact)
+            new_feet_air_time = jax.lax.select(done, jnp.zeros(2), feet_air_time)
             new_carry = xax.FrozenDict(
                 {
-                    "first_contact": first_contact,
-                    "last_contact": last_contact,
-                    "feet_air_time": feet_air_time,
+                    "first_contact": new_first_contact,
+                    "last_contact": new_last_contact,
+                    "feet_air_time": new_feet_air_time,
                 }
             )
             return new_carry, reward_value
 
-        reward_carry, rewards = jax.lax.scan(step_fn, reward_carry, trajectory.obs["feet_contact_observation"])
+        reward_carry, rewards = jax.lax.scan(
+            step_fn,
+            reward_carry,
+            (trajectory.obs["feet_contact_observation"], trajectory.done),
+        )
 
         return rewards, reward_carry
 
