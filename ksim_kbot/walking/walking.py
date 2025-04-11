@@ -548,7 +548,6 @@ if __name__ == "__main__":
             num_passes=4,
             epochs_per_log_step=1,
             rollout_length_seconds=10.0,
-            use_naive_reward=True,
             # Logging parameters.
             # log_full_trajectory_every_n_seconds=60,
             # Simulation parameters.
