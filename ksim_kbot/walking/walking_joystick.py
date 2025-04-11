@@ -80,7 +80,6 @@ class KbotActor(eqx.Module):
             ],
             axis=-1,
         )
-        breakpoint()
         return self.call_flat_obs(x_n)
 
     def call_flat_obs(
@@ -108,7 +107,7 @@ class KbotCritic(eqx.Module):
 
     def __init__(self, key: PRNGKeyArray) -> None:
         self.mlp = eqx.nn.MLP(
-            in_size=NUM_INPUTS + 3 + 2 + 2 + 6 + 20 + 3 + 4 + 3 + 3 + 1,
+            in_size=NUM_INPUTS + 3 + 2 + 20 + 3 + 4 + 3 + 3,
             out_size=1,  # Always output a single critic value.
             width_size=256,
             depth=5,
@@ -644,7 +643,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         # critic observations
         feet_contact_2 = observations["feet_contact_observation"]
         feet_position_6 = observations["feet_position_observation"]
-        feet_air_time_2 = observations["feet_air_time_observation"]
+        # feet_air_time_2 = observations["feet_air_time_observation"]
         true_height_1 = observations["true_height_observation"]
 
         actuator_force_n = observations["actuator_force_observation"]
@@ -665,14 +664,14 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             gait_freq_cmd=gait_freq_cmd,
             last_action_n=last_action_n,
             feet_contact_2=feet_contact_2,
-            feet_position_6=feet_position_6,
-            feet_air_time_2=feet_air_time_2,
-            true_height_1=true_height_1,
-            actuator_force_n=actuator_force_n,
+            # feet_position_6=feet_position_6,
+            # feet_air_time_2=feet_air_time_2,
             base_position_3=base_position_3,
             base_orientation_4=base_orientation_4,
             base_linear_velocity_3=base_linear_velocity_3,
             base_angular_velocity_3=base_angular_velocity_3,
+            actuator_force_n=actuator_force_n,
+            # true_height_1=true_height_1,
         )
 
     def get_ppo_variables(
@@ -683,15 +682,19 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         rng: PRNGKeyArray,
     ) -> tuple[ksim.PPOVariables, None]:
         # Vectorize over the time dimensions.
-        action_dist_j = self.run_actor(model.actor, trajectories.obs, trajectories.command)
-        log_probs_j = action_dist_j.log_prob(trajectories.action)
 
-        # Vectorize over the time dimensions.
-        values_1 = self.run_critic(model.critic, trajectories.obs, trajectories.command)
+        def get_log_prob(transition: ksim.Trajectory) -> Array:
+            action_dist_n = self.run_actor(model.actor, transition.obs, transition.command)
+            log_probs_n = action_dist_n.log_prob(transition.action / model.actor.mean_scale)
+            return log_probs_n
+
+        log_probs_tn = jax.vmap(get_log_prob)(trajectories)
+
+        values_tn = jax.vmap(self.run_critic, in_axes=(None, 0, 0))(model.critic, trajectories.obs, trajectories.command)
 
         ppo_variables = ksim.PPOVariables(
-            log_probs=log_probs_j,
-            values=values_1.squeeze(-1),
+            log_probs=log_probs_tn,
+            values=values_tn.squeeze(-1),
         )
 
         return ppo_variables, None
