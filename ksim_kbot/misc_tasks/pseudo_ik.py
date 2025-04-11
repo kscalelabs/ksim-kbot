@@ -595,8 +595,8 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 # vel_action_noise=0.1,
                 # pos_action_noise_type="gaussian",
                 # vel_action_noise_type="gaussian",
-                # torque_noise=0.2,
-                # torque_noise_type="gaussian",
+                torque_noise=0.2,
+                torque_noise_type="gaussian",
                 ctrl_clip=[
                     # right arm
                     MAX_TORQUE["03"],
@@ -629,8 +629,8 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
-            ksim.JointPositionObservation(freejoint_first=False, noise=0.01, noise_type="gaussian"),
-            ksim.JointVelocityObservation(freejoint_first=False, noise=0.1, noise_type="gaussian"),
+            ksim.JointPositionObservation(freejoint_first=False, noise=0.0, noise_type="gaussian"),
+            ksim.JointVelocityObservation(freejoint_first=False, noise=0.0, noise_type="gaussian"),
             ksim.ActuatorForceObservation(),
             ksim.ActuatorAccelerationObservation(freejoint_first=False),
             ksim.ContactObservation.create(
