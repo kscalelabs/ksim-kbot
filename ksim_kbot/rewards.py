@@ -6,11 +6,10 @@ If some logic will become more general, we can move it to ksim or xax.
 from typing import Self
 
 import attrs
-import jax
 import jax.numpy as jnp
 import ksim
 import xax
-from jaxtyping import Array, PyTree, PRNGKeyArray
+from jaxtyping import Array, PRNGKeyArray, PyTree
 from ksim.utils.mujoco import get_qpos_data_idxs_by_name
 
 

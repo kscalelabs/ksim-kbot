@@ -318,15 +318,9 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         if self.config.domain_randomize:
             return [
-                # TODO - update this for angular values
-                ksim.PushEvent(
-                    x_force=0.8,
-                    y_force=0.8,
-                    z_force=0.0,
-                    x_angular_force=0.0,
-                    y_angular_force=0.0,
-                    z_angular_force=0.0,
+                common.XYPushEvent(
                     interval_range=(5.0, 10.0),
+                    force_range=(0.1, 0.5),
                 ),
             ]
         else:

@@ -13,7 +13,7 @@ import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
-from ksim.utils.mujoco import get_sensor_data_idxs_by_name, get_site_data_idx_from_name
+from ksim.utils.mujoco import get_sensor_data_idxs_by_name, get_site_data_idx_from_name, slice_update, update_data_field
 from mujoco import mjx
 
 
@@ -335,3 +335,29 @@ class AngularVelocityCommand(ksim.Command):
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
         new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
         return jnp.where(switch_mask, new_commands, prev_command)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class XYPushEvent(ksim.PushEvent):
+    """Randomly push the robot after some interval."""
+
+    interval_range: tuple[float, float] = attrs.field()
+    force_range: tuple[float, float] = attrs.field()
+
+    def _apply_random_force(self, data: ksim.PhysicsData, rng: PRNGKeyArray) -> tuple[ksim.PhysicsData, Array]:
+        push_theta = jax.random.uniform(rng, maxval=2 * jnp.pi)
+        push_magnitude = jax.random.uniform(
+            rng,
+            minval=self.force_range[0],
+            maxval=self.force_range[1],
+        )
+        push = jnp.array([jnp.cos(push_theta), jnp.sin(push_theta)])
+        random_forces = push * push_magnitude + data.qvel[:2]
+        new_qvel = slice_update(data, "qvel", slice(0, 2), random_forces)
+        updated_data = update_data_field(data, "qvel", new_qvel)
+
+        # Chooses a new remaining interval.
+        minval, maxval = self.interval_range
+        time_remaining = jax.random.uniform(rng, (), minval=minval, maxval=maxval)
+
+        return updated_data, time_remaining
