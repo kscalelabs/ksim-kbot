@@ -2,7 +2,6 @@
 """Defines simple task for training a standing policy for K-Bot."""
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Callable, Generic, TypeVar
 
 import distrax
@@ -14,15 +13,14 @@ import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from ksim.curriculum import ConstantCurriculum, Curriculum
-from xax.nn.export import export
 
 from ksim_kbot import common, rewards as kbot_rewards
 from ksim_kbot.standing.standing import MAX_TORQUE, KbotStandingTask, KbotStandingTaskConfig
 
 OBS_SIZE = 20 * 2 + 4 + 3 + 3 + 40  # = position + velocity + phase + imu_acc + imu_gyro + last_action
 CMD_SIZE = 2 + 1 + 1
-NUM_OUTPUTS = 20 * 2  # position + velocity
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
+NUM_OUTPUTS = 20 * 2  # position + velocity
 
 
 class KbotActor(eqx.Module):
@@ -88,6 +86,7 @@ class KbotActor(eqx.Module):
         self,
         flat_obs_n: Array,
     ) -> distrax.Normal:
+        jax.debug.breakpoint()
         prediction_n = self.mlp(flat_obs_n)
         mean_n = prediction_n[..., :NUM_OUTPUTS]
         std_n = prediction_n[..., NUM_OUTPUTS:]
@@ -537,27 +536,63 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 ),
                 scale=-0.1,
             ),
-            kbot_rewards.LinearVelocityTrackingReward(scale=1.0),
-            kbot_rewards.AngularVelocityTrackingReward(scale=0.5),
-            kbot_rewards.AngularVelocityXYPenalty(scale=-0.15),
+            kbot_rewards.HipDeviationPenalty.create(
+                physics_model=physics_model,
+                hip_names=(
+                    "dof_right_hip_roll_03",
+                    "dof_right_hip_yaw_03",
+                    "dof_left_hip_roll_03",
+                    "dof_left_hip_yaw_03",
+                ),
+                joint_targets=(
+                    # right arm
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    # left arm
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    # right leg
+                    -0.23,
+                    0.0,
+                    0.0,
+                    -0.441,
+                    0.195,
+                    # left leg
+                    0.23,
+                    0.0,
+                    0.0,
+                    0.441,
+                    -0.195,
+                ),
+                scale=-0.25,
+            ),
             kbot_rewards.TerminationPenalty(scale=-1.0),
             kbot_rewards.FarFromOriginTerminationReward(max_dist=5.0, scale=1.0),
             kbot_rewards.OrientationPenalty(scale=-2.0),
+            kbot_rewards.LinearVelocityTrackingReward(scale=1.2),
+            kbot_rewards.AngularVelocityTrackingReward(scale=0.5),
+            kbot_rewards.AngularVelocityXYPenalty(scale=-0.15),
         ]
         if self.config.use_gait_rewards:
             rewards += [
                 # Stateful rewards
                 kbot_rewards.FeetSlipPenalty(scale=-0.25),
-                kbot_rewards.FeetAirTimeReward(
-                    scale=2.0,
-                    # threshold_min=0.0,
-                    # threshold_max=0.4,
-                ),
-                kbot_rewards.FeetPhaseReward(
-                    # foot_default_height=0.0,
-                    max_foot_height=0.11,
-                    scale=1.0,
-                ),
+                # kbot_rewards.FeetAirTimeReward(
+                #     scale=2.0,
+                #     # threshold_min=0.0,
+                #     # threshold_max=0.4,
+                # ),
+                # kbot_rewards.FeetPhaseReward(
+                #     # foot_default_height=0.0,
+                #     max_foot_height=0.11,
+                #     scale=1.0,
+                # ),
             ]
         return rewards
 
@@ -715,29 +750,30 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
 
         return model_fn
 
-    def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
-        if not self.config.export_for_inference:
-            return state
+    # def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
+    #     if not self.config.export_for_inference:
+    #         return state
 
-        model: KbotModel = self.load_checkpoint(ckpt_path, part="model")
+    #     model: KbotModel = self.load_ckpt_with_template(
+    #         ckpt_path,
+    #         part="model",
+    #         model_template=self.get_model(key=jax.random.PRNGKey(0)),
+    #     )
 
-        model_fn = self.make_export_model(model, stochastic=False, batched=True)
+    #     model_fn = self.make_export_model(model, stochastic=False, batched=True)
 
-        input_shapes = [(NUM_INPUTS,)]
-
-        tf_path = (
-            ckpt_path.parent / "tf_model"
-            if self.config.only_save_most_recent
-            else ckpt_path.parent / f"tf_model_{state.num_steps}"
-        )
-
-        export(
-            model_fn,
-            input_shapes,  # type: ignore [arg-type]
-            tf_path,
-        )
-
-        return state
+    #     input_shapes = [(NUM_INPUTS,)]
+    #     tf_path = (
+    #         ckpt_path.parent / "tf_model"
+    #         if self.config.only_save_most_recent
+    #         else ckpt_path.parent / f"tf_model_{state.num_steps}"
+    #     )
+    #     export(
+    #         model_fn,
+    #         input_shapes,  # type: ignore [arg-type]
+    #         tf_path,
+    #     )
+    #     return state
 
     def reset_reward_carry(self, rng: PRNGKeyArray) -> xax.FrozenDict[str, Array]:
         key, _ = jax.random.split(rng)
@@ -766,7 +802,6 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         physics_state: ksim.PhysicsState,
         commands: xax.FrozenDict[str, Array],
     ) -> xax.FrozenDict[str, Array]:
-        breakpoint()
         # Phase:
         phase_tp1 = reward_carry["phase"] + reward_carry["phase_dt"]
         phase = jnp.fmod(phase_tp1 + jnp.pi, 2 * jnp.pi) - jnp.pi
@@ -824,7 +859,7 @@ if __name__ == "__main__":
             min_action_latency=0.0,
             rollout_length_seconds=1.25,
             # PPO parameters
-            action_scale=0.5,
+            action_scale=0.75,
             gamma=0.97,
             lam=0.95,
             entropy_coef=0.005,
@@ -836,7 +871,7 @@ if __name__ == "__main__":
             export_for_inference=True,
             only_save_most_recent=False,
             # Task parameters
-            use_gait_rewards=False,
+            use_gait_rewards=True,
             domain_randomize=True,
             light_domain_randomize=False,
             gait_freq_lower=1.25,
