@@ -366,6 +366,9 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 angular_velocity_clip_max=self.config.angular_velocity_clip_max,
                 scale=1.0,
             ),
+            # Penalties to incentivize learning more efficient gaits.
+            ksim.ActuatorForcePenalty(scale=1e-4),
+            ksim.BaseJerkZPenalty(scale=1e-4),
         ]
 
         return rewards
