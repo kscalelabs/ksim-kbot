@@ -1,4 +1,4 @@
-"""Example script to deploy a SavedModel in KOS-Sim."""
+"""Script to Deploy Sim-History Model in KOS-Sim."""
 
 import argparse
 import asyncio
@@ -14,12 +14,13 @@ from typing import Callable
 import numpy as np
 import pykos
 import tensorflow as tf
-from askin import KeyboardController
 from scipy.spatial.transform import Rotation as R
+
+from ksim_kbot.deploy.keyboard_controller import KeyboardController
 
 logger = logging.getLogger(__name__)
 DT = 0.02  # time step (50Hz)
-GAIT_DT = 1.25
+
 DEFAULT_POSITIONS = np.array(
     [
         0,
@@ -45,30 +46,9 @@ DEFAULT_POSITIONS = np.array(
     ]
 )
 
-
-class CommandState:
-    def __init__(self) -> None:
-        self.cmd = np.array([0.3, 0.0])
-        self.step_size = 0.01
-
-    async def update_from_key(self, key: str) -> None:
-        if key == "a":
-            self.cmd[0] -= self.step_size
-        elif key == "d":
-            self.cmd[0] += self.step_size
-        elif key == "w":
-            self.cmd[1] += self.step_size
-        elif key == "s":
-            self.cmd[1] -= self.step_size
-
-        logger.debug("Command updated to: %s", self.cmd)
-
-    def get_command(self) -> np.ndarray:
-        return self.cmd.copy()
-
-
 OBS_SIZE = 20 + 20 + 3 + 3 + 3 + 40 + 4  # pos_diff (20) + vel_obs (20) + imu (6) - adjust if needed
 CMD_SIZE = 2
+HIST_LEN = 5
 
 
 @dataclass
@@ -109,9 +89,31 @@ ACTUATOR_LIST: list[Actuator] = [
 ]
 
 
+
+class CommandState:
+    def __init__(self) -> None:
+        self.cmd = np.array([0.3, 0.0])
+        self.step_size = 0.01
+
+    async def update_from_key(self, key: str) -> None:
+        if key == "a":
+            self.cmd[0] -= self.step_size
+        elif key == "d":
+            self.cmd[0] += self.step_size
+        elif key == "w":
+            self.cmd[1] += self.step_size
+        elif key == "s":
+            self.cmd[1] -= self.step_size
+
+        logger.debug("Command updated to: %s", self.cmd)
+
+    def get_command(self) -> np.ndarray:
+        return self.cmd.copy()
+
+
 async def get_observation(
-    kos: pykos.KOS, prev_action: np.ndarray, cmd: np.ndarray, phase: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
+    kos: pykos.KOS, prev_action: np.ndarray, cmd: np.ndarray, phase: np.ndarray, history: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     ids = [ac.actuator_id for ac in ACTUATOR_LIST]
     act_states, imu, raw_quat = await asyncio.gather(
         kos.actuator.get_actuators_state(ids), kos.imu.get_imu_values(), kos.imu.get_quaternion()
@@ -130,19 +132,32 @@ async def get_observation(
     # During training gravity vector is taken from the first torso frame
     gvec = np.array([gvec[1], -gvec[2], -gvec[0]])
 
-    phase += 2 * np.pi * GAIT_DT * DT
+    phase += 2 * np.pi * 1.2550827 * DT
     phase = np.fmod(phase + np.pi, 2 * np.pi) - np.pi
     phase_vec = np.array([np.cos(phase), np.sin(phase)]).flatten()
 
-    obs = np.concatenate([pos_diff, vel_obs, imu_obs, cmd, prev_action, phase_vec])
-    return obs, phase
+    obs = np.concatenate([pos_diff, vel_obs, imu_obs, gvec, cmd, prev_action, phase_vec])
+    full_obs = np.concatenate([obs, history])
+    return obs, full_obs, phase
+
+
+def update_history(history: np.ndarray, obs: np.ndarray, obs_size: int, cmd_size: int, hist_len: int) -> np.ndarray:
+    step_size = obs_size + cmd_size
+    history = history.reshape(hist_len, step_size)
+    history = np.roll(history, shift=-1, axis=0)
+    history[-1] = obs
+    return history.flatten()
 
 
 async def send_actions(kos: pykos.KOS, position: np.ndarray, velocity: np.ndarray) -> None:
     position = np.rad2deg(position)
     velocity = np.rad2deg(velocity)
     commands = [
-        {"actuator_id": ac.actuator_id, "position": position[ac.nn_id], "velocity": velocity[ac.nn_id]}
+        {
+            "actuator_id": ac.actuator_id,
+            "position": 0.0 if ac.actuator_id in [11, 12, 13, 14, 15, 21, 22, 23, 24, 25] else position[ac.nn_id],
+            "velocity": velocity[ac.nn_id],
+        }
         for ac in ACTUATOR_LIST
     ]
     await kos.actuator.command_actuators(commands)  # type: ignore[arg-type]
@@ -150,13 +165,14 @@ async def send_actions(kos: pykos.KOS, position: np.ndarray, velocity: np.ndarra
 
 async def configure_actuators(kos: pykos.KOS) -> None:
     for ac in ACTUATOR_LIST:
-        await kos.actuator.configure_actuator(
-            actuator_id=ac.actuator_id,
-            kp=ac.kp,
-            kd=ac.kd,
-            torque_enabled=True,
-            max_torque=ac.max_torque,
-        )
+        if ac.actuator_id in [11, 12, 13, 14, 15, 21, 22, 23, 24, 25]:
+            await kos.actuator.configure_actuator(
+                actuator_id=ac.actuator_id,
+                kp=ac.kp,
+                kd=ac.kd,
+                torque_enabled=True,
+                max_torque=ac.max_torque,
+            )
 
 
 async def reset(kos: pykos.KOS) -> None:
@@ -185,7 +201,7 @@ def spawn_kos_sim(no_render: bool) -> tuple[subprocess.Popen, Callable]:
     return proc, cleanup
 
 
-async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -> None:
+async def main(model_path: str, ip: str, no_render: bool, episode_length: int, enable_key: bool) -> None:
     model = tf.saved_model.load(model_path)
     try:
         kos = pykos.KOS(ip=ip)
@@ -205,30 +221,43 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
     await configure_actuators(kos)
     await reset(kos)
 
-    command_state = CommandState()
-    keyboard_controller = KeyboardController(command_state.update_from_key, timeout=0.001)
-    await keyboard_controller.start()
+    # Initialize command source
+    command_state = None
+    keyboard_controller = None
+    default_cmd = np.array([0.3, 0.0])
+    
+    if enable_key:
+        command_state = CommandState()
+        keyboard_controller = KeyboardController(command_state.update_from_key)
+        await keyboard_controller.start()
+        get_command = command_state.get_command
+    else:
+        # Use a lambda that returns a copy of the default command
+        get_command = lambda: default_cmd.copy()
 
+    history = np.zeros(HIST_LEN * (OBS_SIZE + CMD_SIZE))
     phase = np.array([0, np.pi])
     prev_action = np.zeros(len(ACTUATOR_LIST) * 2)
-
-    obs, phase = await get_observation(kos, prev_action, command_state.get_command(), phase)
+    obs, full_obs, phase = await get_observation(kos, prev_action, get_command(), phase, history)
     if no_render:
         await kos.process_manager.start_kclip("deployment")
 
     # warm-up
-    model.infer(obs.reshape(1, -1))
+    model.infer(full_obs.reshape(1, -1))
 
     target_time = time.time() + DT
     end_time = time.time() + episode_length
     while time.time() < end_time:
-        action = np.array(model.infer(obs.reshape(1, -1))).reshape(-1)
+        action = np.array(model.infer(full_obs.reshape(1, -1))).reshape(-1)
+        history = update_history(history, obs, OBS_SIZE, CMD_SIZE, HIST_LEN)
         pos = action[: len(ACTUATOR_LIST)] + DEFAULT_POSITIONS
         vel = action[len(ACTUATOR_LIST) :]
-        (obs, phase), _ = await asyncio.gather(
-            get_observation(kos, prev_action, command_state.get_command(), phase),
-            send_actions(kos, pos, vel),
-        )
+        obs, full_obs, phase = (
+            await asyncio.gather(
+                get_observation(kos, prev_action, get_command(), phase, history),
+                send_actions(kos, pos, vel),
+            )
+        )[0]
         prev_action = action
         if time.time() < target_time:
             await asyncio.sleep(max(0, target_time - time.time()))
@@ -244,7 +273,7 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
 
 
 # Run with:
-# python -m ksim_kbot.deploy.sim --model_path ksim_kbot/deploy/assets/mlp_example
+# python -m ksim_kbot.deploy.sim_history --model_path ksim_kbot/deploy/assets/mlp_example_history
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_path", type=str, required=True)
@@ -252,8 +281,9 @@ if __name__ == "__main__":
     parser.add_argument("--episode_length", type=int, default=5)
     parser.add_argument("--no-render", action="store_true")
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--enable-key", action="store_true")
     args = parser.parse_args()
 
     log_level = logging.DEBUG if args.debug else logging.INFO
     logging.basicConfig(level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    asyncio.run(main(args.model_path, args.ip, args.no_render, args.episode_length))
+    asyncio.run(main(args.model_path, args.ip, args.no_render, args.episode_length, args.enable_key))
