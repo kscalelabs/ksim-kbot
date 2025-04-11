@@ -85,7 +85,7 @@ ACTUATOR_LIST: list[Actuator] = [
 ]
 
 
-async def get_observation(kos: pykos.KOS, prev_action: np.ndarray) -> np.ndarray:
+async def get_observation(kos: pykos.KOS, prev_action: np.ndarray, cmd: np.ndarray, phase: np.ndarray) -> np.ndarray:
     (actuator_states, imu) = await asyncio.gather(
         kos.actuator.get_actuators_state([ac.actuator_id for ac in ACTUATOR_LIST]),
         kos.imu.get_imu_values(),
@@ -100,20 +100,18 @@ async def get_observation(kos: pykos.KOS, prev_action: np.ndarray) -> np.ndarray
         np.array([state_dict_vel[ac.actuator_id] for ac in sorted(ACTUATOR_LIST, key=lambda x: x.nn_id)])
     )
 
-    accel = np.array([imu.accel_x, imu.accel_y, imu.accel_z]) * GRAVITY
+    accel = np.array([imu.accel_x, imu.accel_y, imu.accel_z])
 
     gyro = np.deg2rad(np.array([imu.gyro_x, imu.gyro_y, imu.gyro_z]))
 
     imu_obs = np.concatenate([accel, gyro], axis=-1)
 
-    phase = np.array([0, np.pi])
     phase += 2 * np.pi * GAIT_DT * DT
     phase = np.fmod(phase + np.pi, 2 * np.pi) - np.pi
     phase_vec = np.array([np.cos(phase), np.sin(phase)]).flatten()
 
-    cmd = np.array([0.1, 0.0])
     observation = np.concatenate([pos_diff, vel_obs, imu_obs, cmd, prev_action, phase_vec]).reshape(1, -1)
-    return observation
+    return observation, phase
 
 
 async def send_actions(kos: pykos.KOS, position: np.ndarray, velocity: np.ndarray) -> None:
@@ -178,8 +176,10 @@ async def main(model_path: str, ip: str, episode_length: int) -> None:
     logger.info("Resetting...")
     await reset(kos)
 
+    cmd = np.array([0.1, 0.0])
+    phase = np.array([0, np.pi])
     prev_action = np.zeros(len(ACTUATOR_LIST) * 2)
-    obs = await get_observation(kos, prev_action)
+    obs, phase = await get_observation(kos, prev_action, cmd, phase)
 
     # warm up model
     model.infer(obs)
@@ -189,7 +189,7 @@ async def main(model_path: str, ip: str, episode_length: int) -> None:
         await asyncio.sleep(1)
 
     target_time = time.time() + DT
-    observation = await get_observation(kos, prev_action)
+    observation, phase = await get_observation(kos, prev_action, cmd, phase)
 
     end_time = time.time() + episode_length
 
@@ -200,8 +200,8 @@ async def main(model_path: str, ip: str, episode_length: int) -> None:
             action = np.array(model.infer(observation)).reshape(-1)
             position = action[: len(ACTUATOR_LIST)]
             velocity = action[len(ACTUATOR_LIST) :]
-            observation, _ = await asyncio.gather(
-                get_observation(kos, prev_action),
+            observation, phase = await asyncio.gather(
+                get_observation(kos, prev_action, cmd, phase),
                 send_actions(kos, position, velocity),
             )
             prev_action = action
