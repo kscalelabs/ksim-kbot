@@ -135,7 +135,10 @@ async def get_observation(
     phase = np.fmod(phase + np.pi, 2 * np.pi) - np.pi
     phase_vec = np.array([np.cos(phase), np.sin(phase)]).flatten()
 
+    logger.warning(f"imu_obs: {imu_obs.shape}")
+
     obs = np.concatenate([pos_diff, vel_obs, imu_obs, cmd, prev_action, phase_vec])
+    logger.warning(f"shape: {obs.shape}")
     return obs, phase
 
 
@@ -162,7 +165,7 @@ async def configure_actuators(kos: pykos.KOS) -> None:
 
 async def reset(kos: pykos.KOS) -> None:
     await kos.sim.reset(
-        pos={"x": 0.0, "y": 0.0, "z": 1.01},
+        pos={"x": 0.0, "y": 0.0, "z": 1.41},
         quat={"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
         joints=[{"name": ac.joint_name, "pos": pos} for ac, pos in zip(ACTUATOR_LIST, DEFAULT_POSITIONS)],
     )

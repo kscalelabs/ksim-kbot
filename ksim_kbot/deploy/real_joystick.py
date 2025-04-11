@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 DT = 0.02  # Policy time step (50Hz)
 GRAVITY = 9.81  # m/s
-ACTION_SCALE = 1.0
+ACTION_SCALE = 0.3
 
 DEFAULT_POSITIONS = np.array(
     [
@@ -105,8 +105,13 @@ async def get_observation(kos: pykos.KOS, prev_action: np.ndarray) -> np.ndarray
 
     imu_obs = np.concatenate([accel, gyro], axis=-1)
 
-    cmd = np.array([0.0, 0.0])
-    observation = np.concatenate([pos_diff, vel_obs, imu_obs, cmd, prev_action], axis=-1)
+    phase = np.array([0, np.pi])
+    phase += 2 * np.pi * 1.2550827 * DT
+    phase = np.fmod(phase + np.pi, 2 * np.pi) - np.pi
+    phase_vec = np.array([np.cos(phase), np.sin(phase)]).flatten()
+
+    cmd = np.array([0.1, 0.0])
+    observation = np.concatenate([pos_diff, vel_obs, imu_obs, cmd, prev_action, phase_vec]).reshape(1, -1)
     return observation
 
 
@@ -116,14 +121,15 @@ async def send_actions(kos: pykos.KOS, position: np.ndarray, velocity: np.ndarra
     actuator_commands: list[pykos.services.actuator.ActuatorCommand] = [
         {
             "actuator_id": ac.actuator_id,
-            "position": position[ac.nn_id] * ACTION_SCALE,
+            "position": 0.0 if ac.actuator_id in [11, 12, 13, 14, 15, 21, 22, 23, 24, 25] else position[ac.nn_id] * ACTION_SCALE,
             "velocity": velocity[ac.nn_id] * ACTION_SCALE,
         }
         for ac in ACTUATOR_LIST
     ]
-    # logger.debug(actuator_commands)
 
-    await kos.actuator.command_actuators(actuator_commands)
+    logger.warning(actuator_commands)
+    # Send commands to all KOS instances
+    await asyncio.gather(*kos.actuator.command_actuators(actuator_commands))
 
 
 async def configure_actuators(kos: pykos.KOS) -> None:
@@ -170,10 +176,10 @@ async def main(model_path: str, ip: str, episode_length: int) -> None:
     await reset(kos)
 
     prev_action = np.zeros(len(ACTUATOR_LIST) * 2)
-    observation = (await get_observation(kos, prev_action)).reshape(1, -1)
+    obs = await get_observation(kos, prev_action)
 
     # warm up model
-    model.infer(observation)
+    model.infer(obs)
 
     for i in range(5, -1, -1):
         logger.info("Starting in %d seconds...", i)

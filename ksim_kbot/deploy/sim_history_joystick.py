@@ -129,7 +129,7 @@ async def send_actions(kos: pykos.KOS, position: np.ndarray, velocity: np.ndarra
     position = np.rad2deg(position)
     velocity = np.rad2deg(velocity)
     commands = [
-        {"actuator_id": ac.actuator_id, "position": position[ac.nn_id], "velocity": velocity[ac.nn_id]}
+        {"actuator_id": ac.actuator_id, "position": 0.0 if ac.actuator_id in [11, 12, 13, 14, 15, 21, 22, 23, 24, 25] else position[ac.nn_id], "velocity": velocity[ac.nn_id]}
         for ac in ACTUATOR_LIST
     ]
     await kos.actuator.command_actuators(commands)  # type: ignore[arg-type]
@@ -137,13 +137,14 @@ async def send_actions(kos: pykos.KOS, position: np.ndarray, velocity: np.ndarra
 
 async def configure_actuators(kos: pykos.KOS) -> None:
     for ac in ACTUATOR_LIST:
-        await kos.actuator.configure_actuator(
-            actuator_id=ac.actuator_id,
-            kp=ac.kp,
-            kd=ac.kd,
-            torque_enabled=True,
-            max_torque=ac.max_torque,
-        )
+        if ac.actuator_id in [11, 12, 13, 14, 15, 21, 22, 23, 24, 25]:
+            await kos.actuator.configure_actuator(
+                actuator_id=ac.actuator_id,
+                kp=ac.kp,
+                kd=ac.kd,
+                torque_enabled=True,
+                max_torque=ac.max_torque,
+            )
 
 
 async def reset(kos: pykos.KOS) -> None:
