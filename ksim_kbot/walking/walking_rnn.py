@@ -12,7 +12,12 @@ import ksim
 import xax
 from jaxtyping import Array, PRNGKeyArray
 
-from ksim_kbot.walking.walking import NUM_INPUTS, NUM_JOINTS, WalkingTask, WalkingTaskConfig
+from ksim_kbot.walking.walking import (
+    NUM_INPUTS,
+    NUM_JOINTS,
+    WalkingTask,
+    WalkingTaskConfig,
+)
 
 
 class RnnActor(eqx.Module):
@@ -390,6 +395,5 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
-            use_naive_reward=True,
         ),
     )
