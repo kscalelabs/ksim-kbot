@@ -347,8 +347,8 @@ class FeetAirTimeReward(ksim.Reward):
     """Reward for feet air time."""
 
     scale: float = 1.0
-    threshold_min: float = 0.0
-    threshold_max: float = 0.4
+    threshold_min: float = 0.2
+    threshold_max: float = 0.5
     ctrl_dt: float = 0.02
 
     def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
