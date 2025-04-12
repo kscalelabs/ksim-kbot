@@ -143,17 +143,15 @@ class TimestepPhaseObservation(ksim.TimestepObservation):
 
     ctrl_dt: float = attrs.field(default=0.02)
 
-    # TODO - create freq here instead of at the command
-    def create(self, physics_model: ksim.PhysicsModel) -> Self:
-        return None
-
     def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
-        # trotting gait
-        start_phase = jnp.array([0, jnp.pi])
+        gait_freq = state.commands["gait_frequency_command"]
         timestep = super().observe(state, rng)
-        phase_dt = 2 * jnp.pi * state.commands["gait_frequency_command"] * self.ctrl_dt
-        # TODO - compute it here without scan
-        phase = start_phase + timestep * phase_dt
+        steps = timestep / self.ctrl_dt
+        phase_dt = 2 * jnp.pi * gait_freq * self.ctrl_dt
+        start_phase = jnp.array([0, jnp.pi])  # trotting gait
+        phase = start_phase + steps * phase_dt
+        phase = jnp.fmod(phase + jnp.pi, 2 * jnp.pi) - jnp.pi
+
         return jnp.array([jnp.cos(phase), jnp.sin(phase)]).flatten()
 
 
