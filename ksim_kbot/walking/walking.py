@@ -499,11 +499,13 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         rng: PRNGKeyArray,
     ) -> tuple[ksim.PPOVariables, None]:
         # Vectorize over the time dimensions.
-        action_dist_j = self.run_actor(model.actor, trajectories.obs, trajectories.command)
+        run_actor_fn = jax.vmap(self.run_actor, in_axes=(None, 0, 0))
+        action_dist_j = run_actor_fn(model.actor, trajectories.obs, trajectories.command)
         log_probs_j = action_dist_j.log_prob(trajectories.action)
 
         # Vectorize over the time dimensions.
-        values_1 = self.run_critic(model.critic, trajectories.obs, trajectories.command)
+        run_critic_fn = jax.vmap(self.run_critic, in_axes=(None, 0, 0))
+        values_1 = run_critic_fn(model.critic, trajectories.obs, trajectories.command)
 
         ppo_variables = ksim.PPOVariables(
             log_probs=log_probs_j,
@@ -522,11 +524,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> ksim.Action:
-        action_dist_j = self.run_actor(
-            model=model.actor,
-            observations=observations,
-            commands=commands,
-        )
+        action_dist_j = self.run_actor(model.actor, observations, commands)
         action_j = action_dist_j.sample(seed=rng)
         return ksim.Action(action=action_j, carry=None, aux_outputs=None)
 
