@@ -20,7 +20,12 @@ from mujoco import mjx
 
 NUM_JOINTS = 20
 
-NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 230 + 138 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 6
+NUM_OBS = NUM_JOINTS * 2 + 3 + 3 + 2 # joint pos, joint vel, imu acc, imu gyro, time (sin, cos)
+NUM_COMMANDS = 6
+
+NUM_INPUTS = NUM_OBS + NUM_COMMANDS
+
+NUM_CRITIC_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 230 + 138 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 6
 
 
 class Actor(eqx.Module):
@@ -91,7 +96,7 @@ class Critic(eqx.Module):
         hidden_size: int,
         depth: int,
     ) -> None:
-        num_inputs = NUM_INPUTS
+        num_inputs = NUM_CRITIC_INPUTS
         num_outputs = 1
 
         self.mlp = eqx.nn.MLP(
@@ -403,17 +408,10 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
     ) -> distrax.Distribution:
         timestep_1 = observations["timestep_observation"]
-        dh_joint_pos_j = observations["joint_position_observation"]
-        dh_joint_vel_j = observations["joint_velocity_observation"]
-        com_inertia_n = observations["center_of_mass_inertia_observation"]
-        com_vel_n = observations["center_of_mass_velocity_observation"]
+        joint_pos_j = observations["joint_position_observation"]
+        joint_vel_j = observations["joint_velocity_observation"]
         imu_acc_3 = observations["sensor_observation_imu_acc"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
-        act_frc_obs_n = observations["actuator_force_observation"]
-        base_pos_3 = observations["base_position_observation"]
-        base_quat_4 = observations["base_orientation_observation"]
-        lin_vel_obs_3 = observations["base_linear_velocity_observation"]
-        ang_vel_obs_3 = observations["base_angular_velocity_observation"]
         joystick_cmd_1 = commands["joystick_command"]
         joystick_cmd_ohe_6 = jax.nn.one_hot(joystick_cmd_1, num_classes=6).squeeze(-2)
 
@@ -421,17 +419,10 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             [
                 jnp.cos(timestep_1),  # 1
                 jnp.sin(timestep_1),  # 1
-                dh_joint_pos_j,  # NUM_JOINTS
-                dh_joint_vel_j / 10.0,  # NUM_JOINTS
-                com_inertia_n,  # 160
-                com_vel_n,  # 96
+                joint_pos_j,  # NUM_JOINTS
+                joint_vel_j / 10.0,  # NUM_JOINTS
                 imu_acc_3 / 50.0,  # 3
                 imu_gyro_3 / 3.0,  # 3
-                act_frc_obs_n / 100.0,  # NUM_JOINTS
-                base_pos_3,  # 3
-                base_quat_4,  # 4
-                lin_vel_obs_3,  # 3
-                ang_vel_obs_3,  # 3
                 joystick_cmd_ohe_6,  # 6
             ],
             axis=-1,

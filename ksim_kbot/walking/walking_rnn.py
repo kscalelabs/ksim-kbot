@@ -13,6 +13,7 @@ import xax
 from jaxtyping import Array, PRNGKeyArray
 
 from ksim_kbot.walking.walking import (
+    NUM_CRITIC_INPUTS,
     NUM_INPUTS,
     NUM_JOINTS,
     WalkingTask,
@@ -164,6 +165,7 @@ class RnnModel(eqx.Module):
         min_std: float,
         max_std: float,
         num_inputs: int,
+        num_critic_inputs: int,
         num_joints: int,
         hidden_size: int,
         depth: int,
@@ -180,7 +182,7 @@ class RnnModel(eqx.Module):
         )
         self.critic = RnnCritic(
             key,
-            num_inputs=num_inputs,
+            num_inputs=num_critic_inputs,
             hidden_size=hidden_size,
             depth=depth,
         )
@@ -199,6 +201,7 @@ class WalkingRnnTask(WalkingTask[Config], Generic[Config]):
         return RnnModel(
             key,
             num_inputs=NUM_INPUTS,
+            num_critic_inputs=NUM_CRITIC_INPUTS,
             num_joints=NUM_JOINTS,
             min_std=0.01,
             max_std=1.0,
@@ -214,17 +217,10 @@ class WalkingRnnTask(WalkingTask[Config], Generic[Config]):
         carry: Array,
     ) -> tuple[distrax.Distribution, Array]:
         timestep_1 = observations["timestep_observation"]
-        dh_joint_pos_j = observations["joint_position_observation"]
-        dh_joint_vel_j = observations["joint_velocity_observation"]
-        com_inertia_n = observations["center_of_mass_inertia_observation"]
-        com_vel_n = observations["center_of_mass_velocity_observation"]
+        joint_pos_j = observations["joint_position_observation"]
+        joint_vel_j = observations["joint_velocity_observation"]
         imu_acc_3 = observations["sensor_observation_imu_acc"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
-        act_frc_obs_n = observations["actuator_force_observation"]
-        base_pos_3 = observations["base_position_observation"]
-        base_quat_4 = observations["base_orientation_observation"]
-        lin_vel_obs_3 = observations["base_linear_velocity_observation"]
-        ang_vel_obs_3 = observations["base_angular_velocity_observation"]
         joystick_cmd_1 = commands["joystick_command"]
         joystick_cmd_ohe_6 = jax.nn.one_hot(joystick_cmd_1, num_classes=6).squeeze(-2)
 
@@ -232,17 +228,10 @@ class WalkingRnnTask(WalkingTask[Config], Generic[Config]):
             [
                 jnp.cos(timestep_1),  # 1
                 jnp.sin(timestep_1),  # 1
-                dh_joint_pos_j,  # NUM_JOINTS
-                dh_joint_vel_j / 10.0,  # NUM_JOINTS
-                com_inertia_n,  # 160
-                com_vel_n,  # 96
+                joint_pos_j,  # NUM_JOINTS
+                joint_vel_j / 10.0,  # NUM_JOINTS
                 imu_acc_3 / 50.0,  # 3
                 imu_gyro_3 / 3.0,  # 3
-                act_frc_obs_n / 100.0,  # NUM_JOINTS
-                base_pos_3,  # 3
-                base_quat_4,  # 4
-                lin_vel_obs_3,  # 3
-                ang_vel_obs_3,  # 3
                 joystick_cmd_ohe_6,  # 6
             ],
             axis=-1,

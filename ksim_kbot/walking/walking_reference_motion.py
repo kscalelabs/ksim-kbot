@@ -19,8 +19,7 @@ from jaxtyping import Array, PRNGKeyArray
 from ksim.types import PhysicsModel
 from ksim.utils.reference_motion import (
     ReferenceMapping,
-    generate_reference_motion,
-    get_local_xpos,
+    get_reference_qpos,
     get_reference_joint_id,
     visualize_reference_motion,
 )
@@ -28,15 +27,6 @@ from scipy.spatial.transform import Rotation as R
 
 import ksim_kbot.rewards as kbot_rewards
 from ksim_kbot.walking.walking_rnn import RnnModel, WalkingRnnTask, WalkingRnnTaskConfig
-
-HISTORY_LENGTH = 0
-SINGLE_STEP_HISTORY_SIZE = 0
-
-
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class MotionAuxOutputs:
-    tracked_pos: xax.FrozenDict[int, Array]
 
 
 HUMANOID_REFERENCE_MAPPINGS = (
@@ -69,9 +59,9 @@ class WalkingRnnRefMotionTaskConfig(WalkingRnnTaskConfig):
         value=1.0,
         help="Scaling factor to ensure the BVH tree matches the Mujoco model.",
     )
-    offset_reference_motion: tuple[float, float, float] = xax.field(
-        value=(0.1, 0.09, -0.29),
-        help="Offset to apply to the reference motion.",
+    bvh_offset: tuple[float, float, float] = xax.field(
+        value=(0.0, 0.0, 0.0),
+        help="Offset to ensure the BVH tree matches the Mujoco model.",
     )
     mj_base_name: str = xax.field(
         value="pelvis",
@@ -93,9 +83,9 @@ class WalkingRnnRefMotionTaskConfig(WalkingRnnTaskConfig):
         value=1.0,
         help="The scale to apply to the naive reward.",
     )
-    match_reward_scale: float = xax.field(
-        value=0.05,
-        help="The scale to apply to the match reward.",
+    qpos_reward_scale: float = xax.field(
+        value=0.5,
+        help="The scale to apply to the qpos reference motion reward.",
     )
 
 
@@ -103,35 +93,30 @@ Config = TypeVar("Config", bound=WalkingRnnRefMotionTaskConfig)
 
 
 @attrs.define(frozen=True, kw_only=True)
-class MatchReferenceMotionReward(ksim.Reward):
-    reference_motion: xax.FrozenDict[int, xax.HashableArray]
+class QposReferenceMotionReward(ksim.Reward):
+    reference_qpos: xax.HashableArray
     ctrl_dt: float
     norm: xax.NormType = attrs.field(default="l1")
     sensitivity: float = attrs.field(default=5.0)
-    body_idx: int
-
-    def get_name(self) -> str:
-        return f"{self.body_idx}_{super().get_name()}"
 
     @property
     def num_frames(self) -> int:
-        return list(self.reference_motion.values())[0].array.shape[0]
+        return self.reference_qpos.array.shape[0]
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        assert isinstance(trajectory.aux_outputs, MotionAuxOutputs)
-        reference_motion: xax.FrozenDict[int, Array] = jax.tree.map(lambda x: x.array, self.reference_motion)
+    def __call__(self, trajectory: ksim.Trajectory, _: None) -> tuple[Array, None]:
+        qpos = trajectory.qpos
         step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
-        target_pos_dict = jax.tree.map(lambda x: jnp.take(x, step_number, axis=0), reference_motion)
-        tracked_pos = trajectory.aux_outputs.tracked_pos[self.body_idx]
-        target_pos_array = target_pos_dict[self.body_idx]
-        mean_error = xax.get_norm(target_pos_array - tracked_pos, self.norm).mean(axis=-1)
-
+        reference_qpos = jnp.take(self.reference_qpos.array, step_number, axis=0)
+        error = xax.get_norm(reference_qpos - qpos, self.norm)
+        mean_error = error.mean(axis=-1)
         reward = jnp.exp(-mean_error * self.sensitivity)
-        return reward
+        return reward, None
 
 
 class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
     config: Config
+    reference_qpos: xax.HashableArray
+    mj_base_id: int
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards: list[ksim.Reward] = [
@@ -140,18 +125,10 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 scale=1.0,
             ),
             kbot_rewards.OrientationPenalty(scale=self.config.orientation_penalty),
+            QposReferenceMotionReward(
+                reference_qpos=self.reference_qpos, ctrl_dt=self.config.ctrl_dt, scale=self.config.qpos_reward_scale
+            ),
         ]
-
-        # Add separate reward for each body
-        for body_id in self.tracked_body_ids:
-            rewards.append(
-                MatchReferenceMotionReward(
-                    reference_motion=xax.FrozenDict({body_id: self.reference_motion[body_id]}),
-                    ctrl_dt=self.config.ctrl_dt,
-                    scale=self.config.match_reward_scale,
-                    body_idx=body_id,
-                ),
-            )
 
         return rewards
 
@@ -251,18 +228,10 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
 
         action_j = action_dist_j.sample(seed=rng)
 
-        # Getting the local cartesian positions for all tracked bodies.
-        tracked_positions: dict[int, Array] = {}
-        for body_id in self.tracked_body_ids:
-            body_pos = get_local_xpos(physics_state.data.xpos, body_id, self.mj_base_id)
-            tracked_positions[body_id] = jnp.array(body_pos)
-
         return ksim.Action(
             action=action_j,
             carry=(actor_carry, critic_carry_in),
-            aux_outputs=MotionAuxOutputs(
-                tracked_pos=xax.FrozenDict(tracked_positions),
-            ),
+            aux_outputs=None,  # No auxiliary outputs needed for qpos matching
         )
 
     def run(self) -> None:
@@ -276,25 +245,33 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
             quat = R.from_euler("xyz", euler_rotation).as_quat(scalar_first=True)
             root.applyRotation(glm.quat(*quat), bake=True)
 
-        np_reference_motion = generate_reference_motion(
-            mappings=HUMANOID_REFERENCE_MAPPINGS,
+        np_reference_qpos = get_reference_qpos(
             model=mj_model,
-            root=root,
-            reference_base_id=reference_base_id,
-            root_callback=rotation_callback,
-            scaling_factor=self.config.bvh_scaling_factor,
-            offset=np.array(self.config.offset_reference_motion),
+            mj_base_id=self.mj_base_id,
+            bvh_root=root,
+            bvh_to_mujoco_names=HUMANOID_REFERENCE_MAPPINGS,
+            bvh_base_id=reference_base_id,
+            bvh_offset=np.array(self.config.bvh_offset),
+            bvh_root_callback=rotation_callback,
+            bvh_scaling_factor=self.config.bvh_scaling_factor,
+            neutral_qpos=None,  # Or provide a neutral pose if desired
+            neutral_similarity_weight=0.1,
+            temporal_consistency_weight=0.1,
+            n_restarts=3,
+            error_acceptance_threshold=1e-4,
+            ftol=1e-8,
+            xtol=1e-8,
+            max_nfev=2000,
+            verbose=False,
         )
-        self.reference_motion: xax.FrozenDict[int, xax.HashableArray] = jax.tree.map(
-            lambda x: xax.hashable_array(jnp.array(x)), np_reference_motion
-        )
-        self.tracked_body_ids = tuple(self.reference_motion.keys())
+        self.reference_qpos = xax.hashable_array(jnp.array(np_reference_qpos))
 
+        # Visualize reference motion (optional)
         if self.config.visualize_reference_motion:
             visualize_reference_motion(
                 mj_model,
                 base_id=self.mj_base_id,
-                reference_motion=np_reference_motion,
+                reference_motion=np_reference_qpos,
             )
         else:
             super().run()
@@ -334,8 +311,9 @@ if __name__ == "__main__":
             # Reference motion parameters
             rotate_bvh_euler=(0, np.pi / 2, 0),
             bvh_scaling_factor=1 / 100,
-            offset_reference_motion=(0.02, 0.09, -0.29),
+            bvh_offset=(0.0, 0.0, 0.0),
             mj_base_name="floating_base_link",
             reference_base_name="CC_Base_Pelvis",
+            qpos_reward_scale=0.5,
         ),
     )
