@@ -683,8 +683,8 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             # ),
             ksim.PositionCommand.create(
                 model=physics_model,
-                box_min=(0.05, -0.1, -0.15),
-                box_max=(0.15, 0.1, 0.1),
+                box_min=(-0.05, -0.25, -0.2),
+                box_max=(0.15, -0.05, 0.0),
                 vis_target_name="floating_base_link",
                 vis_radius=0.05,
                 vis_color=(1.0, 0.0, 1.0, 0.8),
