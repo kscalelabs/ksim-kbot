@@ -127,15 +127,22 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
         rewards: list[ksim.Reward] = [
             ksim.StayAliveReward(
                 success_reward=1.0,
-                scale=3.0,
+                scale=4.0,
             ),
             kbot_rewards.OrientationPenalty(scale=self.config.orientation_penalty),
             QposReferenceMotionReward(
                 reference_qpos=self.reference_qpos,
                 ctrl_dt=self.config.ctrl_dt,
-                scale=10.0,
+                scale=5.0,
+            ),
+            kbot_rewards.FeetSlipPenalty(scale=-0.25),
+            kbot_rewards.FeetAirTimeReward(
+                scale=2.0,
+                # threshold_min=0.0,
+                # threshold_max=0.4,
             ),
             NaiveForwardReward(scale=0.5),
+            ksim.LinearVelocityPenalty(index="z", scale=-2.0),
         ]
 
         return rewards
@@ -316,6 +323,8 @@ if __name__ == "__main__":
             epochs_per_log_step=1,
             rollout_length_seconds=15.0,
             render_length_seconds=15.0,
+            increase_threshold=10.0,
+            decrease_threshold=5.0,
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,

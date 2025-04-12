@@ -302,13 +302,13 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
             ksim.PushEvent(
-                x_force=1.0,
-                y_force=1.0,
+                x_force=0.5,
+                y_force=0.5,
                 z_force=0.0,
                 x_angular_force=0.1,
                 y_angular_force=0.1,
                 z_angular_force=0.3,
-                interval_range=(0.25, 0.75),
+                interval_range=(0.5, 1.0),
             ),
         ]
 
@@ -378,7 +378,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.PitchTooGreatTermination(max_pitch=math.pi / 3),
             ksim.RollTooGreatTermination(max_roll=math.pi / 3),
             ksim.FastAccelerationTermination(),
-            ksim.FarFromOriginTermination(max_dist=5.0),
+            ksim.FarFromOriginTermination(max_dist=10.0),
         ]
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
