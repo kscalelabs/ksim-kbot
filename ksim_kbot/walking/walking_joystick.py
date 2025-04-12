@@ -23,6 +23,32 @@ OBS_SIZE = 20 * 2 + 4 + 3 + 3 + 40  # = position + velocity + phase + imu_acc + 
 CMD_SIZE = 2 + 1 + 1
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_OUTPUTS = 20 * 2  # position + velocity
+JOINT_TARGETS = (
+    # right arm
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    # left arm
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    # right leg
+    -0.23,
+    0.0,
+    0.0,
+    -0.441,
+    0.195,
+    # left leg
+    0.23,
+    0.0,
+    0.0,
+    0.441,
+    -0.195,
+)
 
 
 class KbotActor(eqx.Module):
@@ -68,6 +94,7 @@ class KbotActor(eqx.Module):
         gait_freq_cmd: Array,
         last_action_n: Array,
     ) -> distrax.Normal:
+        print(f"imu_acc_3: {imu_acc_3}")
         x_n = jnp.concatenate(
             [
                 timestep_phase_4,
@@ -203,32 +230,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         return common.TargetPositionMITActuators(
             physics_model,
             metadata,
-            default_targets=(
-                # right arm
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                # left arm
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                # right leg
-                -0.23,
-                0.0,
-                0.0,
-                -0.441,
-                0.195,
-                # left leg
-                0.23,
-                0.0,
-                0.0,
-                0.441,
-                -0.195,
-            ),
+            default_targets=JOINT_TARGETS,
             pos_action_noise=0.1,
             vel_action_noise=0.1,
             pos_action_noise_type="gaussian",
@@ -290,31 +292,8 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                     0.0,
                     0.0,
                     0.0,
-                    # right arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # left arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # right leg
-                    -0.23,
-                    0.0,
-                    0.0,
-                    -0.441,
-                    0.195,
-                    # left leg
-                    0.23,
-                    0.0,
-                    0.0,
-                    0.441,
-                    -0.195,
                 )
+                + JOINT_TARGETS
             ),
         ]
 
@@ -356,32 +335,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         return [
             common.TimestepPhaseObservation(),
             common.JointPositionObservation(
-                default_targets=(
-                    # right arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # left arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # right leg
-                    -0.23,
-                    0.0,
-                    0.0,
-                    -0.441,
-                    0.195,
-                    # left leg
-                    0.23,
-                    0.0,
-                    0.0,
-                    0.441,
-                    -0.195,
-                ),
+                default_targets=JOINT_TARGETS,
                 noise=0.01,
             ),
             ksim.JointVelocityObservation(noise=vel_obs_noise),
@@ -451,32 +405,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         rewards: list[ksim.Reward] = [
             kbot_rewards.JointDeviationPenalty(
                 scale=-0.1,
-                joint_targets=(
-                    # right arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # left arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # right leg
-                    -0.23,
-                    0.0,
-                    0.0,
-                    -0.441,
-                    0.195,
-                    # left leg
-                    0.23,
-                    0.0,
-                    0.0,
-                    0.441,
-                    -0.195,
-                ),
+                joint_targets=JOINT_TARGETS,
                 joint_weights=(
                     # right arm
                     1.2,
@@ -507,32 +436,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             kbot_rewards.KneeDeviationPenalty.create(
                 physics_model=physics_model,
                 knee_names=("dof_left_knee_04", "dof_right_knee_04"),
-                joint_targets=(
-                    # right arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # left arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # right leg
-                    -0.23,
-                    0.0,
-                    0.0,
-                    -0.441,
-                    0.195,
-                    # left leg
-                    0.23,
-                    0.0,
-                    0.0,
-                    0.441,
-                    -0.195,
-                ),
+                joint_targets=JOINT_TARGETS,
                 scale=-0.1,
             ),
             kbot_rewards.HipDeviationPenalty.create(
@@ -543,36 +447,10 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                     "dof_left_hip_roll_03",
                     "dof_left_hip_yaw_03",
                 ),
-                joint_targets=(
-                    # right arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # left arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # right leg
-                    -0.23,
-                    0.0,
-                    0.0,
-                    -0.441,
-                    0.195,
-                    # left leg
-                    0.23,
-                    0.0,
-                    0.0,
-                    0.441,
-                    -0.195,
-                ),
+                joint_targets=JOINT_TARGETS,
                 scale=-0.25,
             ),
             kbot_rewards.TerminationPenalty(scale=-1.0),
-            # kbot_rewards.FarFromOriginTerminationReward(max_dist=5.0, scale=1.0),
             kbot_rewards.OrientationPenalty(scale=-2.0),
             kbot_rewards.LinearVelocityTrackingReward(scale=1.0),
             kbot_rewards.AngularVelocityTrackingReward(scale=0.5),
@@ -589,6 +467,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 max_foot_height=0.11,
                 scale=1.0,
             ),
+            # force penalties
             # ksim.AvoidLimitsReward(-0.01),
             kbot_rewards.JointPositionLimitPenalty.create(
                 physics_model=physics_model,
@@ -596,6 +475,8 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 scale=-0.1,
             ),
             kbot_rewards.ContactForcePenalty(scale=-0.01),
+            ksim.ActuatorForcePenalty(scale=-0.005),
+            ksim.ActionSmoothnessPenalty(scale=-0.005),
         ]
 
         return rewards
