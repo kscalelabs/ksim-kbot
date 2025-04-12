@@ -112,7 +112,6 @@ class QposReferenceMotionReward(ksim.Reward):
         qpos = trajectory.qpos
         step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
         reference_qpos = jnp.take(self.reference_qpos.array, step_number, axis=0)
-        breakpoint()
         error = xax.get_norm(reference_qpos - qpos, self.norm)
         mean_error = error.mean(axis=-1)
         reward = jnp.exp(-mean_error * self.sensitivity)
