@@ -27,7 +27,6 @@ from ksim.utils.reference_motion import (
 from scipy.spatial.transform import Rotation as R
 
 import ksim_kbot.rewards as kbot_rewards
-from ksim_kbot.walking.walking import NaiveForwardReward
 from ksim_kbot.walking.walking_rnn import RnnModel, WalkingRnnTask, WalkingRnnTaskConfig
 
 HISTORY_LENGTH = 0
@@ -154,10 +153,6 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 ),
             )
 
-        if self.config.use_naive_reward:
-            rewards += [
-                NaiveForwardReward(clip_max=self.config.naive_clip_max, scale=1.0),
-            ]
         return rewards
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
@@ -329,7 +324,6 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
-            use_naive_reward=True,
             # PPO parameters.
             gamma=0.97,
             lam=0.95,
