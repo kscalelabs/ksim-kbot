@@ -239,6 +239,7 @@ class FarFromOriginTerminationReward(ksim.Reward):
         return reward_value, None
 
 
+@attrs.define(frozen=True, kw_only=True)
 class KsimLinearVelocityTrackingReward(ksim.Reward):
     """Penalty for deviating from the linear velocity command."""
 
@@ -263,9 +264,8 @@ class KsimLinearVelocityTrackingReward(ksim.Reward):
 class JointPositionLimitPenalty(ksim.Reward):
     """Penalty for joint position limits."""
 
-    scale: float = -1.0
-    lower_limits: tuple[float, ...] = attrs.field(converter=lambda x: tuple(map(float, x)))
-    upper_limits: tuple[float, ...] = attrs.field(converter=lambda x: tuple(map(float, x)))
+    lower_limits: xax.HashableArray = attrs.field()
+    upper_limits: xax.HashableArray = attrs.field()
 
     @classmethod
     def create(
@@ -284,14 +284,39 @@ class JointPositionLimitPenalty(ksim.Reward):
 
         return cls(
             scale=scale,
-            lower_limits=tuple(soft_lowers),
-            upper_limits=tuple(soft_uppers),
+            lower_limits=xax.hashable_array(soft_lowers),
+            upper_limits=xax.hashable_array(soft_uppers),
         )
 
     def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
-        penalty = -jnp.clip(trajectory.qpos[..., 7:] - jnp.array(self.lower_limits), None, 0.0)
-        penalty += jnp.clip(trajectory.qpos[..., 7:] - jnp.array(self.upper_limits), 0.0, None)
+        penalty = -jnp.clip(trajectory.qpos[..., 7:] - self.lower_limits.array, None, 0.0)
+        penalty += jnp.clip(trajectory.qpos[..., 7:] - self.upper_limits.array, 0.0, None)
         return jnp.sum(penalty, axis=-1), None
+
+
+@attrs.define(frozen=True, kw_only=True)
+class ContactForcePenalty(ksim.Reward):
+    """Penalty for contact force."""
+
+    max_contact_force: float = attrs.field(default=350.0)
+
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
+        if "sensor_observation_left_foot_force" not in trajectory.obs:
+            raise ValueError("left_foot_force not found in trajectory.obs")
+        if "sensor_observation_right_foot_force" not in trajectory.obs:
+            raise ValueError("right_foot_force not found in trajectory.obs")
+
+        left_contact_force = trajectory.obs["sensor_observation_left_foot_force"]
+        right_contact_force = trajectory.obs["sensor_observation_right_foot_force"]
+        cost = jnp.clip(
+            jnp.abs(left_contact_force[2]) - self.max_contact_force,
+            min=0.0,
+        )
+        cost += jnp.clip(
+            jnp.abs(right_contact_force[2]) - self.max_contact_force,
+            min=0.0,
+        )
+        return cost, None
 
 
 # Gate stateful rewards for reference
@@ -340,7 +365,7 @@ class FeetAirTimeReward(ksim.Reward):
     ) -> tuple[Array, xax.FrozenDict[str, PyTree]]:
         # Rollout across trajectory of feet contact observations
         def step_fn(
-            carry: xax.FrozenDict[str, PyTree], obs: tuple[Array, bool]
+            carry: xax.FrozenDict[str, PyTree], obs: tuple[Array, Array]
         ) -> tuple[xax.FrozenDict[str, PyTree], Array]:
             contact, done = obs
             contact_bool = contact.astype(bool)
@@ -362,7 +387,7 @@ class FeetAirTimeReward(ksim.Reward):
             last_contact = contact_bool
             new_last_contact = jax.lax.select(done, jnp.zeros(2, dtype=bool), last_contact)
             new_feet_air_time = jax.lax.select(done, jnp.zeros(2), feet_air_time)
-            new_carry = xax.FrozenDict(
+            new_carry: xax.FrozenDict[str, PyTree] = xax.FrozenDict(
                 {
                     "first_contact": new_first_contact,
                     "last_contact": new_last_contact,

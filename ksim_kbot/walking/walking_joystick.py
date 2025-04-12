@@ -410,6 +410,8 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="upvector_origin", noise=0.0),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="orientation_origin", noise=0.0),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="gyro_origin", noise=0.0),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_force", noise=0.0),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_force", noise=0.0),
             common.FeetContactObservation.create(
                 physics_model=physics_model,
                 foot_left_geom_names="KB_D_501L_L_LEG_FOOT_collision_box",
@@ -587,11 +589,13 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 max_foot_height=0.11,
                 scale=1.0,
             ),
+            # ksim.AvoidLimitsReward(-0.01),
             kbot_rewards.JointPositionLimitPenalty.create(
                 physics_model=physics_model,
                 soft_limit_factor=0.95,
                 scale=-0.1,
             ),
+            kbot_rewards.ContactForcePenalty(scale=-0.01),
         ]
 
         return rewards
