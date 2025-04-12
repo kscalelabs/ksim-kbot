@@ -2,6 +2,7 @@
 """Defines simple task for training a standing policy for K-Bot."""
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Generic, TypeVar
 
 import distrax
@@ -13,6 +14,7 @@ import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from ksim.curriculum import ConstantCurriculum, Curriculum
+from xax.nn.export import export
 
 from ksim_kbot import common, rewards as kbot_rewards
 from ksim_kbot.standing.standing import MAX_TORQUE, KbotStandingTask, KbotStandingTaskConfig
@@ -86,7 +88,6 @@ class KbotActor(eqx.Module):
         self,
         flat_obs_n: Array,
     ) -> distrax.Normal:
-        # jax.debug.breakpoint()
         prediction_n = self.mlp(flat_obs_n)
         mean_n = prediction_n[..., :NUM_OUTPUTS]
         std_n = prediction_n[..., NUM_OUTPUTS:]
@@ -107,7 +108,7 @@ class KbotCritic(eqx.Module):
 
     def __init__(self, key: PRNGKeyArray) -> None:
         self.mlp = eqx.nn.MLP(
-            in_size=NUM_INPUTS + 3 + 2 + 20 + 3 + 4 + 3 + 3,
+            in_size=NUM_INPUTS + 2 + 6 + 3 + 3 + 4 + 3 + 3 + 20 + 1,
             out_size=1,  # Always output a single critic value.
             width_size=256,
             depth=5,
@@ -128,11 +129,14 @@ class KbotCritic(eqx.Module):
         gait_freq_cmd: Array,
         last_action_n: Array,
         feet_contact_2: Array,
+        feet_position_6: Array,
+        # feet_air_time_2: Array,
         base_position_3: Array,
         base_orientation_4: Array,
         base_linear_velocity_3: Array,
         base_angular_velocity_3: Array,
         actuator_force_n: Array,
+        true_height_1: Array,
     ) -> Array:
         x_n = jnp.concatenate(
             [
@@ -147,11 +151,14 @@ class KbotCritic(eqx.Module):
                 gait_freq_cmd,
                 last_action_n,
                 feet_contact_2,
+                feet_position_6,
+                # feet_air_time_2,
                 base_position_3,
                 base_orientation_4,
                 base_linear_velocity_3,
                 base_angular_velocity_3,
                 actuator_force_n,
+                true_height_1,
             ],
             axis=-1,
         )
@@ -642,15 +649,14 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         last_action_n = observations["last_action_observation"]
         # critic observations
         feet_contact_2 = observations["feet_contact_observation"]
-        # feet_position_6 = observations["feet_position_observation"]
+        feet_position_6 = observations["feet_position_observation"]
         # feet_air_time_2 = observations["feet_air_time_observation"]
-        # true_height_1 = observations["true_height_observation"]
-
-        actuator_force_n = observations["actuator_force_observation"]
         base_position_3 = observations["base_position_observation"]
         base_orientation_4 = observations["base_orientation_observation"]
         base_linear_velocity_3 = observations["base_linear_velocity_observation"]
         base_angular_velocity_3 = observations["base_angular_velocity_observation"]
+        actuator_force_n = observations["actuator_force_observation"]
+        true_height_1 = observations["true_height_observation"]
 
         return model.forward(
             timestep_phase_4=timestep_phase_4,
@@ -658,20 +664,21 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             joint_vel_n=joint_vel_n,
             imu_acc_3=imu_acc_3,
             imu_gyro_3=imu_gyro_3,
-            projected_gravity_3=projected_gravity_3,
             lin_vel_cmd_2=lin_vel_cmd_2,
             ang_vel_cmd=ang_vel_cmd,
             gait_freq_cmd=gait_freq_cmd,
             last_action_n=last_action_n,
+            # critic observations
             feet_contact_2=feet_contact_2,
-            # feet_position_6=feet_position_6,
+            feet_position_6=feet_position_6,
             # feet_air_time_2=feet_air_time_2,
+            projected_gravity_3=projected_gravity_3,
             base_position_3=base_position_3,
             base_orientation_4=base_orientation_4,
             base_linear_velocity_3=base_linear_velocity_3,
             base_angular_velocity_3=base_angular_velocity_3,
             actuator_force_n=actuator_force_n,
-            # true_height_1=true_height_1,
+            true_height_1=true_height_1,
         )
 
     def get_ppo_variables(
@@ -750,92 +757,30 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
 
         return model_fn
 
-    # def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
-    #     if not self.config.export_for_inference:
-    #         return state
+    def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
+        if not self.config.export_for_inference:
+            return state
 
-    #     model: KbotModel = self.load_ckpt_with_template(
-    #         ckpt_path,
-    #         part="model",
-    #         model_template=self.get_model(key=jax.random.PRNGKey(0)),
-    #     )
-
-    #     model_fn = self.make_export_model(model, stochastic=False, batched=True)
-
-    #     input_shapes = [(NUM_INPUTS,)]
-    #     tf_path = (
-    #         ckpt_path.parent / "tf_model"
-    #         if self.config.only_save_most_recent
-    #         else ckpt_path.parent / f"tf_model_{state.num_steps}"
-    #     )
-    #     export(
-    #         model_fn,
-    #         input_shapes,  # type: ignore [arg-type]
-    #         tf_path,
-    #     )
-    #     return state
-
-    def reset_reward_carry(self, rng: PRNGKeyArray) -> xax.FrozenDict[str, Array]:
-        key, _ = jax.random.split(rng)
-        gait_freq = jax.random.uniform(
-            key, (1,), minval=self.config.gait_freq_lower, maxval=self.config.gait_freq_upper
-        )
-        phase_dt = 2 * jnp.pi * gait_freq * self.config.ctrl_dt
-        phase = jnp.array([0, jnp.pi])  # trotting gait
-        reward_carry = xax.FrozenDict(
-            {
-                "first_contact": jnp.zeros(2, dtype=bool),
-                "feet_air_time": jnp.zeros(2),
-                "last_contact": jnp.zeros(2, dtype=bool),
-                "swing_peak": jnp.zeros(2),
-                "phase_dt": phase_dt,
-                "phase": phase,
-            }
+        model: KbotModel = self.load_ckpt_with_template(
+            ckpt_path,
+            part="model",
+            model_template=self.get_model(key=jax.random.PRNGKey(0)),
         )
 
-        return reward_carry
+        model_fn = self.make_export_model(model, stochastic=False, batched=True)
 
-    def update_reward_carry(
-        self,
-        reward_carry: xax.FrozenDict[str, Array],
-        observations: xax.FrozenDict[str, Array],
-        physics_state: ksim.PhysicsState,
-        commands: xax.FrozenDict[str, Array],
-    ) -> xax.FrozenDict[str, Array]:
-        # Phase:
-        phase_tp1 = reward_carry["phase"] + reward_carry["phase_dt"]
-        phase = jnp.fmod(phase_tp1 + jnp.pi, 2 * jnp.pi) - jnp.pi
-
-        # Contact dependency:
-        contact = observations["feet_contact_observation"]
-        contact_bool = contact.astype(bool)
-
-        # Current or the last contact to factor in randomness:
-        contact_filt = contact_bool | reward_carry["last_contact"]
-        first_contact = (reward_carry["feet_air_time"] > 0.0) * contact_filt
-        last_contact = contact_bool
-
-        # Feet air time:
-        feet_air_time = reward_carry["feet_air_time"] + self.config.ctrl_dt
-        feet_air_time *= ~contact_bool
-
-        # Swing peak:
-        position_feet = observations["feet_position_observation"]
-        position_feet_z = jnp.array([position_feet[2], position_feet[5]])
-        swing_peak = jnp.maximum(reward_carry["swing_peak"], position_feet_z)
-        swing_peak = swing_peak * ~contact_bool  # And here
-
-        # Last contact:
-        reward_carry = xax.FrozenDict(
-            {
-                "first_contact": first_contact,
-                "feet_air_time": feet_air_time,
-                "last_contact": last_contact,
-                "swing_peak": swing_peak,
-                "phase_dt": reward_carry["phase_dt"],  # constant across the rollout
-                "phase": phase,
-            }
+        input_shapes = [(NUM_INPUTS,)]
+        tf_path = (
+            ckpt_path.parent / "tf_model"
+            if self.config.only_save_most_recent
+            else ckpt_path.parent / f"tf_model_{state.num_steps}"
         )
+        export(
+            model_fn,
+            input_shapes,  # type: ignore [arg-type]
+            tf_path,
+        )
+        return state
 
 
 if __name__ == "__main__":

@@ -304,7 +304,9 @@ class FeetAirTimeReward(ksim.Reward):
         self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]
     ) -> tuple[Array, xax.FrozenDict[str, PyTree]]:
         # Rollout across trajectory of feet contact observations
-        def step_fn(carry, obs):
+        def step_fn(
+            carry: xax.FrozenDict[str, PyTree], obs: tuple[Array, bool]
+        ) -> tuple[xax.FrozenDict[str, PyTree], Array]:
             contact, done = obs
             contact_bool = contact.astype(bool)
 
@@ -359,7 +361,9 @@ class FeetPhaseReward(ksim.Reward):
     def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
         return xax.FrozenDict({"phase": jnp.array([0.0, jnp.pi])})
 
-    def __call__(self, trajectory: ksim.Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
+    def __call__(
+        self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]
+    ) -> tuple[Array, xax.FrozenDict[str, PyTree]]:
         if self.feet_pos_obs_name not in trajectory.obs:
             raise ValueError(f"Observation {self.feet_pos_obs_name} not found; add it as an observation in your task.")
         if self.gait_freq_cmd_name not in trajectory.command:
@@ -368,7 +372,9 @@ class FeetPhaseReward(ksim.Reward):
         # generate phase values
         gait_freq_n = trajectory.command[self.gait_freq_cmd_name]
 
-        def step_fn(carry, observation):
+        def step_fn(
+            carry: xax.FrozenDict[str, PyTree], observation: tuple[Array, bool]
+        ) -> tuple[xax.FrozenDict[str, PyTree], Array]:
             done, gait_freq = observation
             phase_dt = 2 * jnp.pi * gait_freq * self.ctrl_dt
             phase_tp1 = carry["phase"] + phase_dt
