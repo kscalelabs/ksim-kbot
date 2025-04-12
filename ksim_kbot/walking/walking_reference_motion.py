@@ -112,7 +112,7 @@ class QposReferenceMotionReward(ksim.Reward):
         qpos = trajectory.qpos
         step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
         reference_qpos = jnp.take(self.reference_qpos.array, step_number, axis=0)
-        error = xax.get_norm(reference_qpos - qpos, self.norm)
+        error = xax.get_norm(reference_qpos[..., 7:] - qpos[..., 7:], self.norm)
         mean_error = error.mean(axis=-1)
         reward = jnp.exp(-mean_error * self.sensitivity)
         return reward, None
@@ -127,7 +127,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
         rewards: list[ksim.Reward] = [
             ksim.StayAliveReward(
                 success_reward=1.0,
-                scale=1.0,
+                scale=3.0,
             ),
             kbot_rewards.OrientationPenalty(scale=self.config.orientation_penalty),
             QposReferenceMotionReward(
@@ -314,7 +314,8 @@ if __name__ == "__main__":
             batch_size=256,
             num_passes=10,
             epochs_per_log_step=1,
-            rollout_length_seconds=10.0,
+            rollout_length_seconds=15.0,
+            render_length_seconds=15.0,
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
@@ -327,6 +328,8 @@ if __name__ == "__main__":
             learning_rate=1e-4,
             clip_param=0.3,
             max_grad_norm=0.5,
+            export_for_inference=True,
+            only_save_most_recent=False,
             # visualize_reference_motion=True,
         ),
     )
