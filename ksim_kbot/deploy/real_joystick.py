@@ -146,11 +146,16 @@ async def configure_actuators(kos: pykos.KOS) -> None:
 
 
 async def reset(kos: pykos.KOS) -> None:
-    await kos.sim.reset(
-        pos={"x": 0.0, "y": 0.0, "z": 1.01},
-        quat={"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
-        joints=[{"name": ac.joint_name, "pos": pos} for ac, pos in zip(ACTUATOR_LIST, DEFAULT_POSITIONS)],
-    )
+    reset_commands: list[pykos.services.actuator.ActuatorCommand] = [
+        {
+            "actuator_id": ac.actuator_id,
+            "position": np.rad2deg(pos),
+            "velocity": 0.0,
+        }
+        for ac, pos in zip(ACTUATOR_LIST, DEFAULT_POSITIONS)
+    ]
+
+    await kos.actuator.command_actuators(reset_commands)
 
 async def disable(kos: pykos.KOS) -> None:
     for ac in ACTUATOR_LIST:
