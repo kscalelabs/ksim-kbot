@@ -287,7 +287,7 @@ class FeetAirTimeReward(ksim.Reward):
     """Reward for feet air time."""
 
     scale: float = 1.0
-    threshold_min: float = 0.1
+    threshold_min: float = 0.0
     threshold_max: float = 0.4
     ctrl_dt: float = 0.02
 
@@ -307,16 +307,22 @@ class FeetAirTimeReward(ksim.Reward):
         def step_fn(carry, obs):
             contact, done = obs
             contact_bool = contact.astype(bool)
+
+            # Current or the last contact to factor in randomness:
             contact_filt = contact_bool | carry["last_contact"]
             first_contact = (carry["feet_air_time"] > 0.0) * contact_filt
-            last_contact = contact_bool
+
+            # Feet air time:
             feet_air_time = carry["feet_air_time"] + jnp.array(self.ctrl_dt)
-            feet_air_time *= ~contact_bool
+            feet_air_time *= ~contact_bool  # reset when in contact
+
+            # Reward for feet air time:
             air_time = (feet_air_time - self.threshold_min) * first_contact
             air_time = jnp.clip(air_time, a_max=self.threshold_max - self.threshold_min)
-            reward_value = jnp.sum(air_time, axis=-1)
 
+            # Factor in episode termination:
             new_first_contact = jax.lax.select(done, jnp.zeros(2, dtype=bool), first_contact)
+            last_contact = contact_bool
             new_last_contact = jax.lax.select(done, jnp.zeros(2, dtype=bool), last_contact)
             new_feet_air_time = jax.lax.select(done, jnp.zeros(2), feet_air_time)
             new_carry = xax.FrozenDict(
@@ -326,15 +332,18 @@ class FeetAirTimeReward(ksim.Reward):
                     "feet_air_time": new_feet_air_time,
                 }
             )
-            return new_carry, reward_value
+            return new_carry, air_time
 
-        reward_carry, rewards = jax.lax.scan(
+        reward_carry, air_time = jax.lax.scan(
             step_fn,
             reward_carry,
             (trajectory.obs["feet_contact_observation"], trajectory.done),
         )
 
-        return rewards, reward_carry
+        # Reward for feet air time:
+        reward_value = jnp.sum(air_time, axis=-1)
+
+        return reward_value, reward_carry
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -343,9 +352,8 @@ class FeetPhaseReward(ksim.Reward):
 
     scale: float = 1.0
     feet_pos_obs_name: str = attrs.field(default="feet_position_observation")
-    gait_freq_cmd_name: str = attrs.field(default="gait_freq_command")
+    gait_freq_cmd_name: str = attrs.field(default="gait_frequency_command")
     max_foot_height: float = 0.12
-    gait_freq: float = 1.25
     ctrl_dt: float = 0.02
 
     def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
@@ -354,21 +362,24 @@ class FeetPhaseReward(ksim.Reward):
     def __call__(self, trajectory: ksim.Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
         if self.feet_pos_obs_name not in trajectory.obs:
             raise ValueError(f"Observation {self.feet_pos_obs_name} not found; add it as an observation in your task.")
-        # Note bring back the gait freq command
-        # if self.gait_freq_cmd_name not in trajectory.command:
-        #     raise ValueError(f"Command {self.gait_freq_cmd_name} not found; add it as a command in your task.")
-        # gait_freq_cmd = trajectory.command[self.gait_freq_cmd_name]
-        phase_dt = 2 * jnp.pi * self.gait_freq * self.ctrl_dt
+        if self.gait_freq_cmd_name not in trajectory.command:
+            raise ValueError(f"Command {self.gait_freq_cmd_name} not found; add it as a command in your task.")
 
-        def step_fn(carry, done):
+        # generate phase values
+        gait_freq_n = trajectory.command[self.gait_freq_cmd_name]
+
+        def step_fn(carry, observation):
+            done, gait_freq = observation
+            phase_dt = 2 * jnp.pi * gait_freq * self.ctrl_dt
             phase_tp1 = carry["phase"] + phase_dt
             phase = jnp.fmod(phase_tp1 + jnp.pi, 2 * jnp.pi) - jnp.pi
             # If the episode is done, reset the phase to the initial value
             phase = jax.lax.select(done, jnp.array([0.0, jnp.pi]), phase)
             return xax.FrozenDict({"phase": phase}), phase
 
-        reward_carry, phase = jax.lax.scan(step_fn, reward_carry, trajectory.done)
+        reward_carry, phase = jax.lax.scan(step_fn, reward_carry, (trajectory.done, gait_freq_n))
 
+        # batch reward over the time dimension
         foot_pos = trajectory.obs[self.feet_pos_obs_name]
 
         foot_z = jnp.array([foot_pos[..., 2], foot_pos[..., 5]]).T
