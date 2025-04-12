@@ -703,7 +703,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 model=physics_model,
                 tracked_body_name="ik_target",
                 base_body_name="floating_base_link",
-                scale=10.0,
+                scale=20.0,
                 command_name="target_position_command",
             ),
             ksim.PositionTrackingReward.create(
@@ -729,7 +729,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 distance_threshold=0.1,
                 dt=self.config.dt,
             ),
-            ksim.ObservationMeanPenalty(observation_name="contact_observation_arms", scale=-0.1),
+            ksim.ObservationMeanPenalty(observation_name="contact_observation_arms", scale=-0.5),
             ksim.ActuatorForcePenalty(scale=-0.000001, norm="l1"),
             ksim.ActionSmoothnessPenalty(scale=-0.02, norm="l2"),
             ksim.JointVelocityPenalty(scale=-0.001, freejoint_first=False, norm="l2"),
@@ -838,7 +838,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
         return ksim.RewardLevelCurriculum(
             reward_name="ik_target_position_tracking_reward",
-            increase_threshold=0.15,
+            increase_threshold=0.18,
             decrease_threshold=0.12,
             min_level_steps=10,
             num_levels=10,
