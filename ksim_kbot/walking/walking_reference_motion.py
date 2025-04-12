@@ -22,6 +22,7 @@ from ksim.utils.reference_motion import (
     get_reference_qpos,
     get_reference_joint_id,
     visualize_reference_motion,
+    get_reference_cartesian_poses,
 )
 from scipy.spatial.transform import Rotation as R
 
@@ -52,19 +53,19 @@ class WalkingRnnRefMotionTaskConfig(WalkingRnnTaskConfig):
         help="The path to the BVH file.",
     )
     rotate_bvh_euler: tuple[float, float, float] = xax.field(
-        value=(0, 0, 0),
+        value=(0, np.pi / 2, 0),
         help="Optional rotation to ensure the BVH tree matches the Mujoco model.",
     )
     bvh_scaling_factor: float = xax.field(
-        value=1.0,
+        value=1/100.0,
         help="Scaling factor to ensure the BVH tree matches the Mujoco model.",
     )
     bvh_offset: tuple[float, float, float] = xax.field(
-        value=(0.0, 0.0, 0.0),
+        value=(0.02, 0.09, -0.29),
         help="Offset to ensure the BVH tree matches the Mujoco model.",
     )
     mj_base_name: str = xax.field(
-        value="pelvis",
+        value="floating_base_link",
         help="The Mujoco body name of the base of the humanoid",
     )
     reference_base_name: str = xax.field(
@@ -253,6 +254,16 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
             quat = R.from_euler("xyz", euler_rotation).as_quat(scalar_first=True)
             root.applyRotation(glm.quat(*quat), bake=True)
 
+        cartesian_motion = get_reference_cartesian_poses(
+            mappings=HUMANOID_REFERENCE_MAPPINGS,
+            model=mj_model,
+            root=root,
+            reference_base_id=reference_base_id,
+            root_callback=rotation_callback,
+            scaling_factor=self.config.bvh_scaling_factor,
+            offset=np.array(self.config.bvh_offset),
+        )
+
         np_reference_qpos = get_reference_qpos(
             model=mj_model,
             mj_base_id=self.mj_base_id,
@@ -279,6 +290,8 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
             visualize_reference_motion(
                 mj_model,
                 reference_qpos=np_reference_qpos,
+                cartesian_motion=cartesian_motion,
+                mj_base_id=self.mj_base_id,
             )
         else:
             super().run()
@@ -315,12 +328,6 @@ if __name__ == "__main__":
             learning_rate=1e-4,
             clip_param=0.3,
             max_grad_norm=0.5,
-            # Reference motion parameters
-            rotate_bvh_euler=(0, np.pi / 2, 0),
-            bvh_scaling_factor=1 / 100,
-            bvh_offset=(0.0, 0.0, 0.0),
-            mj_base_name="floating_base_link",
-            reference_base_name="CC_Base_Pelvis",
             # visualize_reference_motion=True,
         ),
     )
