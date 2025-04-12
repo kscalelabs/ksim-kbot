@@ -12,7 +12,12 @@ import ksim
 import xax
 from jaxtyping import Array, PRNGKeyArray
 
-from ksim_kbot.walking.walking import NUM_INPUTS, NUM_JOINTS, WalkingTask, WalkingTaskConfig
+from ksim_kbot.walking.walking import (
+    NUM_INPUTS,
+    NUM_JOINTS,
+    WalkingTask,
+    WalkingTaskConfig,
+)
 
 
 class RnnActor(eqx.Module):
@@ -220,9 +225,8 @@ class WalkingRnnTask(WalkingTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        lin_vel_cmd_x_1 = commands["linear_velocity_command_x"]
-        lin_vel_cmd_y_1 = commands["linear_velocity_command_y"]
-        ang_vel_cmd_z_1 = commands["angular_velocity_command_z"]
+        joystick_cmd_1 = commands["joystick_command"]
+        joystick_cmd_ohe_6 = jax.nn.one_hot(joystick_cmd_1, num_classes=6).squeeze(-2)
 
         obs_n = jnp.concatenate(
             [
@@ -239,9 +243,7 @@ class WalkingRnnTask(WalkingTask[Config], Generic[Config]):
                 base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
-                lin_vel_cmd_x_1,  # 1
-                lin_vel_cmd_y_1,  # 1
-                ang_vel_cmd_z_1,  # 1
+                joystick_cmd_ohe_6,  # 6
             ],
             axis=-1,
         )
@@ -267,9 +269,8 @@ class WalkingRnnTask(WalkingTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        lin_vel_cmd_x_1 = commands["linear_velocity_command_x"]
-        lin_vel_cmd_y_1 = commands["linear_velocity_command_y"]
-        ang_vel_cmd_z_1 = commands["angular_velocity_command_z"]
+        joystick_cmd_1 = commands["joystick_command"]
+        joystick_cmd_ohe_6 = jax.nn.one_hot(joystick_cmd_1, num_classes=6).squeeze(-2)
 
         obs_n = jnp.concatenate(
             [
@@ -286,9 +287,7 @@ class WalkingRnnTask(WalkingTask[Config], Generic[Config]):
                 base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
-                lin_vel_cmd_x_1,  # 1
-                lin_vel_cmd_y_1,  # 1
-                ang_vel_cmd_z_1,  # 1
+                joystick_cmd_ohe_6,  # 6
             ],
             axis=-1,
         )
@@ -390,6 +389,5 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
-            use_naive_reward=True,
         ),
     )
