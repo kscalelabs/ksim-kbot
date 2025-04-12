@@ -838,8 +838,8 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
         return ksim.RewardLevelCurriculum(
             reward_name="ik_target_position_tracking_reward",
-            increase_threshold=0.18,
-            decrease_threshold=0.12,
+            increase_threshold=0.03,
+            decrease_threshold=0.015,
             min_level_steps=10,
             num_levels=10,
         )
