@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 DT = 0.02  # Policy time step (50Hz)
 GAIT_DT = 1.25
 GRAVITY = 9.81  # m/s
-ACTION_SCALE = 0.3
+ACTION_SCALE = 0.1
 
 DEFAULT_POSITIONS = np.array(
     [
@@ -100,11 +100,12 @@ async def get_observation(kos: pykos.KOS, prev_action: np.ndarray, cmd: np.ndarr
         np.array([state_dict_vel[ac.actuator_id] for ac in sorted(ACTUATOR_LIST, key=lambda x: x.nn_id)])
     )
 
-    accel = np.array([imu.accel_x, imu.accel_y, imu.accel_z])
+    accel = np.array([imu.accel_x, imu.accel_y, imu.accel_z]) * GRAVITY
 
     gyro = np.deg2rad(np.array([imu.gyro_x, imu.gyro_y, imu.gyro_z]))
 
     imu_obs = np.concatenate([accel, gyro], axis=-1)
+    logger.info(imu_obs)
 
     phase += 2 * np.pi * GAIT_DT * DT
     phase = np.fmod(phase + np.pi, 2 * np.pi) - np.pi
@@ -130,7 +131,7 @@ async def send_actions(kos: pykos.KOS, position: np.ndarray, velocity: np.ndarra
 
     logger.warning(actuator_commands)
     # Send commands to all KOS instances
-    await asyncio.gather(*kos.actuator.command_actuators(actuator_commands))
+    # await kos.actuator.command_actuators(actuator_commands)
 
 
 async def configure_actuators(kos: pykos.KOS) -> None:
@@ -145,17 +146,11 @@ async def configure_actuators(kos: pykos.KOS) -> None:
 
 
 async def reset(kos: pykos.KOS) -> None:
-    zero_commands: list[pykos.services.actuator.ActuatorCommand] = [
-        {
-            "actuator_id": ac.actuator_id,
-            "position": 0.0,
-            "velocity": 0.0,
-        }
-        for ac in ACTUATOR_LIST
-    ]
-
-    await kos.actuator.command_actuators(zero_commands)
-
+    await kos.sim.reset(
+        pos={"x": 0.0, "y": 0.0, "z": 1.01},
+        quat={"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
+        joints=[{"name": ac.joint_name, "pos": pos} for ac, pos in zip(ACTUATOR_LIST, DEFAULT_POSITIONS)],
+    )
 
 async def disable(kos: pykos.KOS) -> None:
     for ac in ACTUATOR_LIST:
@@ -174,7 +169,6 @@ async def main(model_path: str, ip: str, episode_length: int) -> None:
     await configure_actuators(kos)
     await asyncio.sleep(1)
     logger.info("Resetting...")
-    await reset(kos)
 
     cmd = np.array([0.1, 0.0])
     phase = np.array([0, np.pi])
@@ -184,6 +178,8 @@ async def main(model_path: str, ip: str, episode_length: int) -> None:
     # warm up model
     model.infer(obs)
 
+    await reset(kos)
+    
     for i in range(5, -1, -1):
         logger.info("Starting in %d seconds...", i)
         await asyncio.sleep(1)
@@ -200,7 +196,7 @@ async def main(model_path: str, ip: str, episode_length: int) -> None:
             action = np.array(model.infer(observation)).reshape(-1)
             position = action[: len(ACTUATOR_LIST)]
             velocity = action[len(ACTUATOR_LIST) :]
-            observation, phase = await asyncio.gather(
+            (observation, phase), _ = await asyncio.gather(
                 get_observation(kos, prev_action, cmd, phase),
                 send_actions(kos, position, velocity),
             )
