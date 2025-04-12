@@ -131,7 +131,7 @@ async def send_actions(kos: pykos.KOS, position: np.ndarray, velocity: np.ndarra
 
     logger.warning(actuator_commands)
     # Send commands to all KOS instances
-    # await kos.actuator.command_actuators(actuator_commands)
+    await kos.actuator.command_actuators(actuator_commands)
 
 
 async def configure_actuators(kos: pykos.KOS) -> None:
@@ -189,6 +189,8 @@ async def main(model_path: str, ip: str, episode_length: int) -> None:
         logger.info("Starting in %d seconds...", i)
         await asyncio.sleep(1)
 
+    await reset(kos)
+
     target_time = time.time() + DT
     observation, phase = await get_observation(kos, prev_action, cmd, phase)
 
@@ -199,7 +201,7 @@ async def main(model_path: str, ip: str, episode_length: int) -> None:
             observation = observation.reshape(1, -1)
             # move it all to the infer call
             action = np.array(model.infer(observation)).reshape(-1)
-            position = action[: len(ACTUATOR_LIST)]
+            position = action[: len(ACTUATOR_LIST)] + DEFAULT_POSITIONS
             velocity = action[len(ACTUATOR_LIST) :]
             (observation, phase), _ = await asyncio.gather(
                 get_observation(kos, prev_action, cmd, phase),
