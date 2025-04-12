@@ -3,7 +3,7 @@
 If some utilities will become more general, we can move them to ksim or xax.
 """
 
-from typing import Self
+from typing import Collection, Self
 
 import attrs
 import jax
@@ -13,7 +13,7 @@ import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
-from ksim.utils.mujoco import get_sensor_data_idxs_by_name, get_site_data_idx_from_name
+from ksim.utils.mujoco import get_sensor_data_idxs_by_name, get_site_data_idx_from_name, slice_update, update_data_field
 from mujoco import mjx
 
 
@@ -138,11 +138,21 @@ class TrueHeightObservation(ksim.Observation):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class TimestepPhaseObservation(ksim.Observation):
+class TimestepPhaseObservation(ksim.TimestepObservation):
     """Observation of the phase of the timestep."""
 
+    ctrl_dt: float = attrs.field(default=0.02)
+
     def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
-        return jnp.array([jnp.cos(state.physics_state.data.time), jnp.sin(state.physics_state.data.time)])
+        gait_freq = state.commands["gait_frequency_command"]
+        timestep = super().observe(state, rng)
+        steps = timestep / self.ctrl_dt
+        phase_dt = 2 * jnp.pi * gait_freq * self.ctrl_dt
+        start_phase = jnp.array([0, jnp.pi])  # trotting gait
+        phase = start_phase + steps * phase_dt
+        phase = jnp.fmod(phase + jnp.pi, 2 * jnp.pi) - jnp.pi
+
+        return jnp.array([jnp.cos(phase), jnp.sin(phase)]).flatten()
 
 
 @attrs.define(frozen=True)
@@ -228,7 +238,33 @@ class FarFromOriginTermination(ksim.Termination):
     max_dist: float = attrs.field()
 
     def __call__(self, state: ksim.PhysicsData, curriculum_level: Array) -> Array:
-        return jnp.linalg.norm(state.qpos[..., :2], axis=-1) > self.max_dist
+        return jnp.where(jnp.linalg.norm(state.qpos[..., :2], axis=-1) > self.max_dist, -1, 0)
+
+
+@attrs.define(frozen=True)
+class GaitFrequencyCommand(ksim.Command):
+    """Command to set the phase of the robot."""
+
+    gait_freq_lower: float = attrs.field(default=1.2)
+    gait_freq_upper: float = attrs.field(default=1.5)
+
+    def initial_command(
+        self,
+        physics_data: ksim.PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        """Returns (1,) array with phase."""
+        return jax.random.uniform(rng, (1,), minval=self.gait_freq_lower, maxval=self.gait_freq_upper)
+
+    def __call__(
+        self,
+        prev_command: Array,
+        physics_data: ksim.PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        return prev_command
 
 
 @attrs.define(frozen=True)
@@ -241,39 +277,38 @@ class LinearVelocityCommand(ksim.Command):
     any command.
     """
 
-    range: tuple[float, float] = attrs.field()
-    index: int | str | None = attrs.field(default=None)
-    zero_prob: float = attrs.field(default=0.0)
+    x_range: tuple[float, float] = attrs.field()
+    y_range: tuple[float, float] = attrs.field()
+    x_zero_prob: float = attrs.field(default=0.0)
+    y_zero_prob: float = attrs.field(default=0.0)
     switch_prob: float = attrs.field(default=0.0)
     vis_height: float = attrs.field(default=1.0)
     vis_scale: float = attrs.field(default=0.05)
 
-    def initial_command(
-        self,
-        physics_data: ksim.PhysicsData,
-        curriculum_level: Array,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        rng, rng_zero = jax.random.split(rng)
-        minval, maxval = self.range
-        value = jax.random.uniform(rng, (1,), minval=minval, maxval=maxval)
-        zero_mask = jax.random.bernoulli(rng_zero, self.zero_prob)
-        return jnp.where(zero_mask, 0.0, value)
+    def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
+        rng_x, rng_y, rng_zero_x, rng_zero_y = jax.random.split(rng, 4)
+        (xmin, xmax), (ymin, ymax) = self.x_range, self.y_range
+        x = jax.random.uniform(rng_x, (1,), minval=xmin, maxval=xmax)
+        y = jax.random.uniform(rng_y, (1,), minval=ymin, maxval=ymax)
+        x_zero_mask = jax.random.bernoulli(rng_zero_x, self.x_zero_prob)
+        y_zero_mask = jax.random.bernoulli(rng_zero_y, self.y_zero_prob)
+        return jnp.concatenate(
+            [
+                jnp.where(x_zero_mask, 0.0, x),
+                jnp.where(y_zero_mask, 0.0, y),
+            ]
+        )
 
     def __call__(
-        self,
-        prev_command: Array,
-        physics_data: ksim.PhysicsData,
-        curriculum_level: Array,
-        rng: PRNGKeyArray,
+        self, prev_command: Array, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
     ) -> Array:
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
         new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
         return jnp.where(switch_mask, new_commands, prev_command)
 
-    def get_name(self) -> str:
-        return f"{super().get_name()}{'' if self.index is None else f'_{self.index}'}"
+    def get_markers(self) -> Collection[ksim.vis.Marker]:
+        return []
 
 
 @attrs.define(frozen=True)
@@ -281,16 +316,10 @@ class AngularVelocityCommand(ksim.Command):
     """Command to turn the robot."""
 
     scale: float = attrs.field()
-    index: int | str | None = attrs.field(default=None)
     zero_prob: float = attrs.field(default=0.0)
     switch_prob: float = attrs.field(default=0.0)
 
-    def initial_command(
-        self,
-        physics_data: ksim.PhysicsData,
-        curriculum_level: Array,
-        rng: PRNGKeyArray,
-    ) -> Array:
+    def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         """Returns (1,) array with angular velocity."""
         rng_a, rng_b = jax.random.split(rng)
         zero_mask = jax.random.bernoulli(rng_a, self.zero_prob)
@@ -298,16 +327,62 @@ class AngularVelocityCommand(ksim.Command):
         return jnp.where(zero_mask, jnp.zeros_like(cmd), cmd)
 
     def __call__(
-        self,
-        prev_command: Array,
-        physics_data: ksim.PhysicsData,
-        curriculum_level: Array,
-        rng: PRNGKeyArray,
+        self, prev_command: Array, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
     ) -> Array:
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
         new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
         return jnp.where(switch_mask, new_commands, prev_command)
 
-    def get_name(self) -> str:
-        return f"{super().get_name()}{'' if self.index is None else f'_{self.index}'}"
+
+@attrs.define(frozen=True, kw_only=True)
+class XYPushEvent(ksim.Event):
+    """Randomly push the robot after some interval."""
+
+    interval_range: tuple[float, float] = attrs.field()
+    force_range: tuple[float, float] = attrs.field()
+
+    def __call__(
+        self,
+        model: ksim.PhysicsModel,
+        data: ksim.PhysicsData,
+        event_state: Array,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> tuple[ksim.PhysicsData, Array]:
+        # Decrement by physics timestep.
+        dt = jnp.float32(model.opt.timestep)
+        time_remaining = event_state - dt
+
+        # Update the data if the time remaining is less than 0.
+        updated_data, time_remaining = jax.lax.cond(
+            time_remaining <= 0.0,
+            lambda: self._apply_random_force(data, curriculum_level, rng),
+            lambda: (data, time_remaining),
+        )
+
+        return updated_data, time_remaining
+
+    def _apply_random_force(
+        self, data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
+    ) -> tuple[ksim.PhysicsData, Array]:
+        push_theta = jax.random.uniform(rng, maxval=2 * jnp.pi)
+        push_magnitude = jax.random.uniform(
+            rng,
+            minval=self.force_range[0],
+            maxval=self.force_range[1],
+        )
+        push = jnp.array([jnp.cos(push_theta), jnp.sin(push_theta)])
+        random_forces = push * push_magnitude + data.qvel[:2]
+        new_qvel = slice_update(data, "qvel", slice(0, 2), random_forces)
+        updated_data = update_data_field(data, "qvel", new_qvel)
+
+        # Chooses a new remaining interval.
+        minval, maxval = self.interval_range
+        time_remaining = jax.random.uniform(rng, (), minval=minval, maxval=maxval)
+
+        return updated_data, time_remaining
+
+    def get_initial_event_state(self, rng: PRNGKeyArray) -> Array:
+        minval, maxval = self.interval_range
+        return jax.random.uniform(rng, (), minval=minval, maxval=maxval)

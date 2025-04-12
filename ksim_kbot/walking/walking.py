@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Generic, TypeVar
 
-import attrs
 import distrax
 import equinox as eqx
 import jax
@@ -22,14 +21,6 @@ from mujoco import mjx
 NUM_JOINTS = 20
 
 NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 230 + 138 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 6
-
-
-@attrs.define(frozen=True, kw_only=True)
-class NaiveForwardReward(ksim.Reward):
-    clip_max: float = attrs.field(default=5.0)
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        return trajectory.qvel[..., 0].clip(max=self.clip_max)
 
 
 class Actor(eqx.Module):
