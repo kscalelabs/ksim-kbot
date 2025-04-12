@@ -259,6 +259,41 @@ class KsimLinearVelocityTrackingReward(ksim.Reward):
         return f"{self.index}_{super().get_name()}"
 
 
+@attrs.define(frozen=True, kw_only=True)
+class JointPositionLimitPenalty(ksim.Reward):
+    """Penalty for joint position limits."""
+
+    scale: float = -1.0
+    lower_limits: tuple[float, ...] = attrs.field(converter=lambda x: tuple(map(float, x)))
+    upper_limits: tuple[float, ...] = attrs.field(converter=lambda x: tuple(map(float, x)))
+
+    @classmethod
+    def create(
+        cls,
+        physics_model: ksim.PhysicsModel,
+        *,
+        soft_limit_factor: float = 0.95,
+        scale: float = -1.0,
+    ) -> Self:
+        # Note: First joint is freejoint.
+        lowers, uppers = physics_model.jnt_range[1:].T
+        center = (lowers + uppers) / 2
+        range = uppers - lowers
+        soft_lowers = center - 0.5 * range * soft_limit_factor
+        soft_uppers = center + 0.5 * range * soft_limit_factor
+
+        return cls(
+            scale=scale,
+            lower_limits=tuple(soft_lowers),
+            upper_limits=tuple(soft_uppers),
+        )
+
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
+        penalty = -jnp.clip(trajectory.qpos[..., 7:] - jnp.array(self.lower_limits), None, 0.0)
+        penalty += jnp.clip(trajectory.qpos[..., 7:] - jnp.array(self.upper_limits), 0.0, None)
+        return jnp.sum(penalty, axis=-1), None
+
+
 # Gate stateful rewards for reference
 
 

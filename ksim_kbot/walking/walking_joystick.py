@@ -184,10 +184,6 @@ class KbotModel(eqx.Module):
 class KbotWalkingTaskConfig(KbotStandingTaskConfig):
     """Config for the K-Bot walking task."""
 
-    use_gait_rewards: bool = xax.field(value=False)
-
-    light_domain_randomize: bool = xax.field(value=False)
-
     gait_freq_lower: float = xax.field(value=1.25)
     gait_freq_upper: float = xax.field(value=1.25)
 
@@ -452,7 +448,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards: list[ksim.Reward] = [
             kbot_rewards.JointDeviationPenalty(
-                scale=-0.02,
+                scale=-0.1,
                 joint_targets=(
                     # right arm
                     0.0,
@@ -576,25 +572,28 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             kbot_rewards.TerminationPenalty(scale=-1.0),
             # kbot_rewards.FarFromOriginTerminationReward(max_dist=5.0, scale=1.0),
             kbot_rewards.OrientationPenalty(scale=-2.0),
-            kbot_rewards.LinearVelocityTrackingReward(scale=1.2),
+            kbot_rewards.LinearVelocityTrackingReward(scale=1.0),
             kbot_rewards.AngularVelocityTrackingReward(scale=0.5),
             kbot_rewards.AngularVelocityXYPenalty(scale=-0.15),
+            # Stateful rewards
+            kbot_rewards.FeetSlipPenalty(scale=-0.25),
+            kbot_rewards.FeetAirTimeReward(
+                scale=2.0,
+                # threshold_min=0.0,
+                # threshold_max=0.4,
+            ),
+            kbot_rewards.FeetPhaseReward(
+                # foot_default_height=0.0,
+                max_foot_height=0.11,
+                scale=1.0,
+            ),
+            kbot_rewards.JointPositionLimitPenalty.create(
+                physics_model=physics_model,
+                soft_limit_factor=0.95,
+                scale=-0.1,
+            ),
         ]
-        if self.config.use_gait_rewards:
-            rewards += [
-                # Stateful rewards
-                kbot_rewards.FeetSlipPenalty(scale=-0.25),
-                kbot_rewards.FeetAirTimeReward(
-                    scale=2.0,
-                    # threshold_min=0.0,
-                    # threshold_max=0.4,
-                ),
-                kbot_rewards.FeetPhaseReward(
-                    # foot_default_height=0.0,
-                    max_foot_height=0.11,
-                    scale=1.0,
-                ),
-            ]
+
         return rewards
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -816,9 +815,7 @@ if __name__ == "__main__":
             export_for_inference=True,
             only_save_most_recent=False,
             # Task parameters
-            use_gait_rewards=True,
             domain_randomize=True,
-            light_domain_randomize=False,
             gait_freq_lower=1.25,
             gait_freq_upper=1.5,
             reward_clip_min=0.0,
