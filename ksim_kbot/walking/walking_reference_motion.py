@@ -83,13 +83,17 @@ class WalkingRnnRefMotionTaskConfig(WalkingRnnTaskConfig):
         value=1.0,
         help="The scale to apply to the naive reward.",
     )
-    qpos_reward_scale: float = xax.field(
-        value=0.5,
-        help="The scale to apply to the qpos reference motion reward.",
-    )
 
 
 Config = TypeVar("Config", bound=WalkingRnnRefMotionTaskConfig)
+
+@attrs.define(frozen=True)
+class NaiveForwardReward(ksim.Reward):
+    """Reward for forward motion."""
+
+    def __call__(self, trajectory: ksim.Trajectory, _: None) -> tuple[Array, None]:
+        return trajectory.qvel[..., 0], None
+
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -107,6 +111,7 @@ class QposReferenceMotionReward(ksim.Reward):
         qpos = trajectory.qpos
         step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
         reference_qpos = jnp.take(self.reference_qpos.array, step_number, axis=0)
+        breakpoint()
         error = xax.get_norm(reference_qpos - qpos, self.norm)
         mean_error = error.mean(axis=-1)
         reward = jnp.exp(-mean_error * self.sensitivity)
@@ -126,8 +131,11 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
             ),
             kbot_rewards.OrientationPenalty(scale=self.config.orientation_penalty),
             QposReferenceMotionReward(
-                reference_qpos=self.reference_qpos, ctrl_dt=self.config.ctrl_dt, scale=self.config.qpos_reward_scale
+                reference_qpos=self.reference_qpos,
+                ctrl_dt=self.config.ctrl_dt,
+                scale=10.0,
             ),
+            NaiveForwardReward(scale=0.5),
         ]
 
         return rewards
@@ -270,8 +278,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
         if self.config.visualize_reference_motion:
             visualize_reference_motion(
                 mj_model,
-                base_id=self.mj_base_id,
-                reference_motion=np_reference_qpos,
+                reference_qpos=np_reference_qpos,
             )
         else:
             super().run()
@@ -314,6 +321,6 @@ if __name__ == "__main__":
             bvh_offset=(0.0, 0.0, 0.0),
             mj_base_name="floating_base_link",
             reference_base_name="CC_Base_Pelvis",
-            qpos_reward_scale=0.5,
+            # visualize_reference_motion=True,
         ),
     )
