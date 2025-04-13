@@ -31,6 +31,7 @@ class RnnActor(eqx.Module):
     min_std: float = eqx.static_field()
     max_std: float = eqx.static_field()
     var_scale: float = eqx.static_field()
+    num_mixtures: int = eqx.static_field()
 
     def __init__(
         self,
@@ -43,6 +44,7 @@ class RnnActor(eqx.Module):
         var_scale: float,
         hidden_size: int,
         depth: int,
+        num_mixtures: int,
     ) -> None:
         # Project input to hidden size
         key, input_proj_key = jax.random.split(key)
@@ -68,7 +70,7 @@ class RnnActor(eqx.Module):
         # Project to output
         self.output_proj = eqx.nn.Linear(
             in_features=hidden_size,
-            out_features=num_outputs * 2,
+            out_features=num_outputs * 3 * num_mixtures,
             key=key,
         )
 
@@ -77,6 +79,7 @@ class RnnActor(eqx.Module):
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
+        self.num_mixtures = num_mixtures
 
     def forward(self, obs_n: Array, carry: Array) -> tuple[distrax.Distribution, Array]:
         x_n = self.input_proj(obs_n)
@@ -86,14 +89,20 @@ class RnnActor(eqx.Module):
             out_carries.append(x_n)
         out_n = self.output_proj(x_n)
 
-        # Converts the output to a distribution.
-        mean_n = out_n[..., : self.num_outputs]
-        std_n = out_n[..., self.num_outputs :]
+        # Splits the predictions into means, standard deviations, and logits.
+        slice_len = NUM_JOINTS * self.num_mixtures
+        mean_nm = out_n[:slice_len].reshape(NUM_JOINTS, self.num_mixtures)
+        std_nm = out_n[slice_len : slice_len * 2].reshape(NUM_JOINTS, self.num_mixtures)
+        logits_nm = out_n[slice_len * 2 :].reshape(NUM_JOINTS, self.num_mixtures)
 
         # Softplus and clip to ensure positive standard deviations.
-        std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
+        std_nm = jnp.clip((jax.nn.softplus(std_nm) + self.min_std) * self.var_scale, max=self.max_std)
 
-        dist_n = distrax.Normal(mean_n, std_n)
+        dist_n = distrax.MixtureSameFamily(
+            mixture_distribution=distrax.Categorical(logits=logits_nm),
+            components_distribution=distrax.Normal(mean_nm, std_nm),
+        )
+
         return dist_n, jnp.stack(out_carries, axis=0)
 
 
@@ -167,6 +176,7 @@ class RnnModel(eqx.Module):
         num_joints: int,
         hidden_size: int,
         depth: int,
+        num_mixtures: int,
     ) -> None:
         self.actor = RnnActor(
             key,
@@ -177,6 +187,7 @@ class RnnModel(eqx.Module):
             var_scale=0.5,
             hidden_size=hidden_size,
             depth=depth,
+            num_mixtures=num_mixtures,
         )
         self.critic = RnnCritic(
             key,
@@ -204,6 +215,7 @@ class WalkingRnnTask(WalkingTask[Config], Generic[Config]):
             max_std=1.0,
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
+            num_mixtures=self.config.num_mixtures,
         )
 
     def run_actor(
