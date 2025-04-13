@@ -124,7 +124,7 @@ def main() -> None:
     parser.add_argument("--enable_joystick", action="store_true", help="Enable joystick")
     parser.add_argument("--scale_action", type=float, default=0.1, help="Action Scale, default 0.1")
     parser.add_argument("--ip", type=str, default="localhost", help="IP address of KOS")
-    parser.add_argument("--episode_length", type=int, default=60, help="Length of episode in seconds")
+    parser.add_argument("--episode_length", type=int, default=5, help="Length of episode in seconds")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
     args = parser.parse_args()

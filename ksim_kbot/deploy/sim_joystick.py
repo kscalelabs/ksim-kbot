@@ -129,17 +129,13 @@ async def get_observation(
     )
     pos_dict = {s.actuator_id: s.position for s in act_states.states}
 
-    def get_nn_id(actuator: Actuator) -> int:
-        return actuator.nn_id
-
-    pos_obs = np.deg2rad([pos_dict[ac.actuator_id] for ac in sorted(ACTUATOR_LIST, key=get_nn_id)])
+    pos_obs = np.deg2rad([pos_dict[ac.actuator_id] for ac in sorted(ACTUATOR_LIST, key=lambda x: x.nn_id)])
     pos_diff = pos_obs - DEFAULT_POSITIONS
 
     vel_dict = {s.actuator_id: s.velocity for s in act_states.states}
-    vel_obs = np.deg2rad([vel_dict[ac.actuator_id] for ac in sorted(ACTUATOR_LIST, key=get_nn_id)])
+    vel_obs = np.deg2rad([vel_dict[ac.actuator_id] for ac in sorted(ACTUATOR_LIST, key=lambda x: x.nn_id)])
 
     imu_obs = np.array([imu.accel_x, imu.accel_y, imu.accel_z, imu.gyro_x, imu.gyro_y, imu.gyro_z])
-    imu_obs = np.array([0.0, 9.81, 0.0, 0.0, 0.0, 0.0])
 
     phase += 2 * np.pi * GAIT_DT * DT
     phase = np.fmod(phase + np.pi, 2 * np.pi) - np.pi
@@ -283,8 +279,6 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
     if "cleanup" in locals():
         cleanup()
 
-
-# Run with:
 # python -m ksim_kbot.deploy.sim --model_path ksim_kbot/deploy/assets/mlp_example
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
