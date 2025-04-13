@@ -21,6 +21,7 @@ from .pseudo_ik import (
     NUM_CRITIC_INPUTS,
     KbotPseudoIKTask,
     KbotPseudoIKTaskConfig,
+    CartesianBodyTargetVectorReward,
 )
 
 # Same obs space except without prev action.
@@ -252,6 +253,45 @@ class KbotPseudoIKRNNTask(KbotPseudoIKTask[Config], Generic[Config]):
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
         )
+
+    def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
+        return [
+            ksim.PositionTrackingReward.create(
+                model=physics_model,
+                tracked_body_name="ik_target",
+                base_body_name="floating_base_link",
+                scale=40.0,
+                command_name="target_position_command",
+            ),
+            ksim.PositionTrackingReward.create(
+                model=physics_model,
+                tracked_body_name="KC_C_401R_R_UpForearmDrive",
+                base_body_name="floating_base_link",
+                scale=3.0,
+                command_name="elbow_target_position_command",
+            ),
+            # BodyOrientationTrackingReward.create(
+            #     model=physics_model,
+            #     command_name="ik_target_body_orientation_command",
+            #     tracked_body_name="ik_target",
+            #     scale=0.1,
+            # ),
+            CartesianBodyTargetVectorReward.create(
+                model=physics_model,
+                command_name="target_position_command",
+                tracked_body_name="ik_target",
+                base_body_name="floating_base_link",
+                scale=6.0,
+                normalize_velocity=True,
+                distance_threshold=0.1,
+                dt=self.config.dt,
+            ),
+            ksim.ObservationMeanPenalty(observation_name="contact_observation_arms", scale=-0.5),
+            ksim.ActuatorForcePenalty(scale=-0.000001, norm="l1"),
+            ksim.ActionSmoothnessPenalty(scale=-0.02, norm="l2"),
+            ksim.JointVelocityPenalty(scale=-0.001, freejoint_first=False, norm="l2"),
+            ksim.ActuatorJerkPenalty(scale=-0.001, ctrl_dt=self.config.ctrl_dt, norm="l2"),
+        ]
 
     def _run_actor(
         self,
