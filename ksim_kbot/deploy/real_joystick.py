@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 DT = 0.02  # Policy time step (50Hz)
 GAIT_DT = 1.25
 GRAVITY = 9.81  # m/s
-ACTION_SCALE = 0.1
+ACTION_SCALE = 1.0
 
 DEFAULT_POSITIONS = np.array(
     [
@@ -122,9 +122,9 @@ async def send_actions(kos: pykos.KOS, position: np.ndarray, velocity: np.ndarra
         {
             "actuator_id": ac.actuator_id,
             "position": (
-                0.0 if ac.actuator_id in [11, 12, 13, 14, 15, 21, 22, 23, 24, 25] else position[ac.nn_id] * ACTION_SCALE
+                0.0 if ac.actuator_id in [11, 12, 13, 14, 15, 21, 22, 23, 24, 25] else position[ac.nn_id]
             ),
-            "velocity": velocity[ac.nn_id] * ACTION_SCALE,
+            "velocity": velocity[ac.nn_id],
         }
         for ac in ACTUATOR_LIST
     ]
@@ -200,14 +200,15 @@ async def main(model_path: str, ip: str, episode_length: int) -> None:
         while time.time() < end_time:
             observation = observation.reshape(1, -1)
             # move it all to the infer call
-            action = np.array(model.infer(observation)).reshape(-1)
+            action2 = np.array(model.infer(observation)).reshape(-1) 
+            action = action2 * ACTION_SCALE
             position = action[: len(ACTUATOR_LIST)] + DEFAULT_POSITIONS
             velocity = action[len(ACTUATOR_LIST) :]
             (observation, phase), _ = await asyncio.gather(
                 get_observation(kos, prev_action, cmd, phase),
                 send_actions(kos, position, velocity),
             )
-            prev_action = action
+            prev_action = action2
 
             if time.time() < target_time:
                 await asyncio.sleep(max(0, target_time - time.time()))

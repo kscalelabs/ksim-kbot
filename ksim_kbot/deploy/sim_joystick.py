@@ -132,6 +132,9 @@ async def get_observation(
     phase_vec = np.array([np.cos(phase), np.sin(phase)]).flatten()
 
     obs = np.concatenate([pos_diff, vel_obs, imu_obs, cmd, prev_action, phase_vec])
+
+    print(f"working obs: {obs}")
+
     return obs, phase
 
 
@@ -202,14 +205,14 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
     await configure_actuators(kos)
     await reset(kos)
 
-    command_state = CommandState()
-    keyboard_controller = KeyboardController(command_state.update_from_key, timeout=0.001)
-    await keyboard_controller.start()
+    # command_state = CommandState()
+    # keyboard_controller = KeyboardController(command_state.update_from_key, timeout=0.001)
+    # await keyboard_controller.start()
 
     phase = np.array([0, np.pi])
     prev_action = np.zeros(len(ACTUATOR_LIST) * 2)
 
-    obs, phase = await get_observation(kos, prev_action, command_state.get_command(), phase)
+    obs, phase = await get_observation(kos, prev_action, [0.3, 0.0], phase)
     if no_render:
         await kos.process_manager.start_kclip("deployment")
 
@@ -223,7 +226,7 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
         pos = action[: len(ACTUATOR_LIST)] + DEFAULT_POSITIONS
         vel = action[len(ACTUATOR_LIST) :]
         (obs, phase), _ = await asyncio.gather(
-            get_observation(kos, prev_action, command_state.get_command(), phase),
+            get_observation(kos, prev_action, [0.3, 0.0], phase),
             send_actions(kos, pos, vel),
         )
         prev_action = action

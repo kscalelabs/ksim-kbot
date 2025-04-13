@@ -1,0 +1,160 @@
+import argparse
+import asyncio
+import os
+import sys
+import time
+from loguru import logger
+from dataclasses import dataclass
+from abc import ABC, abstractmethod
+
+import numpy as np
+import pykos
+import tensorflow as tf
+
+from ksim_kbot.deploy.deploy import FixedArmDeploy, Deploy
+
+
+#*********************#
+#* Joystick Deploy    #
+#*********************#
+
+class JoystickDeploy(FixedArmDeploy):
+    """Deploy class for joystick-controlled policies."""
+
+
+    def __init__(self, enable_joystick: bool, model_path: str, mode: str, ip: str = "localhost"):
+        super().__init__(model_path, mode, ip)
+        self.enable_joystick = enable_joystick
+
+        self.default_positions_rad = np.array(
+                [
+                    # right arm (nn_id 0-4)
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    # left arm (nn_id 5-9)
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    # right leg (nn_id 10-14)
+                    -0.23,
+                    0.0,
+                    0.0,
+                    -0.441,
+                    0.195,
+                    # left leg (nn_id 15-19)
+                    0.23,
+                    0.0,
+                    0.0,
+                    0.441,
+                    -0.195,
+                ]
+            )
+
+        self.default_positions_deg = np.rad2deg(self.default_positions_rad)
+        self.reset_phase()
+
+
+    def reset_phase(self):
+        """Reset the phase to initial values."""
+        self.phase = np.array([0, np.pi])
+        logger.debug(f"Phase reset to: {self.phase}")
+
+
+    def get_command(self) -> np.ndarray:
+        if self.enable_joystick:
+            return np.array([0.3, 0.0])
+        else:
+            return np.array([0.3, 0.0])
+
+
+    async def get_observation(self) -> np.ndarray:
+        """Get observation from the robot for joystick-controlled policies.
+    
+        Returns:
+            Observation vector and updated phase
+        """
+
+        #* IMU Observation
+        (actuator_states, imu) = await asyncio.gather(
+            self.kos.actuator.get_actuators_state([ac.actuator_id for ac in self.actuator_list]),
+            self.kos.imu.get_imu_values(),
+        )
+
+        accel = np.array([imu.accel_x, imu.accel_y, imu.accel_z]) * self.GRAVITY
+        gyro = np.deg2rad(np.array([imu.gyro_x, imu.gyro_y, imu.gyro_z]))
+        imu_obs = np.concatenate([accel, gyro], axis=-1)
+
+
+        #* Pos Diff. Difference of current position from default position
+        state_dict_pos = {state.actuator_id: state.position for state in actuator_states.states}
+        pos_obs = [state_dict_pos[ac.actuator_id] for ac in sorted(self.actuator_list, key=lambda x: x.nn_id)]
+        pos_obs = np.deg2rad(np.array(pos_obs))
+        pos_diff = pos_obs - self.default_positions_rad #! K-Sim is in radians
+
+        #* Vel Obs. Velocity at each joint
+        state_dict_vel = {state.actuator_id: state.velocity for state in actuator_states.states}
+        vel_obs = np.deg2rad(
+            np.array([state_dict_vel[ac.actuator_id] for ac in sorted(self.actuator_list, key=lambda x: x.nn_id)])
+        )
+
+        #* Phase, tracking a sinusoidal
+        self.phase += 2 * np.pi * self.GAIT_DT * self.DT
+        self.phase = np.fmod(self.phase + np.pi, 2 * np.pi) - np.pi
+        phase_vec = np.array([np.cos(self.phase), np.sin(self.phase)]).flatten()
+
+        cmd = self.get_command()
+
+        observation = np.concatenate([pos_diff, vel_obs, imu_obs, cmd, self.prev_action, phase_vec]).reshape(1, -1)
+
+
+        
+        return observation
+
+
+def main():
+    """Parse arguments and run the deploy script."""
+    parser = argparse.ArgumentParser(description="Deploy a SavedModel on K-Bot")
+    parser.add_argument("--model_path", type=str, required=True, help="File in assets folder eg. mlp_example")
+    parser.add_argument("--mode", type=str, required=True, choices=["sim", "real-deploy", "real-check"], 
+                        help="Mode of deployment")
+    parser.add_argument("--enable_joystick", action="store_true", help="Enable joystick")
+    parser.add_argument("--scale_action", type=float, default=0.1, help="Action Scale, default 0.1")
+    parser.add_argument("--ip", type=str, default="localhost", help="IP address of KOS")
+    parser.add_argument("--episode_length", type=int, default=60, help="Length of episode in seconds")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+
+    args = parser.parse_args()
+
+    file_dir = os.path.dirname(os.path.abspath(__file__))
+    model_path = os.path.join(file_dir, "assets", args.model_path)
+
+
+    # Configure logging
+    log_level = "DEBUG" if args.debug else "INFO"
+    
+    # Set global log level
+    logger.remove()
+    logger.add(sys.stderr, level=log_level)  # This will keep the default colorized format
+    logger.add(f"{file_dir}/deployment_checks/last_deployment.log", level=log_level)
+    
+    deploy = JoystickDeploy(args.enable_joystick, model_path, args.mode, args.ip)
+    deploy.ACTION_SCALE = args.scale_action
+
+    try:
+        asyncio.run(deploy.run(args.episode_length))
+    except Exception as e:
+        logger.error("Error: %s", e)
+        deploy.disable()
+        raise e
+
+
+if __name__ == "__main__":
+    main()
+
+
+
