@@ -136,7 +136,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
             QposReferenceMotionReward(
                 reference_qpos=self.reference_qpos,
                 ctrl_dt=self.config.ctrl_dt,
-                scale=5.0,
+                scale=7.0,
                 joint_weights=(
                     # right arm
                     1.0,
@@ -170,7 +170,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 # threshold_min=0.0,
                 # threshold_max=0.4,
             ),
-            NaiveForwardReward(scale=3.0),
+            NaiveForwardReward(scale=1.5),
             ksim.LinearVelocityPenalty(index="z", scale=-2.0),
         ]
 
