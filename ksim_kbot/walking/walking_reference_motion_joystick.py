@@ -100,24 +100,51 @@ class NaiveForwardReward(ksim.Reward):
 
 @attrs.define(frozen=True, kw_only=True)
 class QposReferenceMotionReward(ksim.Reward):
-    reference_qpos: xax.HashableArray
+    forward_reference_qpos: xax.HashableArray
+    backward_reference_qpos: xax.HashableArray
     ctrl_dt: float
     norm: xax.NormType = attrs.field(default="l1")
     sensitivity: float = attrs.field(default=5.0)
     joint_weights: tuple[float, ...] = attrs.field(default=tuple([1.0] * NUM_JOINTS))
+    command_name: str = attrs.field(default="joystick_command")
+    speed: float = attrs.field(default=1.0)
 
     @property
     def num_frames(self) -> int:
-        return self.reference_qpos.array.shape[0]
+        return self.forward_reference_qpos.array.shape[0]
 
     def __call__(self, trajectory: ksim.Trajectory, _: None) -> tuple[Array, None]:
         qpos = trajectory.qpos
-        step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
-        reference_qpos = jnp.take(self.reference_qpos.array, step_number, axis=0)
-        error = xax.get_norm(reference_qpos[..., 7:] - qpos[..., 7:], self.norm)
+        command = trajectory.command[self.command_name]
+        
+        # Calculate the step number within the reference motion cycle
+        step_number = jnp.int32(jnp.round(self.speed * trajectory.timestep / self.ctrl_dt)) % self.num_frames
+        
+        # Determine the target reference qpos based on the command
+        # Command: 0=stand, 1=forward, 2=backward, 3=turn left, 4=turn right
+        is_standing = command[..., 0] == 0
+        is_walking_backward = command[..., 0] == 2
+
+        target_qpos_fwd = jnp.take(self.forward_reference_qpos.array, step_number, axis=0)
+        target_qpos_bwd = jnp.take(self.backward_reference_qpos.array, step_number, axis=0)
+
+        # Select the appropriate target qpos frame based on the command
+        is_walking_backward_b = jnp.expand_dims(is_walking_backward, axis=-1)
+        target_reference_qpos = jnp.where(
+            is_walking_backward_b,
+            target_qpos_bwd,
+            target_qpos_fwd
+        )
+
+        # Compute the reference motion reward error using the selected target
+        error = xax.get_norm(target_reference_qpos[..., 7:] - qpos[..., 7:], self.norm)
         error = error * jnp.array(self.joint_weights)
         mean_error = error.mean(axis=-1)
-        reward = jnp.exp(-mean_error * self.sensitivity)
+        motion_reward = jnp.exp(-mean_error * self.sensitivity)
+
+        # Apply reward: 1.0 for standing, motion_reward otherwise
+        reward = jnp.where(is_standing, 1.0, motion_reward)
+
         return reward, None
 
 
@@ -127,6 +154,9 @@ class WalkingRnnRefMotionJoystickTask(WalkingRnnTask[Config], Generic[Config]):
     mj_base_id: int
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
+        backward_ref_qpos_array = self.reference_qpos.array[::-1]
+        backward_reference_qpos_hashable = xax.hashable_array(backward_ref_qpos_array)
+
         rewards: list[ksim.Reward] = [
             ksim.StayAliveReward(
                 success_reward=1.0,
@@ -134,9 +164,11 @@ class WalkingRnnRefMotionJoystickTask(WalkingRnnTask[Config], Generic[Config]):
             ),
             kbot_rewards.OrientationPenalty(scale=self.config.orientation_penalty),
             QposReferenceMotionReward(
-                reference_qpos=self.reference_qpos,
+                forward_reference_qpos=self.reference_qpos,
+                backward_reference_qpos=backward_reference_qpos_hashable,
                 ctrl_dt=self.config.ctrl_dt,
                 scale=7.0,
+                speed=2.0,
                 joint_weights=(
                     # right arm
                     1.0,
@@ -172,6 +204,7 @@ class WalkingRnnRefMotionJoystickTask(WalkingRnnTask[Config], Generic[Config]):
             ),
             ksim.JoystickReward(scale=1.5, linear_velocity_clip_max=1.0, angular_velocity_clip_max=1.0),
             ksim.LinearVelocityPenalty(index="z", scale=-2.0),
+            kbot_rewards.TargetHeightReward(target_height=1.0, scale=1.0),
         ]
 
         return rewards
@@ -180,6 +213,14 @@ class WalkingRnnRefMotionJoystickTask(WalkingRnnTask[Config], Generic[Config]):
         return [
             ksim.RandomJointPositionReset(),
             ksim.RandomJointVelocityReset(),
+        ]
+
+    def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
+        return [
+            ksim.JoystickCommand(
+                switch_prob=self.config.ctrl_dt / 15,
+                ranges=((0, 1),) if self.config.joystick_only_forward else ((0, 4),),
+            ),
         ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
@@ -363,7 +404,7 @@ if __name__ == "__main__":
             gamma=0.97,
             lam=0.95,
             entropy_coef=0.005,
-            learning_rate=2e-3,
+            learning_rate=4e-3,
             clip_param=0.3,
             max_grad_norm=0.5,
             export_for_inference=True,

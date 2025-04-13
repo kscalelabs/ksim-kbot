@@ -293,6 +293,20 @@ class JointPositionLimitPenalty(ksim.Reward):
         penalty += jnp.clip(trajectory.qpos[..., 7:] - self.upper_limits.array, 0.0, None)
         return jnp.sum(penalty, axis=-1), None
 
+@attrs.define(frozen=True, kw_only=True)
+class TargetHeightReward(ksim.Reward):
+    """Reward for reaching a target height."""
+
+    target_height: float = attrs.field(default=1.0)
+    norm: xax.NormType = attrs.field(default="l1")
+    monotonic_fn: str = attrs.field(default="inv")
+
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
+        qpos = trajectory.qpos
+        error = qpos[..., 2] - self.target_height
+        reward_value = ksim.norm_to_reward(xax.get_norm(error, self.norm), self.monotonic_fn)
+        return reward_value, None
+
 
 @attrs.define(frozen=True, kw_only=True)
 class ContactForcePenalty(ksim.Reward):

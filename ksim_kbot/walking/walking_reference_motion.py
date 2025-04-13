@@ -93,9 +93,12 @@ Config = TypeVar("Config", bound=WalkingRnnRefMotionTaskConfig)
 class NaiveForwardReward(ksim.Reward):
     """Reward for forward motion."""
 
-    def __call__(self, trajectory: ksim.Trajectory, _: None) -> tuple[Array, None]:
-        return trajectory.qvel[..., 0], None
+    vel_clip_max: float = attrs.field(default=1.0)
 
+    def __call__(self, trajectory: ksim.Trajectory, _: None) -> tuple[Array, None]:
+        vel = trajectory.qvel[..., 0]
+        clipped_vel = jnp.clip(vel, a_max=self.vel_clip_max)
+        return clipped_vel, None
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -170,8 +173,9 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 # threshold_min=0.0,
                 # threshold_max=0.4,
             ),
-            NaiveForwardReward(scale=1.5),
+            NaiveForwardReward(scale=1.5, vel_clip_max=0.2),
             ksim.LinearVelocityPenalty(index="z", scale=-2.0),
+            kbot_rewards.TargetHeightReward(target_height=1.0, scale=1.0),
         ]
 
         return rewards
@@ -352,8 +356,8 @@ if __name__ == "__main__":
             epochs_per_log_step=1,
             rollout_length_seconds=15.0,
             render_length_seconds=15.0,
-            increase_threshold=10.0,
-            decrease_threshold=5.0,
+            increase_threshold=5.0,
+            decrease_threshold=3.0,
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
