@@ -8,6 +8,8 @@ import subprocess
 import sys
 import time
 import types
+import pickle
+import os
 from dataclasses import dataclass
 from typing import Callable
 
@@ -47,6 +49,15 @@ DEFAULT_POSITIONS = np.array(
     ]
 )
 
+rollout_dict = {
+    "command": [],
+    "pos_diff": [],
+    "vel_obs": [],
+    "imu_obs": [],
+    "cmd": [],
+    "prev_action": [],
+    "phase": [],
+}
 
 class CommandState:
     def __init__(self) -> None:
@@ -126,6 +137,7 @@ async def get_observation(
     vel_obs = np.deg2rad([vel_dict[ac.actuator_id] for ac in sorted(ACTUATOR_LIST, key=lambda x: x.nn_id)])
 
     imu_obs = np.array([imu.accel_x, imu.accel_y, imu.accel_z, imu.gyro_x, imu.gyro_y, imu.gyro_z])
+    imu_obs = np.array([0.0, 9.81, 0.0, 0.0, 0.0, 0.0])
 
     phase += 2 * np.pi * GAIT_DT * DT
     phase = np.fmod(phase + np.pi, 2 * np.pi) - np.pi
@@ -133,7 +145,12 @@ async def get_observation(
 
     obs = np.concatenate([pos_diff, vel_obs, imu_obs, cmd, prev_action, phase_vec])
 
-    print(f"working obs: {obs}")
+    rollout_dict["pos_diff"].append(pos_diff)
+    rollout_dict["vel_obs"].append(vel_obs)
+    rollout_dict["imu_obs"].append(imu_obs)
+    rollout_dict["cmd"].append(cmd)
+    rollout_dict["prev_action"].append(prev_action)
+    rollout_dict["phase"].append(phase_vec)
 
     return obs, phase
 
@@ -146,6 +163,7 @@ async def send_actions(kos: pykos.KOS, position: np.ndarray, velocity: np.ndarra
         for ac in ACTUATOR_LIST
     ]
     await kos.actuator.command_actuators(commands)  # type: ignore[arg-type]
+    rollout_dict["command"].append(commands)
 
 
 async def configure_actuators(kos: pykos.KOS) -> None:
@@ -163,8 +181,20 @@ async def reset(kos: pykos.KOS) -> None:
     await kos.sim.reset(
         pos={"x": 0.0, "y": 0.0, "z": 1.01},
         quat={"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
-        joints=[{"name": ac.joint_name, "pos": pos} for ac, pos in zip(ACTUATOR_LIST, DEFAULT_POSITIONS)],
     )
+
+    reset_commands: list[pykos.services.actuator.ActuatorCommand] = [
+        {
+            "actuator_id": ac.actuator_id,
+            "position": pos,
+            "velocity": 0.0,
+        }
+        for ac, pos in zip(ACTUATOR_LIST, np.rad2deg(DEFAULT_POSITIONS))
+    ]
+
+    await kos.actuator.command_actuators(reset_commands)
+
+    
 
 
 def spawn_kos_sim(no_render: bool) -> tuple[subprocess.Popen, Callable]:
@@ -184,6 +214,14 @@ def spawn_kos_sim(no_render: bool) -> tuple[subprocess.Popen, Callable]:
     signal.signal(signal.SIGTERM, cleanup)
     return proc, cleanup
 
+def save_rollout() -> None:
+    """Save the rollout to a file."""
+    global rollout_dict
+    if rollout_dict is not None:
+        file_dir = os.path.dirname(os.path.abspath(__file__))
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        with open(f"{file_dir}/deployment_checks/sim_joystick_{timestamp}.pkl", "wb") as f:
+            pickle.dump(rollout_dict, f)
 
 async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -> None:
     model = tf.saved_model.load(model_path)
@@ -237,6 +275,7 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
 
         target_time += DT
 
+    save_rollout()
     if no_render:
         await kos.process_manager.stop_kclip("deployment")
     if "cleanup" in locals():

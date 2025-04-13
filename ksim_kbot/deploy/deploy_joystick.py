@@ -18,7 +18,7 @@ from ksim_kbot.deploy.deploy import FixedArmDeploy, Deploy
 #* Joystick Deploy    #
 #*********************#
 
-class JoystickDeploy(FixedArmDeploy):
+class JoystickDeploy(Deploy):
     """Deploy class for joystick-controlled policies."""
 
 
@@ -27,43 +27,42 @@ class JoystickDeploy(FixedArmDeploy):
         self.enable_joystick = enable_joystick
 
         self.default_positions_rad = np.array(
-                [
-                    # right arm (nn_id 0-4)
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # left arm (nn_id 5-9)
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # right leg (nn_id 10-14)
-                    -0.23,
-                    0.0,
-                    0.0,
-                    -0.441,
-                    0.195,
-                    # left leg (nn_id 15-19)
-                    0.23,
-                    0.0,
-                    0.0,
-                    0.441,
-                    -0.195,
-                ]
-            )
+            [
+                0,
+                0,
+                0,
+                0,
+                0,  # right arm
+                0,
+                0,
+                0,
+                0,
+                0,  # left arm
+                -0.23,
+                0,
+                0,
+                -0.441,
+                0.195,  # right leg
+                0.23,
+                0,
+                0,
+                0.441,
+                -0.195,  # left leg
+            ]
+        )
 
         self.default_positions_deg = np.rad2deg(self.default_positions_rad)
-        self.reset_phase()
-
-
-    def reset_phase(self):
-        """Reset the phase to initial values."""
         self.phase = np.array([0, np.pi])
-        logger.debug(f"Phase reset to: {self.phase}")
 
+        self.rollout_dict = {
+            "command": [],
+            "pos_diff": [],
+            "vel_obs": [],
+            "imu_obs": [],
+            "controller_cmd": [],
+            "prev_action": [],
+            "phase": [],
+        }
 
     def get_command(self) -> np.ndarray:
         if self.enable_joystick:
@@ -88,7 +87,7 @@ class JoystickDeploy(FixedArmDeploy):
         accel = np.array([imu.accel_x, imu.accel_y, imu.accel_z]) * self.GRAVITY
         gyro = np.deg2rad(np.array([imu.gyro_x, imu.gyro_y, imu.gyro_z]))
         imu_obs = np.concatenate([accel, gyro], axis=-1)
-
+        # imu_obs = np.array([0.0, 9.81, 0.0, 0.0, 0.0, 0.0])
 
         #* Pos Diff. Difference of current position from default position
         state_dict_pos = {state.actuator_id: state.position for state in actuator_states.states}
@@ -108,6 +107,14 @@ class JoystickDeploy(FixedArmDeploy):
         phase_vec = np.array([np.cos(self.phase), np.sin(self.phase)]).flatten()
 
         cmd = self.get_command()
+
+        if self.mode == "sim" or self.mode == "real-check":
+            self.rollout_dict["pos_diff"].append(pos_diff)
+            self.rollout_dict["vel_obs"].append(vel_obs)
+            self.rollout_dict["imu_obs"].append(imu_obs)
+            self.rollout_dict["controller_cmd"].append(cmd)
+            self.rollout_dict["prev_action"].append(self.prev_action)
+            self.rollout_dict["phase"].append(phase_vec)
 
         observation = np.concatenate([pos_diff, vel_obs, imu_obs, cmd, self.prev_action, phase_vec]).reshape(1, -1)
 

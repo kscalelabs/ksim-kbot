@@ -5,6 +5,7 @@ import asyncio
 import os
 import time
 from loguru import logger
+import pickle
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 
@@ -39,6 +40,7 @@ class Deploy(ABC):
     ACTION_SCALE = 1.0
 
 
+    #! Was different between sim and real_deployment
     actuator_list: list[Actuator] = [
         # Right arm (nn_id 0-4)
         Actuator(actuator_id=21, nn_id=0, kp=40.0, kd=4.0, max_torque=40.0, joint_name="dof_right_shoulder_pitch_03"),
@@ -53,17 +55,17 @@ class Deploy(ABC):
         Actuator(actuator_id=14, nn_id=8, kp=30.0, kd=1.0, max_torque=14.0, joint_name="dof_left_elbow_02"),
         Actuator(actuator_id=15, nn_id=9, kp=20.0, kd=0.45473329537059787, max_torque=1.0, joint_name="dof_left_wrist_00"),
         # Right leg (nn_id 10-14)
-        Actuator(actuator_id=41, nn_id=10, kp=85.0, kd=5.0, max_torque=60.0, joint_name="dof_right_hip_pitch_04"),
-        Actuator(actuator_id=42, nn_id=11, kp=40.0, kd=4.0, max_torque=40.0, joint_name="dof_right_hip_roll_03"),
-        Actuator(actuator_id=43, nn_id=12, kp=40.0, kd=4.0, max_torque=40.0, joint_name="dof_right_hip_yaw_03"),
-        Actuator(actuator_id=44, nn_id=13, kp=85.0, kd=5.0, max_torque=60.0, joint_name="dof_right_knee_04"),
-        Actuator(actuator_id=45, nn_id=14, kp=30.0, kd=1.0, max_torque=14.0, joint_name="dof_right_ankle_02"),
+        Actuator(actuator_id=41, nn_id=10, kp=85.0, kd=5.0, max_torque=80.0, joint_name="dof_right_hip_pitch_04"),
+        Actuator(actuator_id=42, nn_id=11, kp=40.0, kd=4.0, max_torque=60.0, joint_name="dof_right_hip_roll_03"),
+        Actuator(actuator_id=43, nn_id=12, kp=40.0, kd=4.0, max_torque=60.0, joint_name="dof_right_hip_yaw_03"),
+        Actuator(actuator_id=44, nn_id=13, kp=85.0, kd=5.0, max_torque=80.0, joint_name="dof_right_knee_04"),
+        Actuator(actuator_id=45, nn_id=14, kp=30.0, kd=1.0, max_torque=17.0, joint_name="dof_right_ankle_02"),
         # Left leg (nn_id 15-19)
-        Actuator(actuator_id=31, nn_id=15, kp=85.0, kd=5.0, max_torque=60.0, joint_name="dof_left_hip_pitch_04"),
-        Actuator(actuator_id=32, nn_id=16, kp=40.0, kd=4.0, max_torque=40.0, joint_name="dof_left_hip_roll_03"),
-        Actuator(actuator_id=33, nn_id=17, kp=40.0, kd=4.0, max_torque=40.0, joint_name="dof_left_hip_yaw_03"),
-        Actuator(actuator_id=34, nn_id=18, kp=85.0, kd=5.0, max_torque=60.0, joint_name="dof_left_knee_04"),
-        Actuator(actuator_id=35, nn_id=19, kp=30.0, kd=1.0, max_torque=14.0, joint_name="dof_left_ankle_02"),
+        Actuator(actuator_id=31, nn_id=15, kp=85.0, kd=5.0, max_torque=80.0, joint_name="dof_left_hip_pitch_04"),
+        Actuator(actuator_id=32, nn_id=16, kp=40.0, kd=4.0, max_torque=60.0, joint_name="dof_left_hip_roll_03"),
+        Actuator(actuator_id=33, nn_id=17, kp=40.0, kd=4.0, max_torque=60.0, joint_name="dof_left_hip_yaw_03"),
+        Actuator(actuator_id=34, nn_id=18, kp=85.0, kd=5.0, max_torque=80.0, joint_name="dof_left_knee_04"),
+        Actuator(actuator_id=35, nn_id=19, kp=30.0, kd=1.0, max_torque=17.0, joint_name="dof_left_ankle_02"),
     ]
 
     def __init__(self, model_path: str, mode: str, ip: str = "localhost"):
@@ -73,10 +75,13 @@ class Deploy(ABC):
         self.model = tf.saved_model.load(model_path)
         self.kos = pykos.KOS(ip=self.ip)
 
-        self.default_positions_deg = np.zeros(len(self.actuator_list))
-        self.default_positions_rad = np.zeros(len(self.actuator_list))
+        self.default_positions_deg = None
+        self.default_positions_rad = None
         
         self.prev_action = np.zeros(len(self.actuator_list) * 2)
+
+        #* Fields defined in child classes
+        self.rollout_dict = None
         
     
 
@@ -103,7 +108,12 @@ class Deploy(ABC):
         if self.mode == "real-deploy":
             await self.kos.actuator.command_actuators(actuator_commands)
         elif self.mode == "real-check":
-            logger.info("Sending actuator commands: %s", actuator_commands)
+            logger.info(f"Sending actuator commands: {actuator_commands}")
+            self.rollout_dict["command"].append(actuator_commands)
+        elif self.mode == "sim":
+            # For all other modes, log and send commands
+            await self.kos.actuator.command_actuators(actuator_commands)
+            self.rollout_dict["command"].append(actuator_commands)
 
     async def configure_actuators(self) -> None:
         """Configure all actuators with their respective parameters."""
@@ -119,7 +129,7 @@ class Deploy(ABC):
     async def reset(self) -> None:
         """Reset all actuators to their default positions."""
 
-        if self.mode == "real":
+        if self.mode == "real-check" or self.mode == "real-deploy":
             reset_commands: list[pykos.services.actuator.ActuatorCommand] = [
                 {
                     "actuator_id": ac.actuator_id,
@@ -131,11 +141,25 @@ class Deploy(ABC):
 
             await self.kos.actuator.command_actuators(reset_commands)
         elif self.mode == "sim":
+            logger.debug(f"Resetting to: {self.default_positions_deg}")
+
+            #! In original script, the joint resets are diff
             await self.kos.sim.reset(
                 pos={"x": 0.0, "y": 0.0, "z": 1.01},
                 quat={"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
-                joints=[{"name": ac.joint_name, "pos": pos} for ac, pos in zip(self.actuator_list, self.default_positions_deg)],
             )
+
+            reset_commands: list[pykos.services.actuator.ActuatorCommand] = [
+                {
+                    "actuator_id": ac.actuator_id,
+                    "position": pos,
+                    "velocity": 0.0,
+                }
+                for ac, pos in zip(self.actuator_list, self.default_positions_deg)
+            ]
+
+            await self.kos.actuator.command_actuators(reset_commands)
+
 
     async def disable(self) -> None:
         """Disable all actuators."""
@@ -144,7 +168,15 @@ class Deploy(ABC):
                 actuator_id=ac.actuator_id,
                 torque_enabled=False,
             )
-    
+
+    def save_rollout(self) -> None:
+        """Save the rollout to a file."""
+        if self.rollout_dict is not None:
+            file_dir = os.path.dirname(os.path.abspath(__file__))
+            timestamp = time.strftime("%Y%m%d-%H%M%S")
+            with open(f"{file_dir}/deployment_checks/{self.mode}_{timestamp}.pkl", "wb") as f:
+                pickle.dump(self.rollout_dict, f)
+
     @abstractmethod
     async def get_observation(self) -> np.ndarray:
         """
@@ -174,15 +206,14 @@ class Deploy(ABC):
 
         await self.reset()
 
-        self.reset_phase()
-        
         logger.warning(f"Deploying with Action Scale: {self.ACTION_SCALE}")
         if self.mode == "real-deploy":
             input("Press Enter to continue...")
 
-        for i in range(5, -1, -1):
-            logger.info(f"Starting in {i} seconds...")
-            await asyncio.sleep(1)
+        if self.mode == "real":
+            for i in range(5, -1, -1):
+                logger.info(f"Starting in {i} seconds...")
+                await asyncio.sleep(1)
 
         await self.reset()
 
@@ -197,8 +228,8 @@ class Deploy(ABC):
                 action = np.array(self.model.infer(observation)).reshape(-1) 
 
                 #! Only Scale Action on observation but not onto Default Positions
-                position = action[: len(self.actuator_list)] * self.ACTION_SCALE + self.default_positions_rad
-                velocity = action[len(self.actuator_list) :] * self.ACTION_SCALE
+                position = action[: len(self.actuator_list)] + self.default_positions_rad
+                velocity = action[len(self.actuator_list) :]
                 
                 observation, _ = await asyncio.gather(
                     self.get_observation(),
@@ -216,10 +247,12 @@ class Deploy(ABC):
         except asyncio.CancelledError:
             logger.info("Exiting...")
             await self.disable()
+            self.save_rollout()
             logger.info("Actuators disabled")
             raise KeyboardInterrupt
 
         logger.info("Episode finished!")
+        self.save_rollout()
         await self.disable()
 
 
@@ -258,9 +291,11 @@ class FixedArmDeploy(Deploy):
             await self.kos.actuator.command_actuators(actuator_commands)
         elif self.mode == "real-check":
             logger.info(f"Sending actuator commands: {actuator_commands}")
-        else:
+            self.rollout_dict["command"].append(actuator_commands)
+        elif self.mode == "sim":
             # For all other modes, log and send commands
             await self.kos.actuator.command_actuators(actuator_commands)
+            self.rollout_dict["command"].append(actuator_commands)
 
         
 if __name__ == "__main__":
