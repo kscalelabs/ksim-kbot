@@ -156,7 +156,6 @@ class KbotCritic(eqx.Module):
         last_action_n: Array,
         feet_contact_2: Array,
         feet_position_6: Array,
-        # feet_air_time_2: Array,
         base_position_3: Array,
         base_orientation_4: Array,
         base_linear_velocity_3: Array,
@@ -178,7 +177,6 @@ class KbotCritic(eqx.Module):
                 last_action_n,
                 feet_contact_2,
                 feet_position_6,
-                # feet_air_time_2,
                 base_position_3,
                 base_orientation_4,
                 base_linear_velocity_3,
@@ -381,6 +379,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
+        # NOTE: increase to 360
         return [
             common.LinearVelocityCommand(
                 x_range=(-0.7, 0.7),
@@ -455,19 +454,17 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             kbot_rewards.AngularVelocityTrackingReward(scale=0.5),
             kbot_rewards.AngularVelocityXYPenalty(scale=-0.15),
             # Stateful rewards
-            kbot_rewards.FeetSlipPenalty(scale=-0.25),
-            kbot_rewards.FeetAirTimeReward(
-                scale=2.0,
-                # threshold_min=0.0,
-                # threshold_max=0.4,
-            ),
             kbot_rewards.FeetPhaseReward(
-                # foot_default_height=0.0,
+                foot_default_height=0.00,
                 max_foot_height=0.11,
-                scale=1.0,
+                scale=2.1,
             ),
+            kbot_rewards.FeetSlipPenalty(scale=-0.25),
+            # NOTE: This should be removed
+            # kbot_rewards.FeetAirTimeReward(
+            #     scale=2.0,
+            # ),
             # force penalties
-            # joint limits and contact force
             kbot_rewards.JointPositionLimitPenalty.create(
                 physics_model=physics_model,
                 soft_limit_factor=0.95,
@@ -477,9 +474,10 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 scale=-0.01,
                 sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
             ),
+            # NOTE: Investigate the effect of these penalties
             # ksim.ActuatorForcePenalty(scale=-0.005),
             # ksim.ActionSmoothnessPenalty(scale=-0.005),
-            # ksim.AvoidLimitsReward(-0.01),
+            # ksim.AvoidLimitsReward(-0.01)
         ]
 
         return rewards
@@ -508,7 +506,6 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         ang_vel_cmd = commands["angular_velocity_command"]
         gait_freq_cmd = commands["gait_frequency_command"]
         last_action_n = observations["last_action_observation"]
-
         return model.forward(
             timestep_phase_4=timestep_phase_4,
             joint_pos_n=joint_pos_n,
@@ -537,7 +534,6 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         # critic observations
         feet_contact_2 = observations["feet_contact_observation"]
         feet_position_6 = observations["feet_position_observation"]
-        # feet_air_time_2 = observations["feet_air_time_observation"]
         base_position_3 = observations["base_position_observation"]
         base_orientation_4 = observations["base_orientation_observation"]
         base_linear_velocity_3 = observations["base_linear_velocity_observation"]
@@ -558,7 +554,6 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             # critic observations
             feet_contact_2=feet_contact_2,
             feet_position_6=feet_position_6,
-            # feet_air_time_2=feet_air_time_2,
             projected_gravity_3=projected_gravity_3,
             base_position_3=base_position_3,
             base_orientation_4=base_orientation_4,
@@ -680,7 +675,7 @@ if __name__ == "__main__":
     #  run_environment_save_path=videos/test.mp4
     KbotWalkingTask.launch(
         KbotWalkingTaskConfig(
-            num_envs=8192,
+            num_envs=2048,
             batch_size=256,
             num_passes=10,
             epochs_per_log_step=1,
@@ -689,9 +684,9 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
-            rollout_length_seconds=1.25,
+            rollout_length_seconds=5.0,
             # PPO parameters
-            action_scale=0.75,
+            action_scale=1.0,
             gamma=0.97,
             lam=0.95,
             entropy_coef=0.005,
