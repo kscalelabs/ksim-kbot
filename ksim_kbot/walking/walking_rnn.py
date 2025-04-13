@@ -42,6 +42,7 @@ class RnnActor(eqx.Module):
         min_std: float,
         max_std: float,
         var_scale: float,
+        mean_scale: float,
         hidden_size: int,
         depth: int,
     ) -> None:
@@ -78,7 +79,7 @@ class RnnActor(eqx.Module):
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
-
+        self.mean_scale = mean_scale
     def forward(self, obs_n: Array, carry: Array) -> tuple[distrax.Distribution, Array]:
         x_n = self.input_proj(obs_n)
         out_carries = []
@@ -88,7 +89,7 @@ class RnnActor(eqx.Module):
         out_n = self.output_proj(x_n)
 
         # Converts the output to a distribution.
-        mean_n = out_n[..., : self.num_outputs]
+        mean_n = out_n[..., : self.num_outputs] * self.mean_scale
         std_n = out_n[..., self.num_outputs :]
 
         # Softplus and clip to ensure positive standard deviations.
@@ -169,6 +170,7 @@ class RnnModel(eqx.Module):
         num_joints: int,
         hidden_size: int,
         depth: int,
+        mean_scale: float,
     ) -> None:
         self.actor = RnnActor(
             key,
@@ -177,6 +179,7 @@ class RnnModel(eqx.Module):
             min_std=min_std,
             max_std=max_std,
             var_scale=0.5,
+            mean_scale=mean_scale,
             hidden_size=hidden_size,
             depth=depth,
         )
@@ -205,6 +208,7 @@ class WalkingRnnTask(WalkingTask[Config], Generic[Config]):
             num_joints=NUM_JOINTS,
             min_std=0.01,
             max_std=1.0,
+            mean_scale=self.config.action_scale,
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
         )
@@ -300,7 +304,7 @@ class WalkingRnnTask(WalkingTask[Config], Generic[Config]):
                 commands=transition.command,
                 carry=actor_carry,
             )
-            log_probs = actor_dist.log_prob(transition.action)
+            log_probs = actor_dist.log_prob(transition.action / model.actor.mean_scale)
             assert isinstance(log_probs, Array)
             value, next_critic_carry = self.run_critic(
                 model=model.critic,

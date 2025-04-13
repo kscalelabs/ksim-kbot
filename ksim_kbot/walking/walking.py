@@ -43,6 +43,7 @@ class Actor(eqx.Module):
         *,
         min_std: float,
         max_std: float,
+        mean_scale: float,
         var_scale: float,
         hidden_size: int,
         depth: int,
@@ -62,6 +63,7 @@ class Actor(eqx.Module):
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
+        self.mean_scale = mean_scale
         self.num_mixtures = num_mixtures
 
     def forward(self, obs_n: Array) -> distrax.Distribution:
@@ -75,6 +77,8 @@ class Actor(eqx.Module):
 
         # Softplus and clip to ensure positive standard deviations.
         std_nm = jnp.clip((jax.nn.softplus(std_nm) + self.min_std) * self.var_scale, max=self.max_std)
+
+        mean_nm = mean_nm * self.mean_scale
 
         dist_n = distrax.MixtureSameFamily(
             mixture_distribution=distrax.Categorical(logits=logits_nm),
@@ -123,12 +127,14 @@ class Model(eqx.Module):
         hidden_size: int,
         depth: int,
         num_mixtures: int,
+        action_scale: float,
     ) -> None:
         self.actor = Actor(
             key,
             min_std=0.0001,
             max_std=1.0,
             var_scale=0.5,
+            mean_scale=action_scale,
             hidden_size=hidden_size,
             depth=depth,
             num_mixtures=num_mixtures,
@@ -231,6 +237,11 @@ class WalkingTaskConfig(ksim.PPOConfig):
     render_track_body_id: int | None = xax.field(
         value=0,
         help="The body id to track with the render camera.",
+    )
+
+    action_scale: float = xax.field(
+        value=1.0,
+        help="The scale to apply to the actions.",
     )
 
     # Checkpointing parameters.
@@ -396,6 +407,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
             num_mixtures=self.config.num_mixtures,
+            action_scale=self.config.action_scale,
         )
 
     def get_initial_model_carry(self, rng: PRNGKeyArray) -> None:
@@ -483,7 +495,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         # Vectorize over the time dimensions.
         run_actor_fn = jax.vmap(self.run_actor, in_axes=(None, 0, 0))
         action_dist_j = run_actor_fn(model.actor, trajectories.obs, trajectories.command)
-        log_probs_j = action_dist_j.log_prob(trajectories.action)
+        log_probs_j = action_dist_j.log_prob(trajectories.action / self.config.action_scale)
 
         # Vectorize over the time dimensions.
         run_critic_fn = jax.vmap(self.run_critic, in_axes=(None, 0, 0))

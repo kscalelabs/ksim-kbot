@@ -225,7 +225,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 commands=transition.command,
                 carry=actor_carry,
             )
-            log_probs = actor_dist.log_prob(transition.action)
+            log_probs = actor_dist.log_prob(transition.action / model.actor.mean_scale)
             assert isinstance(log_probs, Array)
             value, next_critic_carry = self.run_critic(
                 model=model.critic,
@@ -368,6 +368,7 @@ if __name__ == "__main__":
             max_grad_norm=0.5,
             export_for_inference=True,
             only_save_most_recent=False,
+            action_scale = 0.5,
             # visualize_reference_motion=True,
         ),
     )
