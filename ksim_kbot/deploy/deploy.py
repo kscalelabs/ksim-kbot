@@ -143,7 +143,7 @@ class Deploy(ABC):
         elif self.mode == "sim":
             logger.debug(f"Resetting to: {self.default_positions_deg}")
 
-            #! In original script, the joint resets are diff
+            #! In original script, reset was using joints in kos.sim.reset() does not work
             await self.kos.sim.reset(
                 pos={"x": 0.0, "y": 0.0, "z": 1.01},
                 quat={"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
@@ -228,8 +228,8 @@ class Deploy(ABC):
                 action = np.array(self.model.infer(observation)).reshape(-1) 
 
                 #! Only Scale Action on observation but not onto Default Positions
-                position = action[: len(self.actuator_list)] + self.default_positions_rad
-                velocity = action[len(self.actuator_list) :]
+                position = action[: len(self.actuator_list)] * self.ACTION_SCALE + self.default_positions_rad
+                velocity = action[len(self.actuator_list) :] * self.ACTION_SCALE
                 
                 observation, _ = await asyncio.gather(
                     self.get_observation(),

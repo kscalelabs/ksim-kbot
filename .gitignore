@@ -1,5 +1,7 @@
 # .gitignore
 
+/resumed_ik_run_178/
+
 # Python
 *.py[oc]
 __pycache__/
@@ -10,9 +12,11 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .dmypy.json
+.DS_Store
 
 # Databases
 *.db
+*.pdf
 
 # Build artifacts
 build/

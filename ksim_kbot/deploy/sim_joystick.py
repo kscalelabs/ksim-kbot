@@ -223,6 +223,7 @@ def save_rollout() -> None:
         with open(f"{file_dir}/deployment_checks/sim_joystick_{timestamp}.pkl", "wb") as f:
             pickle.dump(rollout_dict, f)
 
+#* python -m ksim_kbot.deploy.sim_joystick --model_path deploy/assets/mlp_example
 async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -> None:
     model = tf.saved_model.load(model_path)
     try:

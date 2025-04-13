@@ -84,10 +84,7 @@ class JoystickDeploy(Deploy):
             self.kos.imu.get_imu_values(),
         )
 
-        accel = np.array([imu.accel_x, imu.accel_y, imu.accel_z]) * self.GRAVITY
-        gyro = np.deg2rad(np.array([imu.gyro_x, imu.gyro_y, imu.gyro_z]))
-        imu_obs = np.concatenate([accel, gyro], axis=-1)
-        # imu_obs = np.array([0.0, 9.81, 0.0, 0.0, 0.0, 0.0])
+        imu_obs = np.array([imu.accel_x, imu.accel_y, imu.accel_z, imu.gyro_x, imu.gyro_y, imu.gyro_z])
 
         #* Pos Diff. Difference of current position from default position
         state_dict_pos = {state.actuator_id: state.position for state in actuator_states.states}
@@ -123,6 +120,7 @@ class JoystickDeploy(Deploy):
         return observation
 
 
+#* python -m ksim_kbot.deploy.deploy_joystick --model_path mlp_example --mode sim --scale_action 0.5 --debug
 def main():
     """Parse arguments and run the deploy script."""
     parser = argparse.ArgumentParser(description="Deploy a SavedModel on K-Bot")
