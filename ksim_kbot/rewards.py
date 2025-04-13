@@ -432,9 +432,7 @@ class FeetPhaseReward(ksim.Reward):
     sensitivity: float = 0.01
     foot_default_height: float = 0.0
 
-    def __call__(
-        self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]
-    ) -> tuple[Array, xax.FrozenDict[str, PyTree]]:
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
         if self.feet_pos_obs_name not in trajectory.obs:
             raise ValueError(f"Observation {self.feet_pos_obs_name} not found; add it as an observation in your task.")
         if self.gait_freq_cmd_name not in trajectory.command:
