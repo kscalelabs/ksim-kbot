@@ -1,7 +1,5 @@
 # .gitignore
 
-/resumed_ik_run_178/
-
 # Python
 *.py[oc]
 __pycache__/
@@ -27,6 +25,9 @@ out*/
 # Training artifacts
 run_*/
 experimental/
+
+# Deployment Assets
+*/deploy/assets/*/*
 
 # Development
 scratch/
