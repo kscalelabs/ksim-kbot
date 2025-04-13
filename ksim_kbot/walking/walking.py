@@ -23,10 +23,18 @@ NUM_JOINTS = 20
 NUM_OBS = NUM_JOINTS * 2 + 3 + 3 + 2 # joint pos, joint vel, imu acc, imu gyro, time (sin, cos)
 NUM_COMMANDS = 6
 
+NUM_OUTPUTS = NUM_JOINTS * 2
+
 NUM_INPUTS = NUM_OBS + NUM_COMMANDS
 
 NUM_CRITIC_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 230 + 138 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 6
 
+MAX_TORQUE = {
+    "00": 1.0,
+    "02": 17.0,
+    "03": 60.0,
+    "04": 80.0,
+}
 
 class Actor(eqx.Module):
     """Actor for the walking task."""
@@ -50,7 +58,7 @@ class Actor(eqx.Module):
         num_mixtures: int,
     ) -> None:
         num_inputs = NUM_INPUTS
-        num_outputs = NUM_JOINTS
+        num_outputs = NUM_OUTPUTS
 
         self.mlp = eqx.nn.MLP(
             in_size=num_inputs,
@@ -296,9 +304,35 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         metadata: dict[str, JointMetadataOutput] | None = None,
     ) -> ksim.Actuators:
         assert metadata is not None, "Metadata is required"
-        return ksim.MITPositionActuators(
+        return ksim.MITPositionVelocityActuators(
             physics_model=physics_model,
             joint_name_to_metadata=metadata,
+            ctrl_clip=[
+                # right arm
+                MAX_TORQUE["03"],
+                MAX_TORQUE["03"],
+                MAX_TORQUE["02"],
+                MAX_TORQUE["02"],
+                MAX_TORQUE["00"],
+                # left arm
+                MAX_TORQUE["03"],
+                MAX_TORQUE["03"],
+                MAX_TORQUE["02"],
+                MAX_TORQUE["02"],
+                MAX_TORQUE["00"],
+                # right leg
+                MAX_TORQUE["04"],
+                MAX_TORQUE["03"],
+                MAX_TORQUE["03"],
+                MAX_TORQUE["04"],
+                MAX_TORQUE["02"],
+                # left leg
+                MAX_TORQUE["04"],
+                MAX_TORQUE["03"],
+                MAX_TORQUE["03"],
+                MAX_TORQUE["04"],
+                MAX_TORQUE["02"],
+            ],
         )
 
     def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:

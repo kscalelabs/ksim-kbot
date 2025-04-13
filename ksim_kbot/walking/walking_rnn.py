@@ -16,6 +16,7 @@ from ksim_kbot.walking.walking import (
     NUM_CRITIC_INPUTS,
     NUM_INPUTS,
     NUM_JOINTS,
+    NUM_OUTPUTS,
     WalkingTask,
     WalkingTaskConfig,
 )
@@ -175,7 +176,7 @@ class RnnModel(eqx.Module):
         self.actor = RnnActor(
             key,
             num_inputs=num_inputs,
-            num_outputs=num_joints,
+            num_outputs=NUM_OUTPUTS,
             min_std=min_std,
             max_std=max_std,
             var_scale=0.5,
