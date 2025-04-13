@@ -14,13 +14,13 @@ import tensorflow as tf
 from ksim_kbot.deploy.deploy import FixedArmDeploy, Deploy
 
 
-#*********************#
-#* Joystick Deploy    #
-#*********************#
+# *********************#
+# * Joystick Deploy    #
+# *********************#
+
 
 class JoystickDeploy(Deploy):
     """Deploy class for joystick-controlled policies."""
-
 
     def __init__(self, enable_joystick: bool, model_path: str, mode: str, ip: str = "localhost"):
         super().__init__(model_path, mode, ip)
@@ -70,15 +70,14 @@ class JoystickDeploy(Deploy):
         else:
             return np.array([0.3, 0.0])
 
-
     async def get_observation(self) -> np.ndarray:
         """Get observation from the robot for joystick-controlled policies.
-    
+
         Returns:
             Observation vector and updated phase
         """
 
-        #* IMU Observation
+        # * IMU Observation
         (actuator_states, imu) = await asyncio.gather(
             self.kos.actuator.get_actuators_state([ac.actuator_id for ac in self.actuator_list]),
             self.kos.imu.get_imu_values(),
@@ -86,19 +85,19 @@ class JoystickDeploy(Deploy):
 
         imu_obs = np.array([imu.accel_x, imu.accel_y, imu.accel_z, imu.gyro_x, imu.gyro_y, imu.gyro_z])
 
-        #* Pos Diff. Difference of current position from default position
+        # * Pos Diff. Difference of current position from default position
         state_dict_pos = {state.actuator_id: state.position for state in actuator_states.states}
         pos_obs = [state_dict_pos[ac.actuator_id] for ac in sorted(self.actuator_list, key=lambda x: x.nn_id)]
         pos_obs = np.deg2rad(np.array(pos_obs))
-        pos_diff = pos_obs - self.default_positions_rad #! K-Sim is in radians
+        pos_diff = pos_obs - self.default_positions_rad  #! K-Sim is in radians
 
-        #* Vel Obs. Velocity at each joint
+        # * Vel Obs. Velocity at each joint
         state_dict_vel = {state.actuator_id: state.velocity for state in actuator_states.states}
         vel_obs = np.deg2rad(
             np.array([state_dict_vel[ac.actuator_id] for ac in sorted(self.actuator_list, key=lambda x: x.nn_id)])
         )
 
-        #* Phase, tracking a sinusoidal
+        # * Phase, tracking a sinusoidal
         self.phase += 2 * np.pi * self.GAIT_DT * self.DT
         self.phase = np.fmod(self.phase + np.pi, 2 * np.pi) - np.pi
         phase_vec = np.array([np.cos(self.phase), np.sin(self.phase)]).flatten()
@@ -115,18 +114,17 @@ class JoystickDeploy(Deploy):
 
         observation = np.concatenate([pos_diff, vel_obs, imu_obs, cmd, self.prev_action, phase_vec]).reshape(1, -1)
 
-
-        
         return observation
 
 
-#* python -m ksim_kbot.deploy.deploy_joystick --model_path mlp_example --mode sim --scale_action 0.5 --debug
+# * python -m ksim_kbot.deploy.deploy_joystick --model_path mlp_example --mode sim --scale_action 0.5 --debug
 def main():
     """Parse arguments and run the deploy script."""
     parser = argparse.ArgumentParser(description="Deploy a SavedModel on K-Bot")
     parser.add_argument("--model_path", type=str, required=True, help="File in assets folder eg. mlp_example")
-    parser.add_argument("--mode", type=str, required=True, choices=["sim", "real-deploy", "real-check"], 
-                        help="Mode of deployment")
+    parser.add_argument(
+        "--mode", type=str, required=True, choices=["sim", "real-deploy", "real-check"], help="Mode of deployment"
+    )
     parser.add_argument("--enable_joystick", action="store_true", help="Enable joystick")
     parser.add_argument("--scale_action", type=float, default=0.1, help="Action Scale, default 0.1")
     parser.add_argument("--ip", type=str, default="localhost", help="IP address of KOS")
@@ -138,15 +136,14 @@ def main():
     file_dir = os.path.dirname(os.path.abspath(__file__))
     model_path = os.path.join(file_dir, "assets", args.model_path)
 
-
     # Configure logging
     log_level = "DEBUG" if args.debug else "INFO"
-    
+
     # Set global log level
     logger.remove()
     logger.add(sys.stderr, level=log_level)  # This will keep the default colorized format
     logger.add(f"{file_dir}/deployment_checks/last_deployment.log", level=log_level)
-    
+
     deploy = JoystickDeploy(args.enable_joystick, model_path, args.mode, args.ip)
     deploy.ACTION_SCALE = args.scale_action
 
@@ -160,6 +157,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-

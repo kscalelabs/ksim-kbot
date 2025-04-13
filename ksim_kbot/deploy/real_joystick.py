@@ -121,9 +121,7 @@ async def send_actions(kos: pykos.KOS, position: np.ndarray, velocity: np.ndarra
     actuator_commands: list[pykos.services.actuator.ActuatorCommand] = [
         {
             "actuator_id": ac.actuator_id,
-            "position": (
-                0.0 if ac.actuator_id in [11, 12, 13, 14, 15, 21, 22, 23, 24, 25] else position[ac.nn_id]
-            ),
+            "position": (0.0 if ac.actuator_id in [11, 12, 13, 14, 15, 21, 22, 23, 24, 25] else position[ac.nn_id]),
             "velocity": velocity[ac.nn_id],
         }
         for ac in ACTUATOR_LIST
@@ -157,6 +155,7 @@ async def reset(kos: pykos.KOS) -> None:
 
     await kos.actuator.command_actuators(reset_commands)
 
+
 async def disable(kos: pykos.KOS) -> None:
     for ac in ACTUATOR_LIST:
         await kos.actuator.configure_actuator(
@@ -184,7 +183,7 @@ async def main(model_path: str, ip: str, episode_length: int) -> None:
     model.infer(obs)
 
     await reset(kos)
-    
+
     for i in range(5, -1, -1):
         logger.info("Starting in %d seconds...", i)
         await asyncio.sleep(1)
@@ -200,7 +199,7 @@ async def main(model_path: str, ip: str, episode_length: int) -> None:
         while time.time() < end_time:
             observation = observation.reshape(1, -1)
             # move it all to the infer call
-            action2 = np.array(model.infer(observation)).reshape(-1) 
+            action2 = np.array(model.infer(observation)).reshape(-1)
             action = action2 * ACTION_SCALE
             position = action[: len(ACTUATOR_LIST)] + DEFAULT_POSITIONS
             velocity = action[len(ACTUATOR_LIST) :]

@@ -59,6 +59,7 @@ rollout_dict = {
     "phase": [],
 }
 
+
 class CommandState:
     def __init__(self) -> None:
         self.cmd = np.array([0.3, 0.0])
@@ -194,8 +195,6 @@ async def reset(kos: pykos.KOS) -> None:
 
     await kos.actuator.command_actuators(reset_commands)
 
-    
-
 
 def spawn_kos_sim(no_render: bool) -> tuple[subprocess.Popen, Callable]:
     args = ["kos-sim", "kbot2-feet"] + (["--no-render"] if no_render else [])
@@ -214,6 +213,7 @@ def spawn_kos_sim(no_render: bool) -> tuple[subprocess.Popen, Callable]:
     signal.signal(signal.SIGTERM, cleanup)
     return proc, cleanup
 
+
 def save_rollout() -> None:
     """Save the rollout to a file."""
     global rollout_dict
@@ -223,7 +223,8 @@ def save_rollout() -> None:
         with open(f"{file_dir}/deployment_checks/sim_joystick_{timestamp}.pkl", "wb") as f:
             pickle.dump(rollout_dict, f)
 
-#* python -m ksim_kbot.deploy.sim_joystick --model_path deploy/assets/mlp_example
+
+# * python -m ksim_kbot.deploy.sim_joystick --model_path deploy/assets/mlp_example
 async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -> None:
     model = tf.saved_model.load(model_path)
     try:

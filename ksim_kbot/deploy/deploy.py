@@ -13,6 +13,7 @@ import numpy as np
 import pykos
 import tensorflow as tf
 
+
 @dataclass
 class Actuator:
     actuator_id: int
@@ -23,22 +24,19 @@ class Actuator:
     joint_name: str
 
 
-#*********************#
-#* Base Deploy Class  #
-#*********************#
-
+# *********************#
+# * Base Deploy Class  #
+# *********************#
 
 
 class Deploy(ABC):
-    """Abstract base class for deploying a SavedModel on K-Bot.
-    """
-    
+    """Abstract base class for deploying a SavedModel on K-Bot."""
+
     # Class-level constants
     DT = 0.02  # Policy time step (50Hz)
     GAIT_DT = 1.25
     GRAVITY = 9.81  # m/s
     ACTION_SCALE = 1.0
-
 
     #! Was different between sim and real_deployment
     actuator_list: list[Actuator] = [
@@ -47,13 +45,17 @@ class Deploy(ABC):
         Actuator(actuator_id=22, nn_id=1, kp=40.0, kd=4.0, max_torque=40.0, joint_name="dof_right_shoulder_roll_03"),
         Actuator(actuator_id=23, nn_id=2, kp=30.0, kd=1.0, max_torque=14.0, joint_name="dof_right_shoulder_yaw_02"),
         Actuator(actuator_id=24, nn_id=3, kp=30.0, kd=1.0, max_torque=14.0, joint_name="dof_right_elbow_02"),
-        Actuator(actuator_id=25, nn_id=4, kp=20.0, kd=0.45473329537059787, max_torque=1.0, joint_name="dof_right_wrist_00"),
+        Actuator(
+            actuator_id=25, nn_id=4, kp=20.0, kd=0.45473329537059787, max_torque=1.0, joint_name="dof_right_wrist_00"
+        ),
         # Left arm (nn_id 5-9)
         Actuator(actuator_id=11, nn_id=5, kp=40.0, kd=4.0, max_torque=40.0, joint_name="dof_left_shoulder_pitch_03"),
         Actuator(actuator_id=12, nn_id=6, kp=40.0, kd=4.0, max_torque=40.0, joint_name="dof_left_shoulder_roll_03"),
         Actuator(actuator_id=13, nn_id=7, kp=30.0, kd=1.0, max_torque=14.0, joint_name="dof_left_shoulder_yaw_02"),
         Actuator(actuator_id=14, nn_id=8, kp=30.0, kd=1.0, max_torque=14.0, joint_name="dof_left_elbow_02"),
-        Actuator(actuator_id=15, nn_id=9, kp=20.0, kd=0.45473329537059787, max_torque=1.0, joint_name="dof_left_wrist_00"),
+        Actuator(
+            actuator_id=15, nn_id=9, kp=20.0, kd=0.45473329537059787, max_torque=1.0, joint_name="dof_left_wrist_00"
+        ),
         # Right leg (nn_id 10-14)
         Actuator(actuator_id=41, nn_id=10, kp=85.0, kd=5.0, max_torque=80.0, joint_name="dof_right_hip_pitch_04"),
         Actuator(actuator_id=42, nn_id=11, kp=40.0, kd=4.0, max_torque=60.0, joint_name="dof_right_hip_roll_03"),
@@ -77,17 +79,15 @@ class Deploy(ABC):
 
         self.default_positions_deg = None
         self.default_positions_rad = None
-        
+
         self.prev_action = np.zeros(len(self.actuator_list) * 2)
 
-        #* Fields defined in child classes
+        # * Fields defined in child classes
         self.rollout_dict = None
-        
-    
 
     async def send_actions(self, position: np.ndarray, velocity: np.ndarray) -> None:
         """Send actions to the robot's actuators.
-        
+
         Args:
             position: Position commands in radians
             velocity: Velocity commands in radians/s
@@ -97,9 +97,7 @@ class Deploy(ABC):
         actuator_commands: list[pykos.services.actuator.ActuatorCommand] = [
             {
                 "actuator_id": ac.actuator_id,
-                "position": (
-                   position[ac.nn_id]
-                ),
+                "position": (position[ac.nn_id]),
                 "velocity": velocity[ac.nn_id],
             }
             for ac in self.actuator_list
@@ -160,7 +158,6 @@ class Deploy(ABC):
 
             await self.kos.actuator.command_actuators(reset_commands)
 
-
     async def disable(self) -> None:
         """Disable all actuators."""
         for ac in self.actuator_list:
@@ -183,16 +180,16 @@ class Deploy(ABC):
         Get observation from the robot.
         """
         pass
-    
+
     async def run(self, episode_length: int) -> None:
         """Run the policy on the robot.
-        
+
         Args:
             episode_length: Length of the episode in seconds
         """
         self.model = tf.saved_model.load(self.model_path)
         self.kos = pykos.KOS(ip=self.ip)
-        
+
         await self.disable()
         time.sleep(1)
         logger.info("Configuring actuators...")
@@ -224,13 +221,13 @@ class Deploy(ABC):
 
         try:
             while time.time() < end_time:
-                
-                action = np.array(self.model.infer(observation)).reshape(-1) 
+
+                action = np.array(self.model.infer(observation)).reshape(-1)
 
                 #! Only Scale Action on observation but not onto Default Positions
                 position = action[: len(self.actuator_list)] * self.ACTION_SCALE + self.default_positions_rad
                 velocity = action[len(self.actuator_list) :] * self.ACTION_SCALE
-                
+
                 observation, _ = await asyncio.gather(
                     self.get_observation(),
                     self.send_actions(position, velocity),
@@ -256,9 +253,9 @@ class Deploy(ABC):
         await self.disable()
 
 
-#*********************#
-#* Fixed Arm Deploy   #
-#*********************#
+# *********************#
+# * Fixed Arm Deploy   #
+# *********************#
 
 
 class FixedArmDeploy(Deploy):
@@ -269,7 +266,7 @@ class FixedArmDeploy(Deploy):
 
     async def send_actions(self, position: np.ndarray, velocity: np.ndarray) -> None:
         """Send actions to the robot's actuators with additional functionality.
-        
+
         Args:
             position: Position commands in radians
             velocity: Velocity commands in radians/s
@@ -279,9 +276,7 @@ class FixedArmDeploy(Deploy):
         actuator_commands: list[pykos.services.actuator.ActuatorCommand] = [
             {
                 "actuator_id": ac.actuator_id,
-                "position": (
-                   0.0 if ac.actuator_id in [11, 12, 13, 14, 15, 21, 22, 23, 24, 25] else position[ac.nn_id]
-                ),
+                "position": (0.0 if ac.actuator_id in [11, 12, 13, 14, 15, 21, 22, 23, 24, 25] else position[ac.nn_id]),
                 "velocity": velocity[ac.nn_id],
             }
             for ac in self.actuator_list
@@ -297,7 +292,7 @@ class FixedArmDeploy(Deploy):
             await self.kos.actuator.command_actuators(actuator_commands)
             self.rollout_dict["command"].append(actuator_commands)
 
-        
+
 if __name__ == "__main__":
     logger.error("Not a standalone script")
     exit(1)
