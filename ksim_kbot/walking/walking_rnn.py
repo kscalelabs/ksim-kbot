@@ -33,6 +33,7 @@ class RnnActor(eqx.Module):
     min_std: float = eqx.static_field()
     max_std: float = eqx.static_field()
     var_scale: float = eqx.static_field()
+    mean_scale: float = eqx.static_field()
 
     def __init__(
         self,
