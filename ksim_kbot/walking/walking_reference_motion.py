@@ -28,7 +28,7 @@ from ksim.utils.reference_motion import (
 from scipy.spatial.transform import Rotation as R
 
 import ksim_kbot.rewards as kbot_rewards
-from ksim_kbot.walking.walking_rnn import RnnModel, WalkingRnnTask, WalkingRnnTaskConfig
+from ksim_kbot.walking.walking_rnn import RnnModel, WalkingRnnTask, WalkingRnnTaskConfig, NUM_JOINTS
 
 
 HUMANOID_REFERENCE_MAPPINGS = (
@@ -104,6 +104,7 @@ class QposReferenceMotionReward(ksim.Reward):
     ctrl_dt: float
     norm: xax.NormType = attrs.field(default="l1")
     sensitivity: float = attrs.field(default=5.0)
+    joint_weights: tuple[float, ...] = attrs.field(default=tuple([1.0] * NUM_JOINTS))
 
     @property
     def num_frames(self) -> int:
@@ -114,6 +115,7 @@ class QposReferenceMotionReward(ksim.Reward):
         step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
         reference_qpos = jnp.take(self.reference_qpos.array, step_number, axis=0)
         error = xax.get_norm(reference_qpos[..., 7:] - qpos[..., 7:], self.norm)
+        error = error * jnp.array(self.joint_weights)
         mean_error = error.mean(axis=-1)
         reward = jnp.exp(-mean_error * self.sensitivity)
         return reward, None
@@ -128,13 +130,39 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
         rewards: list[ksim.Reward] = [
             ksim.StayAliveReward(
                 success_reward=1.0,
-                scale=4.0,
+                scale=5.0,
             ),
             kbot_rewards.OrientationPenalty(scale=self.config.orientation_penalty),
             QposReferenceMotionReward(
                 reference_qpos=self.reference_qpos,
                 ctrl_dt=self.config.ctrl_dt,
-                scale=7.0,
+                scale=5.0,
+                joint_weights=(
+                    # right arm
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    # left arm
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    # right leg
+                    2.0, # hip pitch
+                    1.0, # hip roll
+                    1.0, # hip yaw
+                    2.0, # knee
+                    1.0, # ankle
+                    # left leg
+                    2.0, # hip pitch
+                    1.0, # hip roll
+                    1.0, # hip yaw
+                    2.0, # knee
+                    1.0, # ankle
+                ),
             ),
             kbot_rewards.FeetSlipPenalty(scale=-0.25),
             kbot_rewards.FeetAirTimeReward(
@@ -142,7 +170,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 # threshold_min=0.0,
                 # threshold_max=0.4,
             ),
-            NaiveForwardReward(scale=1.0),
+            NaiveForwardReward(scale=3.0),
             ksim.LinearVelocityPenalty(index="z", scale=-2.0),
         ]
 
