@@ -31,6 +31,7 @@ from ksim_kbot.standing.standing import MAX_TORQUE
 NUM_JOINTS = 5  # disabling all DoFs except for the right arm.
 NUM_OUTPUTS = NUM_JOINTS * 2
 NUM_INPUTS = NUM_JOINTS + NUM_JOINTS + 3 + 3 + NUM_OUTPUTS
+NUM_CRITIC_INPUTS = NUM_INPUTS + NUM_JOINTS + 3 + 3
 
 
 @attrs.define(kw_only=True)
@@ -395,7 +396,7 @@ class KbotCritic(eqx.Module):
     mlp: eqx.nn.MLP
 
     def __init__(self, key: PRNGKeyArray, *, hidden_size: int, depth: int) -> None:
-        num_inputs = NUM_INPUTS + NUM_JOINTS + 3 + 4
+        num_inputs = NUM_CRITIC_INPUTS
         num_outputs = 1
 
         self.mlp = eqx.nn.MLP(
@@ -415,7 +416,7 @@ class KbotCritic(eqx.Module):
         xyz_target_3: Array,
         elbow_target_3: Array,
         end_effector_pos_3: Array,
-        end_effector_quat_4: Array,
+        elbow_pos_3: Array,
         prev_action_n: Array,
     ) -> Array:
         x_n = jnp.concatenate(
@@ -426,7 +427,7 @@ class KbotCritic(eqx.Module):
                 xyz_target_3,  # 3
                 elbow_target_3,  # 3
                 end_effector_pos_3,  # 3
-                end_effector_quat_4,  # 4
+                elbow_pos_3,  # 3
                 prev_action_n,  # NUM_OUTPUTS
             ],
             axis=-1,
@@ -650,6 +651,10 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 physics_model=physics_model,
                 body_name="ik_target",
             ),
+            BodyPositionObservation.create(
+                physics_model=physics_model,
+                body_name="KC_C_401R_R_UpForearmDrive",
+            ),
             BodyOrientationObservation.create(
                 physics_model=physics_model,
                 body_name="ik_target",
@@ -778,7 +783,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         xyz_target_3 = commands["target_position_command"][..., :3]  # 3
         elbow_target_3 = commands["elbow_target_position_command"][..., :3]  # 3
         end_effector_pos_3 = observations["ik_target_body_position_observation"]  # 3
-        end_effector_quat_4 = observations["ik_target_body_orientation_observation"]  # 4
+        elbow_pos_3 = observations["KC_C_401R_R_UpForearmDrive_body_position_observation"]  # 3
         prev_action_n = observations["last_action_observation"]  # 5
 
         return model.critic(
@@ -788,7 +793,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             xyz_target_3=xyz_target_3,
             elbow_target_3=elbow_target_3,
             end_effector_pos_3=end_effector_pos_3,
-            end_effector_quat_4=end_effector_quat_4,
+            elbow_pos_3=elbow_pos_3,
             prev_action_n=prev_action_n,
         )
 

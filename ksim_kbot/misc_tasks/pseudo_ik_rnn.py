@@ -17,11 +17,16 @@ from xax.nn.export import export
 from .pseudo_ik import (
     NUM_INPUTS,
     NUM_JOINTS,
+    NUM_OUTPUTS,
+    NUM_CRITIC_INPUTS,
     KbotPseudoIKTask,
     KbotPseudoIKTaskConfig,
 )
 
-RNN_NUM_INPUTS = NUM_INPUTS - NUM_JOINTS
+# Same obs space except without prev action.
+RNN_NUM_INPUTS = NUM_INPUTS - NUM_OUTPUTS
+
+RNN_NUM_CRITIC_INPUTS = NUM_CRITIC_INPUTS - NUM_OUTPUTS
 
 
 @jax.tree_util.register_dataclass
@@ -47,18 +52,18 @@ class KbotRNNActor(eqx.Module):
         self,
         key: PRNGKeyArray,
         *,
+        num_inputs: int,
+        num_outputs: int,
         min_std: float,
         max_std: float,
         var_scale: float,
         hidden_size: int,
         depth: int,
     ) -> None:
-        num_outputs = NUM_JOINTS
-
         # Project input to hidden size
         key, input_proj_key = jax.random.split(key)
         self.input_proj = eqx.nn.Linear(
-            in_features=RNN_NUM_INPUTS,
+            in_features=num_inputs,
             out_features=hidden_size,
             key=input_proj_key,
         )
@@ -92,7 +97,7 @@ class KbotRNNActor(eqx.Module):
         joint_pos_n: Array,
         joint_vel_n: Array,
         xyz_target_3: Array,
-        quat_target_4: Array,
+        elbow_target_3: Array,
         carry: Array,
     ) -> tuple[distrax.Distribution, Array]:
         obs_n = jnp.concatenate(
@@ -100,7 +105,7 @@ class KbotRNNActor(eqx.Module):
                 joint_pos_n,  # NUM_JOINTS
                 joint_vel_n,  # NUM_JOINTS
                 xyz_target_3,  # 3
-                quat_target_4,  # 4
+                elbow_target_3,  # 3
             ],
             axis=-1,
         )
@@ -115,12 +120,11 @@ class KbotRNNActor(eqx.Module):
         out_n = self.output_proj(x_n)
 
         # Converts the output to a distribution.
-        mean_n = out_n[..., :NUM_JOINTS]
-        std_n = out_n[..., NUM_JOINTS:]
+        mean_n = out_n[..., :NUM_OUTPUTS]
+        std_n = out_n[..., NUM_OUTPUTS:]
 
         # Softplus and clip to ensure positive standard deviations.
         std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
-
         dist_n = distrax.Normal(mean_n, std_n)
         return dist_n, jnp.stack(out_carries, axis=0)
 
@@ -136,12 +140,11 @@ class KbotRNNCritic(eqx.Module):
         self,
         key: PRNGKeyArray,
         *,
+        num_inputs: int,
+        num_outputs: int,
         hidden_size: int,
         depth: int,
     ) -> None:
-        num_inputs = RNN_NUM_INPUTS + NUM_JOINTS + 3
-        num_outputs = 1
-
         # Project input to hidden size
         key, input_proj_key = jax.random.split(key)
         self.input_proj = eqx.nn.Linear(
@@ -176,7 +179,8 @@ class KbotRNNCritic(eqx.Module):
         joint_vel_n: Array,
         actuator_force_n: Array,
         xyz_target_3: Array,
-        quat_target_4: Array,
+        elbow_target_3: Array,
+        elbow_pos_3: Array,
         end_effector_pos_3: Array,
         carry: Array,
     ) -> tuple[Array, Array]:
@@ -186,7 +190,8 @@ class KbotRNNCritic(eqx.Module):
                 joint_vel_n,  # NUM_JOINTS
                 actuator_force_n,  # NUM_JOINTS
                 xyz_target_3,  # 3
-                quat_target_4,  # 4
+                elbow_target_3,  # 3
+                elbow_pos_3,  # 3
                 end_effector_pos_3,  # 3
             ],
             axis=-1,
@@ -215,6 +220,8 @@ class KbotRNNModel(eqx.Module):
     ) -> None:
         self.actor = KbotRNNActor(
             key,
+            num_inputs=RNN_NUM_INPUTS,
+            num_outputs=NUM_OUTPUTS,
             min_std=0.01,
             max_std=1.0,
             var_scale=0.5,
@@ -223,6 +230,8 @@ class KbotRNNModel(eqx.Module):
         )
         self.critic = KbotRNNCritic(
             key,
+            num_inputs=RNN_NUM_CRITIC_INPUTS,
+            num_outputs=1,
             hidden_size=hidden_size,
             depth=depth,
         )
@@ -253,14 +262,14 @@ class KbotPseudoIKRNNTask(KbotPseudoIKTask[Config], Generic[Config]):
     ) -> tuple[distrax.Distribution, Array]:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
-        xyz_target_3 = commands["cartesian_body_target_command_KC_C_104R_PitchHardstopDriven"]
-        quat_target_4 = commands["global_body_quaternion_command_KB_C_501X_Right_Bayonet_Adapter_Hard_Stop"]
+        xyz_target_3 = commands["target_position_command"][..., :3]  # 3
+        elbow_target_3 = commands["elbow_target_position_command"][..., :3]  # 3
 
         return model.forward(
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
             xyz_target_3=xyz_target_3,
-            quat_target_4=quat_target_4,
+            elbow_target_3=elbow_target_3,
             carry=carry,
         )
 
@@ -274,16 +283,18 @@ class KbotPseudoIKRNNTask(KbotPseudoIKTask[Config], Generic[Config]):
         joint_pos_n = observations["joint_position_observation"]  # 26
         joint_vel_n = observations["joint_velocity_observation"]  # 27
         actuator_force_n = observations["actuator_force_observation"]  # 27
-        xyz_target_3 = commands["cartesian_body_target_command_KC_C_104R_PitchHardstopDriven"]  # 3
-        quat_target_4 = commands["global_body_quaternion_command_KB_C_501X_Right_Bayonet_Adapter_Hard_Stop"]  # 4
-        end_effector_pos_3 = observations["cartesian_body_position_observation_KC_C_104R_PitchHardstopDriven"]  # 3
+        xyz_target_3 = commands["target_position_command"][..., :3]  # 3
+        elbow_target_3 = commands["elbow_target_position_command"][..., :3]  # 3
+        end_effector_pos_3 = observations["ik_target_body_position_observation"]  # 3
+        elbow_pos_3 = observations["KC_C_401R_R_UpForearmDrive_body_position_observation"]  # 3
 
         return model.forward(
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
             actuator_force_n=actuator_force_n,
             xyz_target_3=xyz_target_3,
-            quat_target_4=quat_target_4,
+            elbow_target_3=elbow_target_3,
+            elbow_pos_3=elbow_pos_3,
             end_effector_pos_3=end_effector_pos_3,
             carry=carry,
         )
@@ -291,27 +302,46 @@ class KbotPseudoIKRNNTask(KbotPseudoIKTask[Config], Generic[Config]):
     def get_ppo_variables(
         self,
         model: KbotRNNModel,
-        trajectories: ksim.Trajectory,
-        carry: tuple[Array, Array],
+        trajectory: ksim.Trajectory,
+        model_carry: tuple[Array, Array],
         rng: PRNGKeyArray,
     ) -> tuple[ksim.PPOVariables, tuple[Array, Array]]:
-        actor_carry, critic_carry = carry
+        def scan_fn(
+            actor_critic_carry: tuple[Array, Array], transition: ksim.Trajectory
+        ) -> tuple[tuple[Array, Array], ksim.PPOVariables]:
+            actor_carry, critic_carry = actor_critic_carry
+            actor_dist, next_actor_carry = self._run_actor(
+                model=model.actor,
+                observations=transition.obs,
+                commands=transition.command,
+                carry=actor_carry,
+            )
+            log_probs = actor_dist.log_prob(transition.action)
+            assert isinstance(log_probs, Array)
+            value, next_critic_carry = self._run_critic(
+                model=model.critic,
+                observations=transition.obs,
+                commands=transition.command,
+                carry=critic_carry,
+            )
 
-        # Vectorize over the time dimensions.
-        action_dist_tj, actor_carry = self._run_actor(model.actor, trajectories.obs, trajectories.command, actor_carry)
-        log_probs_tj = action_dist_tj.log_prob(trajectories.action)
+            transition_ppo_variables = ksim.PPOVariables(
+                log_probs=log_probs,
+                values=value.squeeze(-1),
+            )
 
-        # Gets the value by calling the critic.
-        values_t1, critic_carry = self._run_critic(model.critic, trajectories.obs, trajectories.command, critic_carry)
+            initial_carry = self.get_initial_model_carry(rng)
+            next_carry = jax.tree.map(
+                lambda x, y: jnp.where(transition.done, x, y), initial_carry, (next_actor_carry, next_critic_carry)
+            )
 
-        ppo_variables = ksim.PPOVariables(
-            log_probs=log_probs_tj,
-            values=values_t1.squeeze(-1),
-        )
+            return next_carry, transition_ppo_variables
 
-        return ppo_variables, (actor_carry, critic_carry)
+        next_model_carry, ppo_variables = jax.lax.scan(scan_fn, model_carry, trajectory)
 
-    def get_initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
+        return ppo_variables, next_model_carry
+
+    def get_initial_model_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
         return (
             jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
             jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
@@ -320,14 +350,14 @@ class KbotPseudoIKRNNTask(KbotPseudoIKTask[Config], Generic[Config]):
     def sample_action(
         self,
         model: KbotRNNModel,
-        carry: tuple[Array, Array],
+        model_carry: tuple[Array, Array],
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> ksim.Action:
-        actor_carry_in, critic_carry_in = carry
+        actor_carry_in, critic_carry_in = model_carry
 
         # Runs the actor model to get the action distribution.
         action_dist_j, actor_carry = self._run_actor(
@@ -378,7 +408,11 @@ class KbotPseudoIKRNNTask(KbotPseudoIKTask[Config], Generic[Config]):
         if not self.config.export_for_inference:
             return state
 
-        model: KbotRNNModel = self.load_ckpt_with_template(ckpt_path, part="model", model_template=KbotRNNModel)
+        model: KbotRNNModel = self.load_ckpt_with_template(
+            ckpt_path,
+            part="model",
+            model_template=self.get_model(key=jax.random.PRNGKey(0)),
+        )
 
         model_fn = self.make_export_model(model, stochastic=False, batched=True)
 
