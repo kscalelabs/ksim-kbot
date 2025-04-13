@@ -1,12 +1,13 @@
-import os
-import pickle
+"""Module for checking and visualizing deployment data from K-Bot."""
 import glob
-from datetime import datetime
-from dataclasses import dataclass
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
+import os
 import os.path as osp
+import pickle
+from dataclasses import dataclass
+from datetime import datetime
+
+import matplotlib.pyplot as plt
+import numpy as np
 
 
 @dataclass
@@ -47,7 +48,8 @@ actuator_list: list[Actuator] = [
 ]
 
 
-def load_latest_deployment():
+def load_latest_deployment() -> tuple[dict, str] | None:
+    """Load the latest deployment pickle file."""
     # Get the directory of this script
     current_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -70,7 +72,10 @@ def load_latest_deployment():
         file_timestamps.append((file, timestamp))
 
     # Sort by timestamp (newest first)
-    file_timestamps.sort(key=lambda x: x[1], reverse=True)
+    def sort_by_timestamp(item: tuple[str, datetime]) -> datetime:
+        return item[1]
+
+    file_timestamps.sort(key=sort_by_timestamp, reverse=True)
 
     # Get the latest file
     latest_file = file_timestamps[0][0]
@@ -84,7 +89,7 @@ def load_latest_deployment():
     return data, latest_filename
 
 
-def plot_command_data(data, output_dir="plots"):
+def plot_command_data(data: dict, output_dir: str = "plots") -> None:
     """Plot command data with subplots for each actuator."""
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -154,7 +159,7 @@ def plot_command_data(data, output_dir="plots"):
         plt.close(fig)
 
 
-def plot_vector_data(data, key, output_dir="plots"):
+def plot_vector_data(data: dict, key: str, output_dir: str = "plots") -> None:
     """Plot data that is a list of vectors over time."""
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -162,7 +167,7 @@ def plot_vector_data(data, key, output_dir="plots"):
     steps = np.arange(len(data[key]))
     vector_len = len(data[key][0]) if data[key] else 0
 
-    if key == "pos_diff" or key == "vel_obs" or key == "prev_action":
+    if key in ["pos_diff", "vel_obs", "prev_action"]:
         # These have nn_id as the position in each vector
         nn_id_to_joint = {a.nn_id: a.joint_name for a in actuator_list}
 
@@ -280,7 +285,8 @@ def plot_vector_data(data, key, output_dir="plots"):
         plt.close(fig)
 
     elif key == "phase":
-        # phase has shape (2,) from phase_vec = np.array([np.cos(self.phase), np.sin(self.phase)])
+        # phase has shape (2,) from phase_vec =
+        # np.array([np.cos(self.phase), np.sin(self.phase)])
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 10), sharex=True)
 
         # Extract cos and sin components
@@ -304,7 +310,7 @@ def plot_vector_data(data, key, output_dir="plots"):
         plt.close(fig)
 
 
-def plot_deployment_data(data, output_dir="plots"):
+def plot_deployment_data(data: dict, output_dir: str = "plots") -> None:
     """Plot all deployment data."""
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -325,15 +331,19 @@ if __name__ == "__main__":
     if deployment_data:
         data, filename = deployment_data
         print(data)
-        # For command it is a list (across time) with each item in that list being a list with the shape, so it should plot different subplots for each actuator. There will be 20 actautors I think.
-        # for pos_diff and vel_obs, prev_action it is a list like commands but each is just a list. The position mapping to actuator name, which is what it should be labeled as if found in actautor_list with the nn_id being the position in each time instance's list.
-        # for imu_obs it is a list of lists with the shape (6,) for each time instance, the first three are accel and the last three are gyro.
-        # for controller_cmd it is a list of lists with the shape (2,) for each time instance. first is x, second is y.
-        # for phase it is a list of lists with the shape (2,) for each time instance. from phase_vec = np.array([np.cos(self.phase), np.sin(self.phase)]).flatten()
-        # breakpoint()  # Comment out breakpoint to run plotting
-        print(
-            f"Successfully loaded deployment data with keys: {list(data.keys()) if isinstance(data, dict) else 'not a dictionary'}"
-        )
+        # For 'command', it is a list over time, with each item being a list
+        # representing actuator data. Plot different subplots for each actuator.
+        # There are likely 20 actuators.
+        # For 'pos_diff', 'vel_obs', and 'prev_action', each is a list similar
+        # to 'command', but each entry is a single list. Use the nn_id to map
+        # positions to actuator names for labeling.
+        # For 'imu_obs', it is a list of lists with shape (6,) per time instance.
+        # The first three values are accelerometer data, and the last three are
+        # gyroscope data.
+        # For 'controller_cmd', it is a list of lists with shape (2,) per time
+        # instance. The first value is x, and the second is y.
+        # For 'phase', it is a list of lists with shape (2,) per time instance,
+        # derived from phase_vec = np.array([np.cos(self.phase), np.sin(self.phase)]).flatten().
 
         # Create output directory based on pickle filename (without extension)
         output_dir = os.path.join("plots", os.path.splitext(filename)[0])

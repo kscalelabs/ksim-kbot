@@ -1,18 +1,13 @@
+"""Module for deploying joystick-controlled policies on K-Bot."""
 import argparse
 import asyncio
 import os
 import sys
-import time
-from loguru import logger
-from dataclasses import dataclass
-from abc import ABC, abstractmethod
 
 import numpy as np
-import pykos
-import tensorflow as tf
+from loguru import logger
 
-from ksim_kbot.deploy.deploy import FixedArmDeploy, Deploy
-
+from ksim_kbot.deploy.deploy import Deploy
 
 # *********************#
 # * Joystick Deploy    #
@@ -22,7 +17,7 @@ from ksim_kbot.deploy.deploy import FixedArmDeploy, Deploy
 class JoystickDeploy(Deploy):
     """Deploy class for joystick-controlled policies."""
 
-    def __init__(self, enable_joystick: bool, model_path: str, mode: str, ip: str = "localhost"):
+    def __init__(self, enable_joystick: bool, model_path: str, mode: str, ip: str = "localhost") -> None:
         super().__init__(model_path, mode, ip)
         self.enable_joystick = enable_joystick
 
@@ -65,6 +60,7 @@ class JoystickDeploy(Deploy):
         }
 
     def get_command(self) -> np.ndarray:
+        """Get command from the joystick."""
         if self.enable_joystick:
             return np.array([0.3, 0.0])
         else:
@@ -76,7 +72,6 @@ class JoystickDeploy(Deploy):
         Returns:
             Observation vector and updated phase
         """
-
         # * IMU Observation
         (actuator_states, imu) = await asyncio.gather(
             self.kos.actuator.get_actuators_state([ac.actuator_id for ac in self.actuator_list]),
@@ -104,7 +99,7 @@ class JoystickDeploy(Deploy):
 
         cmd = self.get_command()
 
-        if self.mode == "sim" or self.mode == "real-check":
+        if self.mode in ["sim", "real-check"]:
             self.rollout_dict["pos_diff"].append(pos_diff)
             self.rollout_dict["vel_obs"].append(vel_obs)
             self.rollout_dict["imu_obs"].append(imu_obs)
@@ -118,7 +113,7 @@ class JoystickDeploy(Deploy):
 
 
 # * python -m ksim_kbot.deploy.deploy_joystick --model_path mlp_example --mode sim --scale_action 0.5 --debug
-def main():
+def main() -> None:
     """Parse arguments and run the deploy script."""
     parser = argparse.ArgumentParser(description="Deploy a SavedModel on K-Bot")
     parser.add_argument("--model_path", type=str, required=True, help="File in assets folder eg. mlp_example")

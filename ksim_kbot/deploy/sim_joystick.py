@@ -3,22 +3,19 @@
 import argparse
 import asyncio
 import logging
+import os
+import pickle
 import signal
 import subprocess
 import sys
 import time
 import types
-import pickle
-import os
 from dataclasses import dataclass
 from typing import Callable
 
 import numpy as np
 import pykos
 import tensorflow as tf
-from scipy.spatial.transform import Rotation as R
-
-from ksim_kbot.deploy.keyboard_controller import KeyboardController
 
 logger = logging.getLogger(__name__)
 GAIT_DT = 1.25
@@ -131,11 +128,15 @@ async def get_observation(
         kos.actuator.get_actuators_state(ids), kos.imu.get_imu_values(), kos.imu.get_quaternion()
     )
     pos_dict = {s.actuator_id: s.position for s in act_states.states}
-    pos_obs = np.deg2rad([pos_dict[ac.actuator_id] for ac in sorted(ACTUATOR_LIST, key=lambda x: x.nn_id)])
+
+    def get_nn_id(actuator: Actuator) -> int:
+        return actuator.nn_id
+
+    pos_obs = np.deg2rad([pos_dict[ac.actuator_id] for ac in sorted(ACTUATOR_LIST, key=get_nn_id)])
     pos_diff = pos_obs - DEFAULT_POSITIONS
 
     vel_dict = {s.actuator_id: s.velocity for s in act_states.states}
-    vel_obs = np.deg2rad([vel_dict[ac.actuator_id] for ac in sorted(ACTUATOR_LIST, key=lambda x: x.nn_id)])
+    vel_obs = np.deg2rad([vel_dict[ac.actuator_id] for ac in sorted(ACTUATOR_LIST, key=get_nn_id)])
 
     imu_obs = np.array([imu.accel_x, imu.accel_y, imu.accel_z, imu.gyro_x, imu.gyro_y, imu.gyro_z])
     imu_obs = np.array([0.0, 9.81, 0.0, 0.0, 0.0, 0.0])
@@ -216,7 +217,6 @@ def spawn_kos_sim(no_render: bool) -> tuple[subprocess.Popen, Callable]:
 
 def save_rollout() -> None:
     """Save the rollout to a file."""
-    global rollout_dict
     if rollout_dict is not None:
         file_dir = os.path.dirname(os.path.abspath(__file__))
         timestamp = time.strftime("%Y%m%d-%H%M%S")

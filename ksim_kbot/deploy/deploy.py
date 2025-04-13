@@ -1,17 +1,17 @@
 """Class to deploy a SavedModel on K-Bot."""
 
-import argparse
 import asyncio
 import os
-import time
-from loguru import logger
 import pickle
-from dataclasses import dataclass
+import sys
+import time
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
 import numpy as np
 import pykos
 import tensorflow as tf
+from loguru import logger
 
 
 @dataclass
@@ -70,7 +70,7 @@ class Deploy(ABC):
         Actuator(actuator_id=35, nn_id=19, kp=30.0, kd=1.0, max_torque=17.0, joint_name="dof_left_ankle_02"),
     ]
 
-    def __init__(self, model_path: str, mode: str, ip: str = "localhost"):
+    def __init__(self, model_path: str, mode: str, ip: str = "localhost") -> None:
         self.model_path = model_path
         self.mode = mode
         self.ip = ip
@@ -126,8 +126,7 @@ class Deploy(ABC):
 
     async def reset(self) -> None:
         """Reset all actuators to their default positions."""
-
-        if self.mode == "real-check" or self.mode == "real-deploy":
+        if self.mode in {"real-check", "real-deploy"}:
             reset_commands: list[pykos.services.actuator.ActuatorCommand] = [
                 {
                     "actuator_id": ac.actuator_id,
@@ -176,9 +175,7 @@ class Deploy(ABC):
 
     @abstractmethod
     async def get_observation(self) -> np.ndarray:
-        """
-        Get observation from the robot.
-        """
+        """Get observation from the robot."""
         pass
 
     async def run(self, episode_length: int) -> None:
@@ -261,7 +258,7 @@ class Deploy(ABC):
 class FixedArmDeploy(Deploy):
     """Deploy class for fixed-arm policies."""
 
-    def __init__(self, model_path: str, mode: str, ip: str = "localhost"):
+    def __init__(self, model_path: str, mode: str, ip: str = "localhost") -> None:
         super().__init__(model_path, mode, ip)
 
     async def send_actions(self, position: np.ndarray, velocity: np.ndarray) -> None:
@@ -295,4 +292,4 @@ class FixedArmDeploy(Deploy):
 
 if __name__ == "__main__":
     logger.error("Not a standalone script")
-    exit(1)
+    sys.exit(1)
