@@ -13,7 +13,12 @@ import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
-from ksim.utils.mujoco import get_sensor_data_idxs_by_name, get_site_data_idx_from_name, slice_update, update_data_field
+from ksim.utils.mujoco import (
+    get_sensor_data_idxs_by_name,
+    get_site_data_idx_from_name,
+    slice_update,
+    update_data_field,
+)
 from mujoco import mjx
 
 
@@ -243,7 +248,7 @@ class FarFromOriginTermination(ksim.Termination):
 
 @attrs.define(frozen=True)
 class GaitFrequencyCommand(ksim.Command):
-    """Command to set the phase of the robot."""
+    """Command to set the gait frequency of the robot."""
 
     gait_freq_lower: float = attrs.field(default=1.2)
     gait_freq_upper: float = attrs.field(default=1.5)
@@ -254,7 +259,7 @@ class GaitFrequencyCommand(ksim.Command):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> Array:
-        """Returns (1,) array with phase."""
+        """Returns (1,) array with gait frequency."""
         return jax.random.uniform(rng, (1,), minval=self.gait_freq_lower, maxval=self.gait_freq_upper)
 
     def __call__(

@@ -23,6 +23,32 @@ OBS_SIZE = 20 * 2 + 4 + 3 + 3 + 40  # = position + velocity + phase + imu_acc + 
 CMD_SIZE = 2 + 1 + 1
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_OUTPUTS = 20 * 2  # position + velocity
+JOINT_TARGETS = (
+    # right arm
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    # left arm
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    # right leg
+    -0.23,
+    0.0,
+    0.0,
+    -0.441,
+    0.195,
+    # left leg
+    0.23,
+    0.0,
+    0.0,
+    0.441,
+    -0.195,
+)
 
 
 class KbotActor(eqx.Module):
@@ -130,7 +156,6 @@ class KbotCritic(eqx.Module):
         last_action_n: Array,
         feet_contact_2: Array,
         feet_position_6: Array,
-        # feet_air_time_2: Array,
         base_position_3: Array,
         base_orientation_4: Array,
         base_linear_velocity_3: Array,
@@ -152,7 +177,6 @@ class KbotCritic(eqx.Module):
                 last_action_n,
                 feet_contact_2,
                 feet_position_6,
-                # feet_air_time_2,
                 base_position_3,
                 base_orientation_4,
                 base_linear_velocity_3,
@@ -203,32 +227,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         return common.TargetPositionMITActuators(
             physics_model,
             metadata,
-            default_targets=(
-                # right arm
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                # left arm
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                # right leg
-                -0.23,
-                0.0,
-                0.0,
-                -0.441,
-                0.195,
-                # left leg
-                0.23,
-                0.0,
-                0.0,
-                0.441,
-                -0.195,
-            ),
+            default_targets=JOINT_TARGETS,
             pos_action_noise=0.1,
             vel_action_noise=0.1,
             pos_action_noise_type="gaussian",
@@ -290,31 +289,8 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                     0.0,
                     0.0,
                     0.0,
-                    # right arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # left arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # right leg
-                    -0.23,
-                    0.0,
-                    0.0,
-                    -0.441,
-                    0.195,
-                    # left leg
-                    0.23,
-                    0.0,
-                    0.0,
-                    0.441,
-                    -0.195,
                 )
+                + JOINT_TARGETS
             ),
         ]
 
@@ -356,32 +332,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         return [
             common.TimestepPhaseObservation(),
             common.JointPositionObservation(
-                default_targets=(
-                    # right arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # left arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # right leg
-                    -0.23,
-                    0.0,
-                    0.0,
-                    -0.441,
-                    0.195,
-                    # left leg
-                    0.23,
-                    0.0,
-                    0.0,
-                    0.441,
-                    -0.195,
-                ),
+                default_targets=JOINT_TARGETS,
                 noise=0.01,
             ),
             ksim.JointVelocityObservation(noise=vel_obs_noise),
@@ -428,6 +379,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
+        # NOTE: increase to 360
         return [
             common.LinearVelocityCommand(
                 x_range=(-0.7, 0.7),
@@ -451,32 +403,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         rewards: list[ksim.Reward] = [
             kbot_rewards.JointDeviationPenalty(
                 scale=-0.1,
-                joint_targets=(
-                    # right arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # left arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # right leg
-                    -0.23,
-                    0.0,
-                    0.0,
-                    -0.441,
-                    0.195,
-                    # left leg
-                    0.23,
-                    0.0,
-                    0.0,
-                    0.441,
-                    -0.195,
-                ),
+                joint_targets=JOINT_TARGETS,
                 joint_weights=(
                     # right arm
                     1.2,
@@ -507,32 +434,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             kbot_rewards.KneeDeviationPenalty.create(
                 physics_model=physics_model,
                 knee_names=("dof_left_knee_04", "dof_right_knee_04"),
-                joint_targets=(
-                    # right arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # left arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # right leg
-                    -0.23,
-                    0.0,
-                    0.0,
-                    -0.441,
-                    0.195,
-                    # left leg
-                    0.23,
-                    0.0,
-                    0.0,
-                    0.441,
-                    -0.195,
-                ),
+                joint_targets=JOINT_TARGETS,
                 scale=-0.1,
             ),
             kbot_rewards.HipDeviationPenalty.create(
@@ -543,59 +445,40 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                     "dof_left_hip_roll_03",
                     "dof_left_hip_yaw_03",
                 ),
-                joint_targets=(
-                    # right arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # left arm
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    # right leg
-                    -0.23,
-                    0.0,
-                    0.0,
-                    -0.441,
-                    0.195,
-                    # left leg
-                    0.23,
-                    0.0,
-                    0.0,
-                    0.441,
-                    -0.195,
-                ),
+                joint_targets=JOINT_TARGETS,
                 scale=-0.25,
             ),
             kbot_rewards.TerminationPenalty(scale=-1.0),
-            # kbot_rewards.FarFromOriginTerminationReward(max_dist=5.0, scale=1.0),
-            kbot_rewards.OrientationPenalty(scale=-2.0),
+            kbot_rewards.SensorOrientationPenalty(scale=-2.0),
+            # kbot_rewards.OrientationPenalty(scale=-2.0),
             kbot_rewards.LinearVelocityTrackingReward(scale=1.0),
             kbot_rewards.AngularVelocityTrackingReward(scale=0.5),
             kbot_rewards.AngularVelocityXYPenalty(scale=-0.15),
             # Stateful rewards
-            kbot_rewards.FeetSlipPenalty(scale=-0.25),
-            kbot_rewards.FeetAirTimeReward(
-                scale=2.0,
-                # threshold_min=0.0,
-                # threshold_max=0.4,
-            ),
             kbot_rewards.FeetPhaseReward(
-                # foot_default_height=0.0,
+                foot_default_height=0.00,
                 max_foot_height=0.11,
-                scale=1.0,
+                scale=2.1,
             ),
-            # ksim.AvoidLimitsReward(-0.01),
+            kbot_rewards.FeetSlipPenalty(scale=-0.25),
+            # NOTE: This should be removed
+            # kbot_rewards.FeetAirTimeReward(
+            #     scale=2.0,
+            # ),
+            # force penalties
             kbot_rewards.JointPositionLimitPenalty.create(
                 physics_model=physics_model,
                 soft_limit_factor=0.95,
-                scale=-0.1,
+                scale=-1.0,
             ),
-            kbot_rewards.ContactForcePenalty(scale=-0.01),
+            kbot_rewards.ContactForcePenalty(
+                scale=-0.01,
+                sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
+            ),
+            # NOTE: Investigate the effect of these penalties
+            # ksim.ActuatorForcePenalty(scale=-0.005),
+            # ksim.ActionSmoothnessPenalty(scale=-0.005),
+            # ksim.AvoidLimitsReward(-0.01)
         ]
 
         return rewards
@@ -624,7 +507,6 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         ang_vel_cmd = commands["angular_velocity_command"]
         gait_freq_cmd = commands["gait_frequency_command"]
         last_action_n = observations["last_action_observation"]
-
         return model.forward(
             timestep_phase_4=timestep_phase_4,
             joint_pos_n=joint_pos_n,
@@ -653,7 +535,6 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         # critic observations
         feet_contact_2 = observations["feet_contact_observation"]
         feet_position_6 = observations["feet_position_observation"]
-        # feet_air_time_2 = observations["feet_air_time_observation"]
         base_position_3 = observations["base_position_observation"]
         base_orientation_4 = observations["base_orientation_observation"]
         base_linear_velocity_3 = observations["base_linear_velocity_observation"]
@@ -674,7 +555,6 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             # critic observations
             feet_contact_2=feet_contact_2,
             feet_position_6=feet_position_6,
-            # feet_air_time_2=feet_air_time_2,
             projected_gravity_3=projected_gravity_3,
             base_position_3=base_position_3,
             base_orientation_4=base_orientation_4,
@@ -796,7 +676,7 @@ if __name__ == "__main__":
     #  run_environment_save_path=videos/test.mp4
     KbotWalkingTask.launch(
         KbotWalkingTaskConfig(
-            num_envs=8192,
+            num_envs=2048,
             batch_size=256,
             num_passes=10,
             epochs_per_log_step=1,
@@ -805,9 +685,9 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
-            rollout_length_seconds=1.25,
+            rollout_length_seconds=5.0,
             # PPO parameters
-            action_scale=0.75,
+            action_scale=1.0,
             gamma=0.97,
             lam=0.95,
             entropy_coef=0.005,
