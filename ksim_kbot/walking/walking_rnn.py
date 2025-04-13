@@ -363,6 +363,7 @@ class WalkingRnnTask(WalkingTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
+        argmax: bool,
     ) -> ksim.Action:
         actor_carry_in, critic_carry_in = model_carry
 
@@ -374,7 +375,7 @@ class WalkingRnnTask(WalkingTask[Config], Generic[Config]):
             carry=actor_carry_in,
         )
 
-        action_j = action_dist_j.sample(seed=rng)
+        action_j = action_dist_j.mode() if argmax else action_dist_j.sample(seed=rng)
 
         return ksim.Action(
             action=action_j,
