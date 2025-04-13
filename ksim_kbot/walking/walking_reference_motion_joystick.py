@@ -121,7 +121,7 @@ class QposReferenceMotionReward(ksim.Reward):
         return reward, None
 
 
-class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
+class WalkingRnnRefMotionJoystickTask(WalkingRnnTask[Config], Generic[Config]):
     config: Config
     reference_qpos: xax.HashableArray
     mj_base_id: int
@@ -170,7 +170,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 # threshold_min=0.0,
                 # threshold_max=0.4,
             ),
-            NaiveForwardReward(scale=1.5),
+            ksim.JoystickReward(scale=1.5, linear_velocity_clip_max=1.0, angular_velocity_clip_max=1.0),
             ksim.LinearVelocityPenalty(index="z", scale=-2.0),
         ]
 
@@ -343,7 +343,7 @@ if __name__ == "__main__":
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
     #   python -m ksim_kbot.walking.walking_reference_motion num_envs=1 batch_size=1
-    WalkingRnnRefMotionTask.launch(
+    WalkingRnnRefMotionJoystickTask.launch(
         WalkingRnnRefMotionTaskConfig(
             # Training parameters.
             num_envs=2048,
@@ -363,7 +363,7 @@ if __name__ == "__main__":
             gamma=0.97,
             lam=0.95,
             entropy_coef=0.005,
-            learning_rate=1e-3,
+            learning_rate=2e-3,
             clip_param=0.3,
             max_grad_norm=0.5,
             export_for_inference=True,

@@ -169,13 +169,13 @@ class RnnModel(eqx.Module):
         max_std: float,
         num_inputs: int,
         num_critic_inputs: int,
-        num_joints: int,
         hidden_size: int,
         depth: int,
         mean_scale: float,
     ) -> None:
+        actor_key, critic_key = jax.random.split(key)
         self.actor = RnnActor(
-            key,
+            actor_key,
             num_inputs=num_inputs,
             num_outputs=NUM_OUTPUTS,
             min_std=min_std,
@@ -186,7 +186,7 @@ class RnnModel(eqx.Module):
             depth=depth,
         )
         self.critic = RnnCritic(
-            key,
+            critic_key,
             num_inputs=num_critic_inputs,
             hidden_size=hidden_size,
             depth=depth,
@@ -207,7 +207,6 @@ class WalkingRnnTask(WalkingTask[Config], Generic[Config]):
             key,
             num_inputs=NUM_INPUTS,
             num_critic_inputs=NUM_CRITIC_INPUTS,
-            num_joints=NUM_JOINTS,
             min_std=0.01,
             max_std=1.0,
             mean_scale=self.config.action_scale,
@@ -306,7 +305,7 @@ class WalkingRnnTask(WalkingTask[Config], Generic[Config]):
                 commands=transition.command,
                 carry=actor_carry,
             )
-            log_probs = actor_dist.log_prob(transition.action / model.actor.mean_scale)
+            log_probs = actor_dist.log_prob(transition.action)
             assert isinstance(log_probs, Array)
             value, next_critic_carry = self.run_critic(
                 model=model.critic,
