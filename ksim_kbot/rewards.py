@@ -12,7 +12,7 @@ import ksim
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from ksim.utils.mujoco import get_qpos_data_idxs_by_name
-
+from jax.scipy.spatial.transform import Rotation
 
 @attrs.define(frozen=True, kw_only=True)
 class JointDeviationPenalty(ksim.Reward):
@@ -68,7 +68,7 @@ class FeetSlipPenalty(ksim.Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class OrientationPenalty(ksim.Reward):
+class SensorOrientationPenalty(ksim.Reward):
     """Penalty for the orientation of the robot."""
 
     norm: xax.NormType = attrs.field(default="l2")
@@ -77,6 +77,23 @@ class OrientationPenalty(ksim.Reward):
     def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
         reward_value = xax.get_norm(trajectory.obs[self.obs_name][..., :2], self.norm).sum(axis=-1)
         return reward_value, None
+
+@attrs.define(frozen=True, kw_only=True)
+class OrientationPenalty(ksim.Reward):
+    """Penalizes deviation from upright orientation using the upvector approach.
+    
+    Rotates a unit up vector [0,0,1] by the current quaternion 
+    and penalizes any x,y components, which should be zero if perfectly upright.
+    """
+    scale: float = attrs.field()
+    
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
+
+        quat = trajectory.qpos[..., 3:7]
+        up = jnp.array([0.0, 0.0, 1.0])
+        rot_up = Rotation(quat).apply(up)
+        orientation_penalty = jnp.sum(jnp.square(rot_up[..., :2]), axis=-1)
+        return orientation_penalty, None
 
 
 @attrs.define(frozen=True, kw_only=True)

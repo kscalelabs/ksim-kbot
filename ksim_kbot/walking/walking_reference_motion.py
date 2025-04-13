@@ -139,7 +139,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 success_reward=1.0,
                 scale=1.0,
             ),
-            kbot_rewards.OrientationPenalty(scale=self.config.orientation_penalty),
+            kbot_rewards.SensorOrientationPenalty(scale=self.config.orientation_penalty),
         ]
 
         # Add separate reward for each body
