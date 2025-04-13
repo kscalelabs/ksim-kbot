@@ -414,7 +414,7 @@ if __name__ == "__main__":
             max_grad_norm=0.5,
             log_full_trajectory_every_n_steps=5,
             save_every_n_steps=25,
-            export_for_inference=True,
+            export_for_inference=False,
             only_save_most_recent=False,
             # Task parameters
             domain_randomize=True,

@@ -264,11 +264,12 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
     def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
         if self.config.domain_randomize:
             return [
-                ksim.StaticFrictionRandomizer(),
+                ksim.StaticFrictionRandomizer(scale_lower=0.9, scale_upper=1.1),
                 ksim.ArmatureRandomizer(),
-                ksim.MassMultiplicationRandomizer.from_body_name(physics_model, "Torso_Side_Right"),
+                # ksim.AllBodiesMassMultiplicationRandomizer(),
+                ksim.MassAdditionRandomizer.from_body_name(physics_model, "Torso_Side_Right"),
                 ksim.JointDampingRandomizer(),
-                ksim.JointZeroPositionRandomizer(),
+                ksim.JointZeroPositionRandomizer(scale_lower=-0.03, scale_upper=0.03),
             ]
         else:
             return []
@@ -394,8 +395,8 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 switch_prob=0.0,
             ),
             common.GaitFrequencyCommand(
-                gait_freq_lower=1.2,
-                gait_freq_upper=1.5,
+                gait_freq_lower=self.config.gait_freq_lower,
+                gait_freq_upper=self.config.gait_freq_upper,
             ),
         ]
 
