@@ -296,26 +296,19 @@ class JointPositionLimitPenalty(ksim.Reward):
 
 @attrs.define(frozen=True, kw_only=True)
 class ContactForcePenalty(ksim.Reward):
-    """Penalty for contact force."""
+    """Penalty for too high contact force."""
 
     max_contact_force: float = attrs.field(default=350.0)
+    sensor_names: tuple[str, ...] = attrs.field()
 
     def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
-        if "sensor_observation_left_foot_force" not in trajectory.obs:
-            raise ValueError("left_foot_force not found in trajectory.obs")
-        if "sensor_observation_right_foot_force" not in trajectory.obs:
-            raise ValueError("right_foot_force not found in trajectory.obs")
+        for sensor_name in self.sensor_names:
+            if sensor_name not in trajectory.obs:
+                raise ValueError(f"{sensor_name} not found in trajectory.obs")
 
-        left_contact_force = trajectory.obs["sensor_observation_left_foot_force"]
-        right_contact_force = trajectory.obs["sensor_observation_right_foot_force"]
-        cost = jnp.clip(
-            jnp.abs(left_contact_force[..., 2]) - self.max_contact_force,
-            min=0.0,
-        )
-        cost += jnp.clip(
-            jnp.abs(right_contact_force[..., 2]) - self.max_contact_force,
-            min=0.0,
-        )
+        forces_t3b = jnp.stack([trajectory.obs[name] for name in self.sensor_names], axis=-1)
+        cost = jnp.clip(jnp.abs(forces_t3b[..., 2, :]) - self.max_contact_force, min=0.0)
+        cost = jnp.sum(cost, axis=-1)
         return cost, None
 
 

@@ -94,7 +94,6 @@ class KbotActor(eqx.Module):
         gait_freq_cmd: Array,
         last_action_n: Array,
     ) -> distrax.Normal:
-        print(f"imu_acc_3: {imu_acc_3}")
         x_n = jnp.concatenate(
             [
                 timestep_phase_4,
@@ -468,15 +467,19 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 scale=1.0,
             ),
             # force penalties
-            # ksim.AvoidLimitsReward(-0.01),
+            # joint limits and contact force
             kbot_rewards.JointPositionLimitPenalty.create(
                 physics_model=physics_model,
                 soft_limit_factor=0.95,
-                scale=-0.1,
+                scale=-1.0,
             ),
-            kbot_rewards.ContactForcePenalty(scale=-0.01),
-            ksim.ActuatorForcePenalty(scale=-0.005),
-            ksim.ActionSmoothnessPenalty(scale=-0.005),
+            kbot_rewards.ContactForcePenalty(
+                scale=-0.01,
+                sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
+            ),
+            # ksim.ActuatorForcePenalty(scale=-0.005),
+            # ksim.ActionSmoothnessPenalty(scale=-0.005),
+            # ksim.AvoidLimitsReward(-0.01),
         ]
 
         return rewards
