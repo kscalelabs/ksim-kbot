@@ -17,6 +17,7 @@ import xax
 from bvhio.lib.hierarchy import Joint as BvhioJoint
 from jaxtyping import Array, PRNGKeyArray
 from ksim.types import PhysicsModel
+import ksim_kbot.common as common
 from ksim.utils.reference_motion import (
     ReferenceMapping,
     get_reference_qpos,
@@ -137,7 +138,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
             ),
             kbot_rewards.FeetSlipPenalty(scale=-0.25),
             kbot_rewards.FeetAirTimeReward(
-                scale=2.0,
+                scale=5.0,
                 # threshold_min=0.0,
                 # threshold_max=0.4,
             ),
@@ -169,7 +170,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
             ksim.ActuatorAccelerationObservation(),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_acc"),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_gyro"),
-            ksim.FeetContactObservation.create(
+            common.FeetContactObservation.create(
                 physics_model=physics_model,
                 foot_left_geom_names="KB_D_501L_L_LEG_FOOT_collision_box",
                 foot_right_geom_names="KB_D_501R_R_LEG_FOOT_collision_box",
