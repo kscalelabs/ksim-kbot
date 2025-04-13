@@ -299,12 +299,13 @@ class TargetHeightReward(ksim.Reward):
 
     target_height: float = attrs.field(default=1.0)
     norm: xax.NormType = attrs.field(default="l1")
+    temp: float = attrs.field(default=1.0)
     monotonic_fn: str = attrs.field(default="inv")
 
     def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
         qpos = trajectory.qpos
         error = qpos[..., 2] - self.target_height
-        reward_value = ksim.norm_to_reward(xax.get_norm(error, self.norm), self.monotonic_fn)
+        reward_value = ksim.norm_to_reward(xax.get_norm(error, self.norm), temp=self.temp, monotonic_fn=self.monotonic_fn)
         return reward_value, None
 
 
