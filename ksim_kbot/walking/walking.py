@@ -307,6 +307,8 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return ksim.MITPositionVelocityActuators(
             physics_model=physics_model,
             joint_name_to_metadata=metadata,
+            torque_noise=0.5,   
+            torque_noise_type="gaussian",
             ctrl_clip=[
                 # right arm
                 MAX_TORQUE["03"],

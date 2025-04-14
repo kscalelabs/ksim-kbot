@@ -108,6 +108,7 @@ class QposReferenceMotionReward(ksim.Reward):
     norm: xax.NormType = attrs.field(default="l1")
     sensitivity: float = attrs.field(default=5.0)
     joint_weights: tuple[float, ...] = attrs.field(default=tuple([1.0] * NUM_JOINTS))
+    speed: float = attrs.field(default=1.0)
 
     @property
     def num_frames(self) -> int:
@@ -115,7 +116,7 @@ class QposReferenceMotionReward(ksim.Reward):
 
     def __call__(self, trajectory: ksim.Trajectory, _: None) -> tuple[Array, None]:
         qpos = trajectory.qpos
-        step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
+        step_number = jnp.int32(jnp.round(self.speed * trajectory.timestep / self.ctrl_dt)) % self.num_frames
         reference_qpos = jnp.take(self.reference_qpos.array, step_number, axis=0)
         error = xax.get_norm(reference_qpos[..., 7:] - qpos[..., 7:], self.norm)
         error = error * jnp.array(self.joint_weights)
@@ -139,7 +140,8 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
             QposReferenceMotionReward(
                 reference_qpos=self.reference_qpos,
                 ctrl_dt=self.config.ctrl_dt,
-                scale=7.0,
+                scale=15.0,
+                speed=3.6,
                 joint_weights=(
                     # right arm
                     1.0,
@@ -167,14 +169,17 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                     1.0, # ankle
                 ),
             ),
-            kbot_rewards.FeetSlipPenalty(scale=-0.25),
+            kbot_rewards.FeetSlipPenalty(scale=-2.0),
             kbot_rewards.FeetAirTimeReward(
-                scale=5.0,
+                scale=8.0,
                 # threshold_min=0.0,
                 # threshold_max=0.4,
             ),
-            NaiveForwardReward(scale=1.5, vel_clip_max=0.2),
+            NaiveForwardReward(scale=1.5, vel_clip_max=0.5),
             ksim.LinearVelocityPenalty(index="z", scale=-2.0),
+            kbot_rewards.ContactForcePenalty(
+                scale=-0.01,
+            ),
             kbot_rewards.TargetHeightReward(target_height=1.0, scale=1.0),
         ]
 
@@ -208,6 +213,8 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 foot_right_geom_names="KB_D_501R_R_LEG_FOOT_collision_box",
                 floor_geom_names="floor",
             ),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_force", noise=0.0),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_force", noise=0.0),
             ksim.TimestepObservation(),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="upvector_origin", noise=0.0),
         ]
@@ -372,7 +379,7 @@ if __name__ == "__main__":
             max_grad_norm=0.5,
             export_for_inference=True,
             only_save_most_recent=False,
-            action_scale = 0.5,
+            action_scale = 0.75,
             # visualize_reference_motion=True,
         ),
     )

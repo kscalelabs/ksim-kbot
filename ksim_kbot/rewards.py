@@ -324,11 +324,11 @@ class ContactForcePenalty(ksim.Reward):
         left_contact_force = trajectory.obs["sensor_observation_left_foot_force"]
         right_contact_force = trajectory.obs["sensor_observation_right_foot_force"]
         cost = jnp.clip(
-            jnp.abs(left_contact_force[2]) - self.max_contact_force,
+            jnp.abs(left_contact_force[..., 2]) - self.max_contact_force,
             min=0.0,
         )
         cost += jnp.clip(
-            jnp.abs(right_contact_force[2]) - self.max_contact_force,
+            jnp.abs(right_contact_force[..., 2]) - self.max_contact_force,
             min=0.0,
         )
         return cost, None

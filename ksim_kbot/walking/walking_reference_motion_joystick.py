@@ -28,8 +28,8 @@ from ksim.utils.reference_motion import (
 from scipy.spatial.transform import Rotation as R
 
 import ksim_kbot.rewards as kbot_rewards
-from ksim_kbot.walking.walking_rnn import RnnModel, WalkingRnnTask, WalkingRnnTaskConfig, NUM_JOINTS
-
+from ksim_kbot.walking.walking_rnn import RnnModel, WalkingRnnTask, WalkingRnnTaskConfig, NUM_JOINTS, RnnActor, RnnCritic, NUM_INPUTS, NUM_CRITIC_INPUTS
+import distrax
 
 HUMANOID_REFERENCE_MAPPINGS = (
     ReferenceMapping("CC_Base_L_ThighTwist01", "RS03_5"),  # hip
@@ -97,7 +97,9 @@ class NaiveForwardReward(ksim.Reward):
         return trajectory.qvel[..., 0], None
 
 
-
+# approx 72 frames for 1 cycle
+# with ctrl_dt = 0.02, have ~ 1.44 seconds per cycle
+# isaacgym setup had 0.4 cycle time
 @attrs.define(frozen=True, kw_only=True)
 class QposReferenceMotionReward(ksim.Reward):
     forward_reference_qpos: xax.HashableArray
@@ -122,8 +124,11 @@ class QposReferenceMotionReward(ksim.Reward):
         
         # Determine the target reference qpos based on the command
         # Command: 0=stand, 1=forward, 2=backward, 3=turn left, 4=turn right
-        is_standing = command[..., 0] == 0
-        is_walking_backward = command[..., 0] == 2
+        # is_standing = command[..., 0] == 0
+        # is_walking_backward = command[..., 0] == 2
+
+        is_standing = jnp.linalg.norm(command, axis=-1) == 0
+        is_walking_backward = command[..., 0] < 0
 
         target_qpos_fwd = jnp.take(self.forward_reference_qpos.array, step_number, axis=0)
         target_qpos_bwd = jnp.take(self.backward_reference_qpos.array, step_number, axis=0)
@@ -153,6 +158,18 @@ class WalkingRnnRefMotionJoystickTask(WalkingRnnTask[Config], Generic[Config]):
     reference_qpos: xax.HashableArray
     mj_base_id: int
 
+    def get_model(self, key: PRNGKeyArray) -> RnnModel:
+        return RnnModel(
+            key,
+            num_inputs=NUM_INPUTS - 4, # lin vel instead of joystick
+            num_critic_inputs=NUM_CRITIC_INPUTS - 4, # lin vel instead of joystick
+            min_std=0.01,
+            max_std=1.0,
+            mean_scale=self.config.action_scale,
+            hidden_size=self.config.hidden_size,
+            depth=self.config.depth,
+        )
+
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         backward_ref_qpos_array = self.reference_qpos.array[::-1]
         backward_reference_qpos_hashable = xax.hashable_array(backward_ref_qpos_array)
@@ -160,15 +177,16 @@ class WalkingRnnRefMotionJoystickTask(WalkingRnnTask[Config], Generic[Config]):
         rewards: list[ksim.Reward] = [
             ksim.StayAliveReward(
                 success_reward=1.0,
-                scale=8.0,
+                scale=2.0,
             ),
             kbot_rewards.OrientationPenalty(scale=self.config.orientation_penalty),
             QposReferenceMotionReward(
                 forward_reference_qpos=self.reference_qpos,
                 backward_reference_qpos=backward_reference_qpos_hashable,
                 ctrl_dt=self.config.ctrl_dt,
-                scale=7.0,
-                speed=2.0,
+                scale=6.0,
+                speed=3.6,
+                command_name="linear_velocity_command",
                 joint_weights=(
                     # right arm
                     1.0,
@@ -196,14 +214,17 @@ class WalkingRnnRefMotionJoystickTask(WalkingRnnTask[Config], Generic[Config]):
                     1.0, # ankle
                 ),
             ),
-            kbot_rewards.FeetSlipPenalty(scale=-0.25),
-            kbot_rewards.FeetAirTimeReward(
-                scale=5.0,
-                # threshold_min=0.0,
-                # threshold_max=0.4,
+            # kbot_rewards.FeetSlipPenalty(scale=-0.25),
+            # kbot_rewards.FeetAirTimeReward(
+            #     scale=5.0,
+            #     # threshold_min=0.0,
+            #     # threshold_max=0.4,
+            # ),
+            # ksim.JoystickReward(scale=2.0, linear_velocity_clip_max=1.0, angular_velocity_clip_max=1.0),
+            kbot_rewards.LinearVelocityTrackingReward(
+                scale=2.0,
             ),
-            ksim.JoystickReward(scale=1.5, linear_velocity_clip_max=1.0, angular_velocity_clip_max=1.0),
-            ksim.LinearVelocityPenalty(index="z", scale=-2.0),
+            ksim.LinearVelocityPenalty(index="z", scale=-1.0),
             kbot_rewards.TargetHeightReward(target_height=1.0, scale=1.0),
         ]
 
@@ -215,30 +236,115 @@ class WalkingRnnRefMotionJoystickTask(WalkingRnnTask[Config], Generic[Config]):
             ksim.RandomJointVelocityReset(),
         ]
 
+    def run_actor(
+        self,
+        model: RnnActor,
+        observations: xax.FrozenDict[str, Array],
+        commands: xax.FrozenDict[str, Array],
+        carry: Array,
+    ) -> tuple[distrax.Distribution, Array]:
+        timestep_1 = observations["timestep_observation"]
+        joint_pos_j = observations["joint_position_observation"]
+        joint_vel_j = observations["joint_velocity_observation"]
+        imu_acc_3 = observations["sensor_observation_imu_acc"]
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        # joystick_cmd_1 = commands["joystick_command"]
+        # joystick_cmd_ohe_6 = jax.nn.one_hot(joystick_cmd_1, num_classes=6).squeeze(-2)
+        linear_vel_cmd_2 = commands["linear_velocity_command"]
+
+        obs_n = jnp.concatenate(
+            [
+                jnp.cos(timestep_1),  # 1
+                jnp.sin(timestep_1),  # 1
+                joint_pos_j,  # NUM_JOINTS
+                joint_vel_j / 10.0,  # NUM_JOINTS
+                imu_acc_3 / 50.0,  # 3
+                imu_gyro_3 / 3.0,  # 3
+                linear_vel_cmd_2,  # 2
+            ],
+            axis=-1,
+        )
+
+        return model.forward(obs_n, carry)
+
+    def run_critic(
+        self,
+        model: RnnCritic,
+        observations: xax.FrozenDict[str, Array],
+        commands: xax.FrozenDict[str, Array],
+        carry: Array,
+    ) -> tuple[Array, Array]:
+        timestep_1 = observations["timestep_observation"]
+        dh_joint_pos_j = observations["joint_position_observation"]
+        dh_joint_vel_j = observations["joint_velocity_observation"]
+        com_inertia_n = observations["center_of_mass_inertia_observation"]
+        com_vel_n = observations["center_of_mass_velocity_observation"]
+        imu_acc_3 = observations["sensor_observation_imu_acc"]
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        act_frc_obs_n = observations["actuator_force_observation"]
+        base_pos_3 = observations["base_position_observation"]
+        base_quat_4 = observations["base_orientation_observation"]
+        lin_vel_obs_3 = observations["base_linear_velocity_observation"]
+        ang_vel_obs_3 = observations["base_angular_velocity_observation"]
+        # joystick_cmd_1 = commands["joystick_command"]
+        # joystick_cmd_ohe_6 = jax.nn.one_hot(joystick_cmd_1, num_classes=6).squeeze(-2)
+        linear_vel_cmd_2 = commands["linear_velocity_command"]
+
+        obs_n = jnp.concatenate(
+            [
+                jnp.cos(timestep_1),  # 1
+                jnp.sin(timestep_1),  # 1
+                dh_joint_pos_j,  # NUM_JOINTS
+                dh_joint_vel_j / 10.0,  # NUM_JOINTS
+                com_inertia_n,  # 160
+                com_vel_n,  # 96
+                imu_acc_3 / 50.0,  # 3
+                imu_gyro_3 / 3.0,  # 3
+                act_frc_obs_n / 100.0,  # NUM_JOINTS
+                base_pos_3,  # 3
+                base_quat_4,  # 4
+                lin_vel_obs_3,  # 3
+                ang_vel_obs_3,  # 3
+                linear_vel_cmd_2,  # 2
+            ],
+            axis=-1,
+        )
+
+        return model.forward(obs_n, carry)
+
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            ksim.JoystickCommand(
+            # ksim.JoystickCommand(
+            #     switch_prob=self.config.ctrl_dt / 15,
+            #     # ranges=((0, 1),) if self.config.joystick_only_forward else ((0, 4),),
+            #     ranges=((0,2),)
+            # ),
+            common.LinearVelocityCommand(
+                x_range=(-1, 1),
+                y_range=(-1, 1),
+                x_zero_prob=0.3,
+                y_zero_prob=0.3,
                 switch_prob=self.config.ctrl_dt / 15,
-                ranges=((0, 1),) if self.config.joystick_only_forward else ((0, 4),),
-            ),
+            )
         ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
-            ksim.JointPositionObservation(),
-            ksim.JointVelocityObservation(),
-            ksim.ActuatorForceObservation(),
-            ksim.CenterOfMassInertiaObservation(),
-            ksim.CenterOfMassVelocityObservation(),
-            ksim.BasePositionObservation(),
-            ksim.BaseOrientationObservation(),
-            ksim.BaseLinearVelocityObservation(),
-            ksim.BaseAngularVelocityObservation(),
+            ksim.JointPositionObservation(noise=0.01),
+            ksim.JointVelocityObservation(noise=0.1),
+            ksim.ActuatorForceObservation(noise=0.0),
+            ksim.CenterOfMassInertiaObservation(noise=0.0),
+            ksim.CenterOfMassVelocityObservation(noise=0.0),
+            ksim.BasePositionObservation(noise=0.0),
+            ksim.BaseOrientationObservation(noise=0.0),
+            ksim.BaseLinearVelocityObservation(noise=0.0),
+            ksim.BaseAngularVelocityObservation(noise=0.0),
             ksim.BaseLinearAccelerationObservation(),
             ksim.BaseAngularAccelerationObservation(),
             ksim.ActuatorAccelerationObservation(),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_acc"),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_gyro"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_acc", noise=0.4),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_gyro", noise=0.5),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="local_linvel_origin", noise=0.0),
             common.FeetContactObservation.create(
                 physics_model=physics_model,
                 foot_left_geom_names="KB_D_501L_L_LEG_FOOT_collision_box",
