@@ -8,7 +8,7 @@ import sys
 import numpy as np
 from loguru import logger
 
-from ksim_kbot.deploy.deploy import Deploy
+from ksim_kbot.deploy.deploy import Deploy, FixedArmDeploy
 
 # *********************#
 # * Joystick Deploy    #
@@ -21,6 +21,7 @@ class JoystickDeploy(Deploy):
     def __init__(self, enable_joystick: bool, model_path: str, mode: str, ip: str = "localhost") -> None:
         super().__init__(model_path, mode, ip)
         self.enable_joystick = enable_joystick
+        self.gait = np.asarray([1.25])
 
         self.default_positions_rad = np.array(
             [
@@ -54,7 +55,8 @@ class JoystickDeploy(Deploy):
             "command": [],
             "pos_diff": [],
             "vel_obs": [],
-            "imu_obs": [],
+            "imu_accel": [],
+            "imu_gyro": [],
             "controller_cmd": [],
             "prev_action": [],
             "phase": [],
@@ -63,9 +65,9 @@ class JoystickDeploy(Deploy):
     def get_command(self) -> np.ndarray:
         """Get command from the joystick."""
         if self.enable_joystick:
-            return np.array([0.3, 0.0])
+            return np.array([0.3, 0.0, 0.0])
         else:
-            return np.array([0.3, 0.0])
+            return np.array([0.3, 0.0, 0.0])
 
     async def get_observation(self) -> np.ndarray:
         """Get observation from the robot for joystick-controlled policies.
@@ -78,8 +80,8 @@ class JoystickDeploy(Deploy):
             self.kos.actuator.get_actuators_state([ac.actuator_id for ac in self.actuator_list]),
             self.kos.imu.get_imu_values(),
         )
-
-        imu_obs = np.array([imu.accel_x, imu.accel_y, imu.accel_z, imu.gyro_x, imu.gyro_y, imu.gyro_z])
+        imu_accel = np.array([imu.accel_x, imu.accel_y, imu.accel_z])
+        imu_gyro = np.array([imu.gyro_x, imu.gyro_y, imu.gyro_z])
 
         # * Pos Diff. Difference of current position from default position
         state_dict_pos = {state.actuator_id: state.position for state in actuator_states.states}
@@ -94,7 +96,7 @@ class JoystickDeploy(Deploy):
         )
 
         # * Phase, tracking a sinusoidal
-        self.phase += 2 * np.pi * self.GAIT_DT * self.DT
+        self.phase += 2 * np.pi * self.gait * self.DT
         self.phase = np.fmod(self.phase + np.pi, 2 * np.pi) - np.pi
         phase_vec = np.array([np.cos(self.phase), np.sin(self.phase)]).flatten()
 
@@ -103,12 +105,13 @@ class JoystickDeploy(Deploy):
         if self.mode in ["sim", "real-check"]:
             self.rollout_dict["pos_diff"].append(pos_diff)
             self.rollout_dict["vel_obs"].append(vel_obs)
-            self.rollout_dict["imu_obs"].append(imu_obs)
+            self.rollout_dict["imu_accel"].append(imu_accel)
+            self.rollout_dict["imu_gyro"].append(imu_gyro)
             self.rollout_dict["controller_cmd"].append(cmd)
             self.rollout_dict["prev_action"].append(self.prev_action)
             self.rollout_dict["phase"].append(phase_vec)
 
-        observation = np.concatenate([pos_diff, vel_obs, imu_obs, cmd, self.prev_action, phase_vec]).reshape(1, -1)
+        observation = np.concatenate([phase_vec, pos_diff, vel_obs, imu_accel, imu_gyro, cmd, self.gait, self.prev_action]).reshape(1, -1)
 
         return observation
 

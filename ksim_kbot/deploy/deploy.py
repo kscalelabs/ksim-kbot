@@ -34,7 +34,6 @@ class Deploy(ABC):
 
     # Class-level constants
     DT = 0.02  # Policy time step (50Hz)
-    GAIT_DT = 1.25
     GRAVITY = 9.81  # m/s
     ACTION_SCALE = 1.0
 
