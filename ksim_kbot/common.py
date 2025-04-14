@@ -346,6 +346,7 @@ class XYPushEvent(ksim.Event):
 
     interval_range: tuple[float, float] = attrs.field()
     force_range: tuple[float, float] = attrs.field()
+    curriculum_scale: float = attrs.field(default=1.0)
 
     def __call__(
         self,
@@ -376,7 +377,7 @@ class XYPushEvent(ksim.Event):
             rng,
             minval=self.force_range[0],
             maxval=self.force_range[1],
-        )
+        ) * curriculum_level * self.curriculum_scale
         push = jnp.array([jnp.cos(push_theta), jnp.sin(push_theta)])
         random_forces = push * push_magnitude + data.qvel[:2]
         new_qvel = slice_update(data, "qvel", slice(0, 2), random_forces)

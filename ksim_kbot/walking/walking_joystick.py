@@ -270,10 +270,10 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
     def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
         if self.config.domain_randomize:
             return [
-                ksim.StaticFrictionRandomizer(scale_lower=0.9, scale_upper=1.1),
+                ksim.StaticFrictionRandomizer(scale_lower=0.5, scale_upper=1.5),
                 ksim.ArmatureRandomizer(),
                 # ksim.AllBodiesMassMultiplicationRandomizer(),
-                ksim.MassAdditionRandomizer.from_body_name(physics_model, "Torso_Side_Right"),
+                ksim.MassAdditionRandomizer.from_body_name(physics_model, "Torso_Side_Right", scale_lower=-1.0, scale_upper=1.0),
                 ksim.JointDampingRandomizer(),
                 ksim.JointZeroPositionRandomizer(scale_lower=-0.03, scale_upper=0.03),
             ]
@@ -305,21 +305,27 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         if self.config.domain_randomize:
             return [
                 common.XYPushEvent(
-                    interval_range=(5.0, 10.0),
-                    force_range=(0.1, 0.5),
+                    interval_range=(2.0, 4.0),
+                    force_range=(0.5, 1.8),
                 ),
             ]
         else:
             return []
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> Curriculum:
-        return ConstantCurriculum(level=1.0)
+        return ksim.EpisodeLengthCurriculum(
+            num_levels=10,
+            increase_threshold=20.0,
+            decrease_threshold=10.0,
+            min_level_steps=25,
+            dt=self.config.ctrl_dt, # not sure what this is for
+        )
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         if self.config.domain_randomize:
             vel_obs_noise = 0.0
             imu_acc_noise = 0.5
-            imu_gyro_noise = 0.2
+            imu_gyro_noise = 0.5
             gvec_noise = 0.0
             base_position_noise = 0.0
             base_orientation_noise = 0.0
