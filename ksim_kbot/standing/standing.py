@@ -1,6 +1,7 @@
 """Defines simple task for training a standing policy for K-Bot."""
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Generic, TypeVar
@@ -17,8 +18,11 @@ from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from ksim.curriculum import ConstantCurriculum, Curriculum
 from mujoco import mjx
+from mujoco_scenes.mjcf import load_mjmodel
 
 from ksim_kbot import common, rewards
+
+logger = logging.getLogger(__name__)
 
 OBS_SIZE = 20 * 2 + 2 + 3 + 3 + 3 + 40  # = position + velocity + imu_acc + imu_gyro + projected_gravity + last_action
 CMD_SIZE = 3
@@ -266,8 +270,9 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         return optimizer
 
     def get_mujoco_model(self) -> mujoco.MjModel:
-        mjcf_path = (Path(self.config.robot_urdf_path) / "scene.mjcf").resolve().as_posix()
-        mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
+        mjcf_path = (Path(self.config.robot_urdf_path) / "robot.mjcf").resolve().as_posix()
+        logger.info("Loading MJCF model from %s", mjcf_path)
+        mj_model = load_mjmodel(mjcf_path, scene="smooth")
 
         mj_model.opt.timestep = jnp.array(self.config.dt)
         mj_model.opt.iterations = 6
