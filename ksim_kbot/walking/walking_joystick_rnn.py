@@ -364,6 +364,7 @@ class KbotRnnWalkingTask(KbotWalkingTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
+        argmax: bool = False,
     ) -> ksim.Action:
         actor_carry_in, critic_carry_in = model_carry
 
@@ -375,8 +376,7 @@ class KbotRnnWalkingTask(KbotWalkingTask[Config], Generic[Config]):
             carry=actor_carry_in,
         )
 
-        action_j = action_dist_j.sample(seed=rng)
-
+        action_j = action_dist_j.mode() if argmax else action_dist_j.sample(seed=rng)
         return ksim.Action(
             action=action_j,
             carry=(actor_carry, critic_carry_in),
@@ -412,7 +412,7 @@ if __name__ == "__main__":
             learning_rate=1e-4,
             clip_param=0.3,
             max_grad_norm=0.5,
-            log_full_trajectory_every_n_steps=5,
+            log_full_trajectory_every_n_steps=10,
             save_every_n_steps=25,
             export_for_inference=False,
             only_save_most_recent=False,

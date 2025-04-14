@@ -383,7 +383,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 floor_threshold=0.00,
             ),
             common.TrueHeightObservation(),
-            # NOTE: Add collisions
+            # NOTE: Add collisions to hands
             # ksim.ContactObservation(
             #     physics_model=physics_model,
             #     geom_names=(
