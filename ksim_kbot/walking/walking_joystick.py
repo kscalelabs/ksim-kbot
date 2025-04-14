@@ -210,6 +210,10 @@ class KbotWalkingTaskConfig(KbotStandingTaskConfig):
 
     gait_freq_lower: float = xax.field(value=1.25)
     gait_freq_upper: float = xax.field(value=1.5)
+    # to be removed
+    log_full_trajectory_every_n_steps: int = xax.field(value=5)
+    log_full_trajectory_on_first_step: bool = xax.field(value=False)
+    log_full_trajectory_every_n_seconds: float = xax.field(value=1.0)
 
 
 Config = TypeVar("Config", bound=KbotWalkingTaskConfig)
@@ -463,9 +467,9 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             ),
             kbot_rewards.FeetSlipPenalty(scale=-0.25),
             # NOTE: This should be removed
-            # kbot_rewards.FeetAirTimeReward(
-            #     scale=2.0,
-            # ),
+            kbot_rewards.FeetAirTimeReward(
+                scale=2.0,
+            ),
             # force penalties
             kbot_rewards.JointPositionLimitPenalty.create(
                 physics_model=physics_model,
@@ -693,8 +697,8 @@ if __name__ == "__main__":
             learning_rate=1e-4,
             clip_param=0.3,
             max_grad_norm=0.5,
-            valid_every_n_steps=5,
-            save_every_n_steps=5,
+            valid_every_n_steps=25,
+            save_every_n_steps=25,
             export_for_inference=True,
             only_save_most_recent=False,
             # Task parameters
