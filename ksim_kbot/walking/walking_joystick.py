@@ -317,7 +317,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             num_levels=10,
             increase_threshold=20.0,
             decrease_threshold=10.0,
-            min_level_steps=25,
+            min_level_steps=5,
             dt=self.config.ctrl_dt, # not sure what this is for
         )
 
@@ -708,9 +708,9 @@ if __name__ == "__main__":
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,
-            max_action_latency=0.0,
+            max_action_latency=0.05,
             min_action_latency=0.0,
-            rollout_length_seconds=1.25,
+            rollout_length_seconds=2.5,
             # PPO parameters
             action_scale=1.0,
             gamma=0.97,
