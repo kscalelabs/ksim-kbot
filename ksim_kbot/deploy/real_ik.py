@@ -10,7 +10,6 @@ from enum import Enum
 import numpy as np
 import pykos
 import tensorflow as tf
-
 from askin import KeyboardController
 
 logger = logging.getLogger(__name__)
