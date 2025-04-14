@@ -613,7 +613,7 @@ class KbotGetupTask(KbotStandingTask[Config], Generic[Config]):
     def sample_action(
         self,
         model: KbotModel,
-        carry: Array,
+        model_carry: Array,
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, Array],
@@ -621,7 +621,7 @@ class KbotGetupTask(KbotStandingTask[Config], Generic[Config]):
         rng: PRNGKeyArray,
         argmax: bool = False,
     ) -> ksim.Action:
-        actor_carry, _ = carry
+        actor_carry, _ = model_carry
         action_dist_n = self.run_actor(model.actor, observations, commands, actor_carry)  # type: ignore[arg-type]
         action_j = action_dist_n.mode() if argmax else action_dist_n.sample(seed=rng)
 
