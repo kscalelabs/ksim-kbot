@@ -209,7 +209,7 @@ class KbotWalkingTaskConfig(KbotStandingTaskConfig):
     """Config for the K-Bot walking task."""
 
     gait_freq_lower: float = xax.field(value=1.25)
-    gait_freq_upper: float = xax.field(value=1.25)
+    gait_freq_upper: float = xax.field(value=1.5)
 
 
 Config = TypeVar("Config", bound=KbotWalkingTaskConfig)
@@ -383,7 +383,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         # NOTE: increase to 360
         return [
             common.LinearVelocityCommand(
-                x_range=(0.7, 0.7),
+                x_range=(-0.7, 0.7),
                 y_range=(-0.2, 0.2),
                 x_zero_prob=0.1,
                 y_zero_prob=0.2,
@@ -459,7 +459,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             kbot_rewards.FeetPhaseReward(
                 foot_default_height=0.04,
                 max_foot_height=0.12,
-                scale=1.2,
+                scale=2.1,
             ),
             kbot_rewards.FeetSlipPenalty(scale=-0.25),
             # NOTE: This should be removed
@@ -693,8 +693,8 @@ if __name__ == "__main__":
             learning_rate=1e-4,
             clip_param=0.3,
             max_grad_norm=0.5,
-            log_full_trajectory_every_n_steps=5,
-            save_every_n_steps=25,
+            valid_every_n_steps=5,
+            save_every_n_steps=5,
             export_for_inference=True,
             only_save_most_recent=False,
             # Task parameters
