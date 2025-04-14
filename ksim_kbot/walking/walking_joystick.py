@@ -308,6 +308,10 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                     interval_range=(2.0, 4.0),
                     force_range=(0.5, 1.8),
                 ),
+                common.AngularVelocityPushEvent(
+                    interval_range=(2.0, 4.0),
+                    ang_vel_range=(0.5, 1.8),
+                ),
             ]
         else:
             return []
@@ -503,8 +507,9 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
             ),
             # NOTE: Investigate the effect of these penalties
-            # ksim.ActuatorForcePenalty(scale=-0.005),
-            # ksim.ActionSmoothnessPenalty(scale=-0.005),
+            ksim.ActuatorForcePenalty(scale=-0.005),
+            ksim.ActionSmoothnessPenalty(scale=-0.005),
+            ksim.JointVelocityPenalty(scale=-0.005),
             # ksim.AvoidLimitsReward(-0.01)
         ]
 
@@ -710,7 +715,8 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             max_action_latency=0.05,
             min_action_latency=0.0,
-            rollout_length_seconds=2.5,
+            rollout_length_seconds=5.0,
+            render_length_seconds=5.0,
             # PPO parameters
             action_scale=1.0,
             gamma=0.97,
