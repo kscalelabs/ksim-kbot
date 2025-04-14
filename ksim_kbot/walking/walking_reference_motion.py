@@ -7,6 +7,7 @@ from typing import Callable, Generic, TypeVar
 
 import attrs
 import bvhio
+import distrax  # Import distrax
 import glm
 import jax
 import jax.numpy as jnp
@@ -16,8 +17,8 @@ import numpy as np
 import xax
 from bvhio.lib.hierarchy import Joint as BvhioJoint
 from jaxtyping import Array, PRNGKeyArray
-from ksim.types import PhysicsModel, PhysicsState
 from ksim import ObservationState
+from ksim.types import PhysicsModel
 from ksim.utils.reference_motion import (
     ReferenceMapping,
     ReferenceMotionData,
@@ -29,21 +30,20 @@ from ksim.utils.reference_motion import (
 )
 from scipy.spatial.transform import Rotation as R
 
-import ksim_kbot.common as common
 import ksim_kbot.rewards as kbot_rewards
+from ksim_kbot import common
 
 # Import necessary components from walking_rnn
 from ksim_kbot.walking.walking_rnn import (
-    NUM_JOINTS,
+    NUM_CRITIC_INPUTS,  # Import base critic input size
     NUM_INPUTS,  # Import base actor input size
-    NUM_CRITIC_INPUTS, # Import base critic input size
+    NUM_JOINTS,
     RnnActor,
     RnnCritic,
     RnnModel,
     WalkingRnnTask,
     WalkingRnnTaskConfig,
 )
-import distrax # Import distrax
 
 HUMANOID_REFERENCE_MAPPINGS = (
     ReferenceMapping("CC_Base_L_ThighTwist01", "RS03_5"),  # hip
@@ -72,7 +72,7 @@ class WalkingRnnRefMotionTaskConfig(WalkingRnnTaskConfig):
         help="Optional rotation to ensure the BVH tree matches the Mujoco model.",
     )
     bvh_scaling_factor: float = xax.field(
-        value=1/100.0,
+        value=1 / 100.0,
         help="Scaling factor to ensure the BVH tree matches the Mujoco model.",
     )
     bvh_offset: tuple[float, float, float] = xax.field(
@@ -103,6 +103,7 @@ class WalkingRnnRefMotionTaskConfig(WalkingRnnTaskConfig):
 
 Config = TypeVar("Config", bound=WalkingRnnRefMotionTaskConfig)
 
+
 @attrs.define(frozen=True)
 class NaiveForwardReward(ksim.Reward):
     """Reward for forward motion."""
@@ -113,6 +114,7 @@ class NaiveForwardReward(ksim.Reward):
         vel = trajectory.qvel[..., 0]
         clipped_vel = jnp.clip(vel, a_max=self.vel_clip_max)
         return clipped_vel, None
+
 
 @attrs.define(frozen=True)
 class TargetLinearVelocityReward(ksim.Reward):
@@ -157,6 +159,7 @@ class QposReferenceMotionReward(ksim.Reward):
 class MotionAuxOutputs:
     tracked_pos: xax.FrozenDict[int, Array]
 
+
 def create_tracked_marker_update_fn(
     body_id: int, mj_base_id: int, tracked_pos_fn: Callable[[ksim.Trajectory], xax.FrozenDict[int, Array]]
 ) -> Callable[[ksim.Marker, ksim.Trajectory], None]:
@@ -182,6 +185,7 @@ def create_target_marker_update_fn(
 
     return _target_update_fn
 
+
 @attrs.define(frozen=True, kw_only=True)
 class CartesianReferenceMotionReward(ksim.Reward):
     reference_motion_data: ReferenceMotionData
@@ -200,7 +204,9 @@ class CartesianReferenceMotionReward(ksim.Reward):
         target_pos = self.get_target_pos(trajectory)
         tracked_pos = self.get_tracked_pos(trajectory)
         target_pos_filtered = xax.FrozenDict({k: v for k, v in target_pos.items() if k in tracked_pos})
-        error = jax.tree.map(lambda target, tracked: xax.get_norm(target - tracked, self.norm), target_pos_filtered, tracked_pos)
+        error = jax.tree.map(
+            lambda target, tracked: xax.get_norm(target - tracked, self.norm), target_pos_filtered, tracked_pos
+        )
         mean_error_over_bodies = jax.tree.reduce(jnp.add, error) / len(error)
         mean_error = mean_error_over_bodies.mean(axis=-1)
         reward = jnp.exp(-mean_error * self.sensitivity)
@@ -211,7 +217,6 @@ class CartesianReferenceMotionReward(ksim.Reward):
 
         # Add markers for reference positions (in blue)
         for body_id in self.reference_motion_data.cartesian_poses.keys():
-
             markers.append(
                 ksim.Marker.sphere(
                     pos=(0.0, 0.0, 0.0),
@@ -284,8 +289,8 @@ NUM_ACTOR_INPUTS_REF = NUM_INPUTS
 NUM_CRITIC_INPUTS_REF = (
     NUM_CRITIC_INPUTS
     + NUM_JOINTS  # reference_qpos
-    + (len(HUMANOID_REFERENCE_MAPPINGS) * 3) # reference_local_xpos
-    + (len(HUMANOID_REFERENCE_MAPPINGS) * 3) # tracked_local_xpos
+    + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # reference_local_xpos
+    + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # tracked_local_xpos
 )
 
 
@@ -311,23 +316,23 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
         num_critic_inputs_actual = (
             NUM_CRITIC_INPUTS
             + NUM_JOINTS  # reference_qpos
-            + (num_tracked_bodies * 3) # reference_local_xpos
-            + (num_tracked_bodies * 3) # tracked_local_xpos
+            + (num_tracked_bodies * 3)  # reference_local_xpos
+            + (num_tracked_bodies * 3)  # tracked_local_xpos
         )
         expected_num_critic_inputs_ref = (
             NUM_CRITIC_INPUTS
             + NUM_JOINTS  # reference_qpos
-            + (len(HUMANOID_REFERENCE_MAPPINGS) * 3) # reference_local_xpos
-            + (len(HUMANOID_REFERENCE_MAPPINGS) * 3) # tracked_local_xpos
+            + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # reference_local_xpos
+            + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # tracked_local_xpos
         )
 
-        assert num_critic_inputs_actual == expected_num_critic_inputs_ref, \
-            f"Calculated critic inputs ({num_critic_inputs_actual}) != expected ({expected_num_critic_inputs_ref})"
+        msg = f"Calculated critic inputs ({num_critic_inputs_actual}) != expected ({expected_num_critic_inputs_ref})"
+        assert num_critic_inputs_actual == expected_num_critic_inputs_ref, msg
 
         return RnnModel(
             key,
-            num_inputs=NUM_ACTOR_INPUTS_REF, # Use actor size derived from base
-            num_critic_inputs=num_critic_inputs_actual, # Use dynamically calculated critic size
+            num_inputs=NUM_ACTOR_INPUTS_REF,  # Use actor size derived from base
+            num_critic_inputs=num_critic_inputs_actual,  # Use dynamically calculated critic size
             min_std=0.01,
             max_std=1.0,
             mean_scale=self.config.action_scale,
@@ -364,8 +369,9 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
             ],
             axis=-1,
         )
-        assert obs_n.shape[-1] == NUM_ACTOR_INPUTS_REF, \
-            f"Actor input shape ({obs_n.shape[-1]}) != constant ({NUM_ACTOR_INPUTS_REF})"
+
+        msg = f"Actor input shape ({obs_n.shape[-1]}) != constant ({NUM_ACTOR_INPUTS_REF})"
+        assert obs_n.shape[-1] == NUM_ACTOR_INPUTS_REF, msg
 
         return model.forward(obs_n, carry)
 
@@ -396,7 +402,6 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
         ref_local_xpos_n = observations["reference_local_xpos_observation"]
         tracked_local_xpos_n = observations["tracked_local_xpos_observation"]
 
-
         # Concatenate observations for the critic, including new ones
         obs_n = jnp.concatenate(
             [
@@ -415,9 +420,9 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 ang_vel_obs_3,  # 3
                 joystick_cmd_ohe_6,  # 6
                 # Add reference observations
-                ref_qpos_j, # NUM_JOINTS
-                ref_local_xpos_n, # num_tracked_bodies * 3
-                tracked_local_xpos_n, # num_tracked_bodies * 3
+                ref_qpos_j,  # NUM_JOINTS
+                ref_local_xpos_n,  # num_tracked_bodies * 3
+                tracked_local_xpos_n,  # num_tracked_bodies * 3
             ],
             axis=-1,
         )
@@ -425,16 +430,15 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
         expected_num_critic_inputs_ref = (
             NUM_CRITIC_INPUTS
             + NUM_JOINTS  # reference_qpos
-            + (len(HUMANOID_REFERENCE_MAPPINGS) * 3) # reference_local_xpos
-            + (len(HUMANOID_REFERENCE_MAPPINGS) * 3) # tracked_local_xpos
+            + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # reference_local_xpos
+            + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # tracked_local_xpos
         )
 
-        assert obs_n.shape[-1] == expected_num_critic_inputs_ref, \
-             f"Critic input shape ({obs_n.shape[-1]}) != expected ({expected_num_critic_inputs_ref})"
+        msg = f"Critic input shape ({obs_n.shape[-1]}) != expected ({expected_num_critic_inputs_ref})"
 
+        assert obs_n.shape[-1] == expected_num_critic_inputs_ref, msg
 
         return model.forward(obs_n, carry)
-
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards: list[ksim.Reward] = [
@@ -466,17 +470,17 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                     1.0,
                     1.0,
                     # right leg
-                    2.0, # hip pitch
-                    1.0, # hip roll
-                    1.0, # hip yaw
-                    2.0, # knee
-                    1.0, # ankle
+                    2.0,  # hip pitch
+                    1.0,  # hip roll
+                    1.0,  # hip yaw
+                    2.0,  # knee
+                    1.0,  # ankle
                     # left leg
-                    2.0, # hip pitch
-                    1.0, # hip roll
-                    1.0, # hip yaw
-                    2.0, # knee
-                    1.0, # ankle
+                    2.0,  # hip pitch
+                    1.0,  # hip roll
+                    1.0,  # hip yaw
+                    2.0,  # knee
+                    1.0,  # ankle
                 ),
             ),
             kbot_rewards.FeetSlipPenalty(scale=-2.0),
@@ -708,7 +712,7 @@ if __name__ == "__main__":
             max_grad_norm=0.5,
             export_for_inference=True,
             only_save_most_recent=False,
-            action_scale = 0.75,
+            action_scale=0.75,
             # visualize_reference_motion=True,
         ),
     )

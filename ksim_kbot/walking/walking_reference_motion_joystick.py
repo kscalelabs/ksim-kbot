@@ -3,10 +3,11 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generic, TypeVar, Callable
+from typing import Callable, Generic, TypeVar
 
 import attrs
 import bvhio
+import distrax
 import glm
 import jax
 import jax.numpy as jnp
@@ -17,20 +18,28 @@ import xax
 from bvhio.lib.hierarchy import Joint as BvhioJoint
 from jaxtyping import Array, PRNGKeyArray
 from ksim.types import PhysicsModel
-import ksim_kbot.common as common
 from ksim.utils.reference_motion import (
     ReferenceMapping,
-    get_reference_qpos,
+    get_reference_cartesian_poses,
     get_reference_joint_id,
+    get_reference_qpos,
     local_to_absolute,
     visualize_reference_motion,
-    get_reference_cartesian_poses,
 )
 from scipy.spatial.transform import Rotation as R
 
 import ksim_kbot.rewards as kbot_rewards
-from ksim_kbot.walking.walking_rnn import RnnModel, WalkingRnnTask, WalkingRnnTaskConfig, NUM_JOINTS, RnnActor, RnnCritic, NUM_INPUTS, NUM_CRITIC_INPUTS
-import distrax
+from ksim_kbot import common
+from ksim_kbot.walking.walking_rnn import (
+    NUM_CRITIC_INPUTS,
+    NUM_INPUTS,
+    NUM_JOINTS,
+    RnnActor,
+    RnnCritic,
+    RnnModel,
+    WalkingRnnTask,
+    WalkingRnnTaskConfig,
+)
 
 HUMANOID_REFERENCE_MAPPINGS = (
     ReferenceMapping("CC_Base_L_ThighTwist01", "RS03_5"),  # hip
@@ -59,7 +68,7 @@ class WalkingRnnRefMotionTaskConfig(WalkingRnnTaskConfig):
         help="Optional rotation to ensure the BVH tree matches the Mujoco model.",
     )
     bvh_scaling_factor: float = xax.field(
-        value=1/100.0,
+        value=1 / 100.0,
         help="Scaling factor to ensure the BVH tree matches the Mujoco model.",
     )
     bvh_offset: tuple[float, float, float] = xax.field(
@@ -90,6 +99,7 @@ class WalkingRnnRefMotionTaskConfig(WalkingRnnTaskConfig):
 
 Config = TypeVar("Config", bound=WalkingRnnRefMotionTaskConfig)
 
+
 @attrs.define(frozen=True)
 class NaiveForwardReward(ksim.Reward):
     """Reward for forward motion."""
@@ -119,10 +129,10 @@ class QposReferenceMotionReward(ksim.Reward):
     def __call__(self, trajectory: ksim.Trajectory, _: None) -> tuple[Array, None]:
         qpos = trajectory.qpos
         command = trajectory.command[self.command_name]
-        
+
         # Calculate the step number within the reference motion cycle
         step_number = jnp.int32(jnp.round(self.speed * trajectory.timestep / self.ctrl_dt)) % self.num_frames
-        
+
         # Determine the target reference qpos based on the command
         # Command: 0=stand, 1=forward, 2=backward, 3=turn left, 4=turn right
         # is_standing = command[..., 0] == 0
@@ -136,11 +146,7 @@ class QposReferenceMotionReward(ksim.Reward):
 
         # Select the appropriate target qpos frame based on the command
         is_walking_backward_b = jnp.expand_dims(is_walking_backward, axis=-1)
-        target_reference_qpos = jnp.where(
-            is_walking_backward_b,
-            target_qpos_bwd,
-            target_qpos_fwd
-        )
+        target_reference_qpos = jnp.where(is_walking_backward_b, target_qpos_bwd, target_qpos_fwd)
 
         # Compute the reference motion reward error using the selected target
         error = xax.get_norm(target_reference_qpos[..., 7:] - qpos[..., 7:], self.norm)
@@ -153,10 +159,12 @@ class QposReferenceMotionReward(ksim.Reward):
 
         return reward, None
 
+
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class MotionAuxOutputs:
     tracked_pos: xax.FrozenDict[int, Array]
+
 
 def create_tracked_marker_update_fn(
     body_id: int, mj_base_id: int, tracked_pos_fn: Callable[[ksim.Trajectory], xax.FrozenDict[int, Array]]
@@ -182,6 +190,7 @@ def create_target_marker_update_fn(
         marker.pos = tuple(abs_pos)
 
     return _target_update_fn
+
 
 @attrs.define(frozen=True, kw_only=True)
 class CartesianReferenceMotionReward(ksim.Reward):
@@ -218,7 +227,6 @@ class CartesianReferenceMotionReward(ksim.Reward):
 
         # Add markers for reference positions (in blue)
         for body_id in self.reference_motion.keys():
-
             markers.append(
                 ksim.Marker.sphere(
                     pos=(0.0, 0.0, 0.0),
@@ -239,6 +247,7 @@ class CartesianReferenceMotionReward(ksim.Reward):
 
         return markers
 
+
 class WalkingRnnRefMotionJoystickTask(WalkingRnnTask[Config], Generic[Config]):
     config: Config
     reference_qpos: xax.HashableArray
@@ -247,8 +256,8 @@ class WalkingRnnRefMotionJoystickTask(WalkingRnnTask[Config], Generic[Config]):
     def get_model(self, key: PRNGKeyArray) -> RnnModel:
         return RnnModel(
             key,
-            num_inputs=NUM_INPUTS - 4, # lin vel instead of joystick
-            num_critic_inputs=NUM_CRITIC_INPUTS - 4, # lin vel instead of joystick
+            num_inputs=NUM_INPUTS - 4,  # lin vel instead of joystick
+            num_critic_inputs=NUM_CRITIC_INPUTS - 4,  # lin vel instead of joystick
             min_std=0.01,
             max_std=1.0,
             mean_scale=self.config.action_scale,
@@ -287,17 +296,17 @@ class WalkingRnnRefMotionJoystickTask(WalkingRnnTask[Config], Generic[Config]):
                     1.0,
                     1.0,
                     # right leg
-                    2.0, # hip pitch
-                    1.0, # hip roll
-                    1.0, # hip yaw
-                    2.0, # knee
-                    1.0, # ankle
+                    2.0,  # hip pitch
+                    1.0,  # hip roll
+                    1.0,  # hip yaw
+                    2.0,  # knee
+                    1.0,  # ankle
                     # left leg
-                    2.0, # hip pitch
-                    1.0, # hip roll
-                    1.0, # hip yaw
-                    2.0, # knee
-                    1.0, # ankle
+                    2.0,  # hip pitch
+                    1.0,  # hip roll
+                    1.0,  # hip yaw
+                    2.0,  # knee
+                    1.0,  # ankle
                 ),
             ),
             # kbot_rewards.FeetSlipPenalty(scale=-0.25),
@@ -601,7 +610,7 @@ if __name__ == "__main__":
             max_grad_norm=0.5,
             export_for_inference=True,
             only_save_most_recent=False,
-            action_scale = 0.5,
+            action_scale=0.5,
             # visualize_reference_motion=True,
         ),
     )

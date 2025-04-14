@@ -15,7 +15,6 @@ from jaxtyping import Array, PRNGKeyArray
 from ksim_kbot.walking.walking import (
     NUM_CRITIC_INPUTS,
     NUM_INPUTS,
-    NUM_JOINTS,
     NUM_OUTPUTS,
     WalkingTask,
     WalkingTaskConfig,
@@ -82,6 +81,7 @@ class RnnActor(eqx.Module):
         self.max_std = max_std
         self.var_scale = var_scale
         self.mean_scale = mean_scale
+
     def forward(self, obs_n: Array, carry: Array) -> tuple[distrax.Distribution, Array]:
         x_n = self.input_proj(obs_n)
         out_carries = []

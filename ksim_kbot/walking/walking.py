@@ -20,7 +20,7 @@ from mujoco import mjx
 
 NUM_JOINTS = 20
 
-NUM_OBS = NUM_JOINTS * 2 + 3 + 3 + 2 # joint pos, joint vel, imu acc, imu gyro, time (sin, cos)
+NUM_OBS = NUM_JOINTS * 2 + 3 + 3 + 2  # joint pos, joint vel, imu acc, imu gyro, time (sin, cos)
 NUM_COMMANDS = 6
 
 NUM_OUTPUTS = NUM_JOINTS * 2
@@ -35,6 +35,7 @@ MAX_TORQUE = {
     "03": 60.0,
     "04": 80.0,
 }
+
 
 class Actor(eqx.Module):
     """Actor for the walking task."""
@@ -307,7 +308,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return ksim.MITPositionVelocityActuators(
             physics_model=physics_model,
             joint_name_to_metadata=metadata,
-            torque_noise=0.5,   
+            torque_noise=0.5,
             torque_noise_type="gaussian",
             ctrl_clip=[
                 # right arm
