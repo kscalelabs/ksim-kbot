@@ -11,7 +11,7 @@ import numpy as np
 import pykos
 import tensorflow as tf
 
-from ksim_kbot.deploy.keyboard_controller import KeyboardController
+from askin import KeyboardController
 
 logger = logging.getLogger(__name__)
 
