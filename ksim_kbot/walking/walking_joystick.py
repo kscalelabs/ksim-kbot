@@ -215,6 +215,8 @@ class KbotWalkingTaskConfig(KbotStandingTaskConfig):
     log_full_trajectory_on_first_step: bool = xax.field(value=False)
     log_full_trajectory_every_n_seconds: float = xax.field(value=1.0)
 
+    stand_still: bool = xax.field(value=True)
+
 
 Config = TypeVar("Config", bound=KbotWalkingTaskConfig)
 
@@ -381,13 +383,30 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 floor_threshold=0.00,
             ),
             common.TrueHeightObservation(),
+            # NOTE: Add collisions
+            # ksim.ContactObservation(
+            #     physics_model=physics_model,
+            #     geom_names=(
+            #         "KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
+            #         "RS03_4",
+            #     ),
+            #     contact_group="right_hand_leg",
+            # ),
+            # ksim.ContactObservation(
+            #     physics_model=physics_model,
+            #     geom_names=(
+            #         "KB_C_501X_Left_Bayonet_Adapter_Hard_Stop",
+            #         "RS03_5",
+            #     ),
+            #     contact_group="left_hand_leg",
+            # ),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         # NOTE: increase to 360
         return [
             common.LinearVelocityCommand(
-                x_range=(-0.7, 0.7),
+                x_range=(-0.3, 0.7),
                 y_range=(-0.2, 0.2),
                 x_zero_prob=0.1,
                 y_zero_prob=0.2,
@@ -464,12 +483,9 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 foot_default_height=0.04,
                 max_foot_height=0.12,
                 scale=2.1,
+                stand_still=self.config.stand_still,
             ),
             kbot_rewards.FeetSlipPenalty(scale=-0.25),
-            # NOTE: This should be removed
-            kbot_rewards.FeetAirTimeReward(
-                scale=2.0,
-            ),
             # force penalties
             kbot_rewards.JointPositionLimitPenalty.create(
                 physics_model=physics_model,
@@ -707,5 +723,6 @@ if __name__ == "__main__":
             gait_freq_upper=1.5,
             reward_clip_min=0.0,
             reward_clip_max=1000.0,
+            stand_still=False,
         ),
     )
