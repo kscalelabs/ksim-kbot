@@ -1,6 +1,7 @@
 """Defines simple task for training a walking policy for the K-Bot."""
 
 import asyncio
+import logging
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,10 +18,13 @@ import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
+from mujoco_scenes.mjcf import load_mjmodel
 
 NUM_JOINTS = 20
 
 NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 230 + 138 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 6
+
+logger = logging.getLogger(__name__)
 
 
 class Actor(eqx.Module):
@@ -257,8 +261,9 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return optimizer
 
     def get_mujoco_model(self) -> mujoco.MjModel:
-        mjcf_path = (Path(self.config.robot_urdf_path) / "scene.mjcf").resolve().as_posix()
-        mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
+        mjcf_path = (Path(self.config.robot_urdf_path) / "robot.mjcf").resolve().as_posix()
+        logger.info("Loading MJCF model from %s", mjcf_path)
+        mj_model = load_mjmodel(mjcf_path, scene="smooth")
 
         mj_model.opt.timestep = jnp.array(self.config.dt)
         mj_model.opt.iterations = 6
@@ -514,9 +519,10 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
+        argmax: bool,
     ) -> ksim.Action:
         action_dist_j = self.run_actor(model.actor, observations, commands)
-        action_j = action_dist_j.sample(seed=rng)
+        action_j = action_dist_j.mode() if argmax else action_dist_j.sample(seed=rng)
         return ksim.Action(action=action_j, carry=None, aux_outputs=None)
 
 

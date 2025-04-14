@@ -19,10 +19,10 @@ from jaxtyping import Array, PRNGKeyArray
 from ksim.types import PhysicsModel
 from ksim.utils.reference_motion import (
     ReferenceMapping,
-    generate_reference_motion,
     get_local_xpos,
+    get_reference_cartesian_poses,
     get_reference_joint_id,
-    visualize_reference_motion,
+    visualize_reference_points,
 )
 from scipy.spatial.transform import Rotation as R
 
@@ -139,7 +139,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 success_reward=1.0,
                 scale=1.0,
             ),
-            kbot_rewards.OrientationPenalty(scale=self.config.orientation_penalty),
+            kbot_rewards.SensorOrientationPenalty(scale=self.config.orientation_penalty),
         ]
 
         # Add separate reward for each body
@@ -276,7 +276,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
             quat = R.from_euler("xyz", euler_rotation).as_quat(scalar_first=True)
             root.applyRotation(glm.quat(*quat), bake=True)
 
-        np_reference_motion = generate_reference_motion(
+        np_reference_motion = get_reference_cartesian_poses(
             mappings=HUMANOID_REFERENCE_MAPPINGS,
             model=mj_model,
             root=root,
@@ -291,7 +291,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
         self.tracked_body_ids = tuple(self.reference_motion.keys())
 
         if self.config.visualize_reference_motion:
-            visualize_reference_motion(
+            visualize_reference_points(
                 mj_model,
                 base_id=self.mj_base_id,
                 reference_motion=np_reference_motion,

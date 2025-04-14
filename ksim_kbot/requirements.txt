@@ -2,3 +2,4 @@
 
 ksim
 askin
+mujoco-scenes

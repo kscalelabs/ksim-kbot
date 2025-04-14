@@ -10,6 +10,7 @@ import jax
 import jax.numpy as jnp
 import ksim
 import xax
+from jax.scipy.spatial.transform import Rotation
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from ksim.utils.mujoco import get_qpos_data_idxs_by_name
 
@@ -68,7 +69,7 @@ class FeetSlipPenalty(ksim.Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class OrientationPenalty(ksim.Reward):
+class SensorOrientationPenalty(ksim.Reward):
     """Penalty for the orientation of the robot."""
 
     norm: xax.NormType = attrs.field(default="l2")
@@ -77,6 +78,24 @@ class OrientationPenalty(ksim.Reward):
     def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
         reward_value = xax.get_norm(trajectory.obs[self.obs_name][..., :2], self.norm).sum(axis=-1)
         return reward_value, None
+
+
+@attrs.define(frozen=True, kw_only=True)
+class OrientationPenalty(ksim.Reward):
+    """Penalizes deviation from upright orientation using the upvector approach.
+
+    Rotates a unit up vector [0,0,1] by the current quaternion
+    and penalizes any x,y components, which should be zero if perfectly upright.
+    """
+
+    scale: float = attrs.field()
+
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
+        quat = trajectory.qpos[..., 3:7]
+        up = jnp.array([0.0, 0.0, 1.0])
+        rot_up = Rotation(quat).apply(up)
+        orientation_penalty = jnp.sum(jnp.square(rot_up[..., :2]), axis=-1)
+        return orientation_penalty, None
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -296,30 +315,20 @@ class JointPositionLimitPenalty(ksim.Reward):
 
 @attrs.define(frozen=True, kw_only=True)
 class ContactForcePenalty(ksim.Reward):
-    """Penalty for contact force."""
+    """Penalty for too high contact force."""
 
     max_contact_force: float = attrs.field(default=350.0)
+    sensor_names: tuple[str, ...] = attrs.field()
 
     def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
-        if "sensor_observation_left_foot_force" not in trajectory.obs:
-            raise ValueError("left_foot_force not found in trajectory.obs")
-        if "sensor_observation_right_foot_force" not in trajectory.obs:
-            raise ValueError("right_foot_force not found in trajectory.obs")
+        for sensor_name in self.sensor_names:
+            if sensor_name not in trajectory.obs:
+                raise ValueError(f"{sensor_name} not found in trajectory.obs")
 
-        left_contact_force = trajectory.obs["sensor_observation_left_foot_force"]
-        right_contact_force = trajectory.obs["sensor_observation_right_foot_force"]
-        cost = jnp.clip(
-            jnp.abs(left_contact_force[2]) - self.max_contact_force,
-            min=0.0,
-        )
-        cost += jnp.clip(
-            jnp.abs(right_contact_force[2]) - self.max_contact_force,
-            min=0.0,
-        )
+        forces_t3b = jnp.stack([trajectory.obs[name] for name in self.sensor_names], axis=-1)
+        cost = jnp.clip(jnp.abs(forces_t3b[..., 2, :]) - self.max_contact_force, min=0.0)
+        cost = jnp.sum(cost, axis=-1)
         return cost, None
-
-
-# Gate stateful rewards for reference
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -394,7 +403,10 @@ class FeetAirTimeReward(ksim.Reward):
                     "feet_air_time": new_feet_air_time,
                 }
             )
-            return new_carry, air_time
+            return (
+                new_carry,
+                air_time,
+            )
 
         reward_carry, air_time = jax.lax.scan(
             step_fn,
@@ -417,13 +429,12 @@ class FeetPhaseReward(ksim.Reward):
     gait_freq_cmd_name: str = attrs.field(default="gait_frequency_command")
     max_foot_height: float = 0.12
     ctrl_dt: float = 0.02
+    sensitivity: float = 0.01
+    foot_default_height: float = 0.0
+    stand_still: bool = attrs.field(default=False)
+    stand_still_threshold: float = 0.1
 
-    def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
-        return xax.FrozenDict({"phase": jnp.array([0.0, jnp.pi])})
-
-    def __call__(
-        self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]
-    ) -> tuple[Array, xax.FrozenDict[str, PyTree]]:
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
         if self.feet_pos_obs_name not in trajectory.obs:
             raise ValueError(f"Observation {self.feet_pos_obs_name} not found; add it as an observation in your task.")
         if self.gait_freq_cmd_name not in trajectory.command:
@@ -432,29 +443,29 @@ class FeetPhaseReward(ksim.Reward):
         # generate phase values
         gait_freq_n = trajectory.command[self.gait_freq_cmd_name]
 
-        def step_fn(
-            carry: xax.FrozenDict[str, PyTree], observation: tuple[Array, bool]
-        ) -> tuple[xax.FrozenDict[str, PyTree], Array]:
-            done, gait_freq = observation
-            phase_dt = 2 * jnp.pi * gait_freq * self.ctrl_dt
-            phase_tp1 = carry["phase"] + phase_dt
-            phase = jnp.fmod(phase_tp1 + jnp.pi, 2 * jnp.pi) - jnp.pi
-            # If the episode is done, reset the phase to the initial value
-            phase = jax.lax.select(done, jnp.array([0.0, jnp.pi]), phase)
-            return xax.FrozenDict({"phase": phase}), phase
+        phase_dt = 2 * jnp.pi * gait_freq_n * self.ctrl_dt
+        steps = jnp.int32(trajectory.timestep / self.ctrl_dt)
+        steps = jnp.repeat(steps[:, None], 2, axis=1)
 
-        reward_carry, phase = jax.lax.scan(step_fn, reward_carry, (trajectory.done, gait_freq_n))
+        start_phase = jnp.broadcast_to(jnp.array([0.0, jnp.pi]), (steps.shape[0], 2))
+        phase = start_phase + steps * phase_dt
+        phase = jnp.fmod(phase + jnp.pi, 2 * jnp.pi) - jnp.pi
 
         # batch reward over the time dimension
         foot_pos = trajectory.obs[self.feet_pos_obs_name]
 
         foot_z = jnp.array([foot_pos[..., 2], foot_pos[..., 5]]).T
         ideal_z = self.gait_phase(phase, swing_height=jnp.array(self.max_foot_height))
-
         error = jnp.sum(jnp.square(foot_z - ideal_z), axis=-1)
-        reward = jnp.exp(-error / 0.01)
+        reward = jnp.exp(-error / self.sensitivity)
 
-        return reward, xax.FrozenDict({"phase": phase[-1]})
+        if self.stand_still:
+            # no movement for small velocity command
+            command = trajectory.command["linear_velocity_command"]
+            command_norm = jnp.linalg.norm(command, axis=-1)
+            reward *= command_norm > self.stand_still_threshold
+
+        return reward, None
 
     def gait_phase(
         self,

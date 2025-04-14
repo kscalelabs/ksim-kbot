@@ -1,6 +1,7 @@
 """Defines simple task for training a standing policy for K-Bot."""
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Generic, TypeVar
@@ -17,8 +18,11 @@ from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from ksim.curriculum import ConstantCurriculum, Curriculum
 from mujoco import mjx
+from mujoco_scenes.mjcf import load_mjmodel
 
 from ksim_kbot import common, rewards
+
+logger = logging.getLogger(__name__)
 
 OBS_SIZE = 20 * 2 + 2 + 3 + 3 + 3 + 40  # = position + velocity + imu_acc + imu_gyro + projected_gravity + last_action
 CMD_SIZE = 3
@@ -32,9 +36,9 @@ NUM_INPUTS = (OBS_SIZE + CMD_SIZE) + SINGLE_STEP_HISTORY_SIZE * HISTORY_LENGTH
 
 MAX_TORQUE = {
     "00": 1.0,
-    "02": 17.0,
-    "03": 60.0,
-    "04": 80.0,
+    "02": 14.0,
+    "03": 40.0,
+    "04": 60.0,
 }
 
 Config = TypeVar("Config", bound="KbotStandingTaskConfig")
@@ -266,8 +270,9 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         return optimizer
 
     def get_mujoco_model(self) -> mujoco.MjModel:
-        mjcf_path = (Path(self.config.robot_urdf_path) / "scene.mjcf").resolve().as_posix()
-        mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
+        mjcf_path = (Path(self.config.robot_urdf_path) / "robot.mjcf").resolve().as_posix()
+        logger.info("Loading MJCF model from %s", mjcf_path)
+        mj_model = load_mjmodel(mjcf_path, scene="smooth")
 
         mj_model.opt.timestep = jnp.array(self.config.dt)
         mj_model.opt.iterations = 6
@@ -712,14 +717,15 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     def sample_action(
         self,
         model: KbotModel,
-        carry: Array,
+        model_carry: Array,
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
+        argmax: bool = False,
     ) -> ksim.Action:
-        actor_carry, _ = carry
+        actor_carry, _ = model_carry
         action_dist_n = self.run_actor(model.actor, observations, commands, actor_carry)
         action_j = action_dist_n.sample(seed=rng)
 
@@ -791,7 +797,6 @@ if __name__ == "__main__":
             clip_param=0.3,
             max_grad_norm=0.5,
             use_mit_actuators=True,
-            log_full_trajectory_every_n_steps=5,
             save_every_n_steps=25,
             export_for_inference=True,
             domain_randomize=True,
