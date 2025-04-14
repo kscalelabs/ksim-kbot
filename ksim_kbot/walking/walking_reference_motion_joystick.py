@@ -3,7 +3,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generic, TypeVar
+from typing import Generic, TypeVar, Callable
 
 import attrs
 import bvhio
@@ -22,6 +22,7 @@ from ksim.utils.reference_motion import (
     ReferenceMapping,
     get_reference_qpos,
     get_reference_joint_id,
+    local_to_absolute,
     visualize_reference_motion,
     get_reference_cartesian_poses,
 )
@@ -152,6 +153,91 @@ class QposReferenceMotionReward(ksim.Reward):
 
         return reward, None
 
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class MotionAuxOutputs:
+    tracked_pos: xax.FrozenDict[int, Array]
+
+def create_tracked_marker_update_fn(
+    body_id: int, mj_base_id: int, tracked_pos_fn: Callable[[ksim.Trajectory], xax.FrozenDict[int, Array]]
+) -> Callable[[ksim.Marker, ksim.Trajectory], None]:
+    """Factory function to create a marker update for the tracked positions."""
+
+    def _actual_update_fn(marker: ksim.Marker, transition: ksim.Trajectory) -> None:
+        tracked_pos = tracked_pos_fn(transition)
+        abs_pos = local_to_absolute(transition.xpos, tracked_pos[body_id], mj_base_id)
+        marker.pos = tuple(abs_pos)
+
+    return _actual_update_fn
+
+
+def create_target_marker_update_fn(
+    body_id: int, mj_base_id: int, target_pos_fn: Callable[[ksim.Trajectory], xax.FrozenDict[int, Array]]
+) -> Callable[[ksim.Marker, ksim.Trajectory], None]:
+    """Factory function to create a marker update for the target positions."""
+
+    def _target_update_fn(marker: ksim.Marker, transition: ksim.Trajectory) -> None:
+        target_pos = target_pos_fn(transition)
+        abs_pos = local_to_absolute(transition.xpos, target_pos[body_id], mj_base_id)
+        marker.pos = tuple(abs_pos)
+
+    return _target_update_fn
+
+@attrs.define(frozen=True, kw_only=True)
+class CartesianReferenceMotionReward(ksim.Reward):
+    reference_motion: xax.FrozenDict[int, xax.HashableArray]
+    mj_base_id: int
+    ctrl_dt: float
+    norm: xax.NormType = attrs.field(default="l1")
+    sensitivity: float = attrs.field(default=5.0)
+
+    @property
+    def num_frames(self) -> int:
+        return list(self.reference_motion.values())[0].array.shape[0]
+
+    def get_tracked_pos(self, trajectory: ksim.Trajectory) -> xax.FrozenDict[int, Array]:
+        assert isinstance(trajectory.aux_outputs, MotionAuxOutputs)
+        return trajectory.aux_outputs.tracked_pos
+
+    def get_target_pos(self, trajectory: ksim.Trajectory) -> xax.FrozenDict[int, Array]:
+        reference_motion: xax.FrozenDict[int, Array] = jax.tree.map(lambda x: x.array, self.reference_motion)
+        step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
+        return jax.tree.map(lambda x: jnp.take(x, step_number, axis=0), reference_motion)
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        target_pos = self.get_target_pos(trajectory)
+        tracked_pos = self.get_tracked_pos(trajectory)
+        error = jax.tree.map(lambda target, tracked: xax.get_norm(target - tracked, self.norm), target_pos, tracked_pos)
+        mean_error_over_bodies = jax.tree.reduce(jnp.add, error) / len(error)
+        mean_error = mean_error_over_bodies.mean(axis=-1)
+        reward = jnp.exp(-mean_error * self.sensitivity)
+        return reward
+
+    def get_markers(self) -> list[ksim.Marker]:
+        markers = []
+
+        # Add markers for reference positions (in blue)
+        for body_id in self.reference_motion.keys():
+
+            markers.append(
+                ksim.Marker.sphere(
+                    pos=(0.0, 0.0, 0.0),
+                    radius=0.05,
+                    rgba=(0.0, 0.0, 1.0, 0.5),  # blue = actual
+                    update_fn=create_tracked_marker_update_fn(body_id, self.mj_base_id, self.get_tracked_pos),
+                )
+            )
+
+            markers.append(
+                ksim.Marker.sphere(
+                    pos=(0.0, 0.0, 0.0),
+                    radius=0.05,
+                    rgba=(1.0, 0.0, 0.0, 0.5),  # red = target
+                    update_fn=create_target_marker_update_fn(body_id, self.mj_base_id, self.get_target_pos),
+                )
+            )
+
+        return markers
 
 class WalkingRnnRefMotionJoystickTask(WalkingRnnTask[Config], Generic[Config]):
     config: Config
