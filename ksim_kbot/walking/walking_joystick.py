@@ -383,7 +383,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         # NOTE: increase to 360
         return [
             common.LinearVelocityCommand(
-                x_range=(-0.7, 0.7),
+                x_range=(0.7, 0.7),
                 y_range=(-0.2, 0.2),
                 x_zero_prob=0.1,
                 y_zero_prob=0.2,
@@ -457,9 +457,9 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             kbot_rewards.AngularVelocityXYPenalty(scale=-0.15),
             # Stateful rewards
             kbot_rewards.FeetPhaseReward(
-                foot_default_height=0.00,
-                max_foot_height=0.11,
-                scale=2.1,
+                foot_default_height=0.04,
+                max_foot_height=0.12,
+                scale=1.2,
             ),
             kbot_rewards.FeetSlipPenalty(scale=-0.25),
             # NOTE: This should be removed
@@ -485,10 +485,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         return rewards
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
-        return [
-            common.GVecTermination.create(physics_model, sensor_name="upvector_origin"),
-            common.FarFromOriginTermination(max_dist=5.0),
-        ]
+        return [common.GVecTermination.create(physics_model, sensor_name="upvector_origin")]
 
     def get_model(self, key: PRNGKeyArray) -> KbotModel:
         return KbotModel(key)
@@ -677,7 +674,7 @@ if __name__ == "__main__":
     #  run_environment_save_path=videos/test.mp4
     KbotWalkingTask.launch(
         KbotWalkingTaskConfig(
-            num_envs=2048,
+            num_envs=8192,
             batch_size=256,
             num_passes=10,
             epochs_per_log_step=1,
@@ -686,7 +683,7 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
-            rollout_length_seconds=5.0,
+            rollout_length_seconds=1.25,
             # PPO parameters
             action_scale=1.0,
             gamma=0.97,
