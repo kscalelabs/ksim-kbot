@@ -712,14 +712,15 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     def sample_action(
         self,
         model: KbotModel,
-        carry: Array,
+        model_carry: Array,
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
+        argmax: bool = False,
     ) -> ksim.Action:
-        actor_carry, _ = carry
+        actor_carry, _ = model_carry
         action_dist_n = self.run_actor(model.actor, observations, commands, actor_carry)
         action_j = action_dist_n.sample(seed=rng)
 
@@ -791,7 +792,6 @@ if __name__ == "__main__":
             clip_param=0.3,
             max_grad_norm=0.5,
             use_mit_actuators=True,
-            log_full_trajectory_every_n_steps=5,
             save_every_n_steps=25,
             export_for_inference=True,
             domain_randomize=True,
