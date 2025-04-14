@@ -36,9 +36,9 @@ NUM_INPUTS = (OBS_SIZE + CMD_SIZE) + SINGLE_STEP_HISTORY_SIZE * HISTORY_LENGTH
 
 MAX_TORQUE = {
     "00": 1.0,
-    "02": 17.0,
-    "03": 60.0,
-    "04": 80.0,
+    "02": 14.0,
+    "03": 40.0,
+    "04": 60.0,
 }
 
 Config = TypeVar("Config", bound="KbotStandingTaskConfig")

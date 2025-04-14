@@ -209,7 +209,13 @@ class KbotWalkingTaskConfig(KbotStandingTaskConfig):
     """Config for the K-Bot walking task."""
 
     gait_freq_lower: float = xax.field(value=1.25)
-    gait_freq_upper: float = xax.field(value=1.25)
+    gait_freq_upper: float = xax.field(value=1.5)
+    # to be removed
+    log_full_trajectory_every_n_steps: int = xax.field(value=5)
+    log_full_trajectory_on_first_step: bool = xax.field(value=False)
+    log_full_trajectory_every_n_seconds: float = xax.field(value=1.0)
+
+    stand_still: bool = xax.field(value=True)
 
 
 Config = TypeVar("Config", bound=KbotWalkingTaskConfig)
@@ -264,11 +270,12 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
     def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
         if self.config.domain_randomize:
             return [
-                ksim.StaticFrictionRandomizer(),
+                ksim.StaticFrictionRandomizer(scale_lower=0.9, scale_upper=1.1),
                 ksim.ArmatureRandomizer(),
-                ksim.MassMultiplicationRandomizer.from_body_name(physics_model, "Torso_Side_Right"),
+                # ksim.AllBodiesMassMultiplicationRandomizer(),
+                ksim.MassAdditionRandomizer.from_body_name(physics_model, "Torso_Side_Right"),
                 ksim.JointDampingRandomizer(),
-                ksim.JointZeroPositionRandomizer(),
+                ksim.JointZeroPositionRandomizer(scale_lower=-0.03, scale_upper=0.03),
             ]
         else:
             return []
@@ -376,13 +383,30 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 floor_threshold=0.00,
             ),
             common.TrueHeightObservation(),
+            # NOTE: Add collisions to hands
+            # ksim.ContactObservation(
+            #     physics_model=physics_model,
+            #     geom_names=(
+            #         "KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
+            #         "RS03_4",
+            #     ),
+            #     contact_group="right_hand_leg",
+            # ),
+            # ksim.ContactObservation(
+            #     physics_model=physics_model,
+            #     geom_names=(
+            #         "KB_C_501X_Left_Bayonet_Adapter_Hard_Stop",
+            #         "RS03_5",
+            #     ),
+            #     contact_group="left_hand_leg",
+            # ),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         # NOTE: increase to 360
         return [
             common.LinearVelocityCommand(
-                x_range=(-0.7, 0.7),
+                x_range=(-0.3, 0.7),
                 y_range=(-0.2, 0.2),
                 x_zero_prob=0.1,
                 y_zero_prob=0.2,
@@ -394,8 +418,8 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 switch_prob=0.0,
             ),
             common.GaitFrequencyCommand(
-                gait_freq_lower=1.2,
-                gait_freq_upper=1.5,
+                gait_freq_lower=self.config.gait_freq_lower,
+                gait_freq_upper=self.config.gait_freq_upper,
             ),
         ]
 
@@ -456,15 +480,12 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             kbot_rewards.AngularVelocityXYPenalty(scale=-0.15),
             # Stateful rewards
             kbot_rewards.FeetPhaseReward(
-                foot_default_height=0.00,
-                max_foot_height=0.11,
+                foot_default_height=0.04,
+                max_foot_height=0.12,
                 scale=2.1,
+                stand_still=self.config.stand_still,
             ),
             kbot_rewards.FeetSlipPenalty(scale=-0.25),
-            # NOTE: This should be removed
-            # kbot_rewards.FeetAirTimeReward(
-            #     scale=2.0,
-            # ),
             # force penalties
             kbot_rewards.JointPositionLimitPenalty.create(
                 physics_model=physics_model,
@@ -484,10 +505,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         return rewards
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
-        return [
-            common.GVecTermination.create(physics_model, sensor_name="upvector_origin"),
-            common.FarFromOriginTermination(max_dist=5.0),
-        ]
+        return [common.GVecTermination.create(physics_model, sensor_name="upvector_origin")]
 
     def get_model(self, key: PRNGKeyArray) -> KbotModel:
         return KbotModel(key)
@@ -677,7 +695,7 @@ if __name__ == "__main__":
     #  run_environment_save_path=videos/test.mp4
     KbotWalkingTask.launch(
         KbotWalkingTaskConfig(
-            num_envs=2048,
+            num_envs=8192,
             batch_size=256,
             num_passes=10,
             epochs_per_log_step=1,
@@ -686,7 +704,7 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
-            rollout_length_seconds=5.0,
+            rollout_length_seconds=1.25,
             # PPO parameters
             action_scale=1.0,
             gamma=0.97,
@@ -695,7 +713,7 @@ if __name__ == "__main__":
             learning_rate=1e-4,
             clip_param=0.3,
             max_grad_norm=0.5,
-            log_full_trajectory_every_n_steps=5,
+            valid_every_n_steps=25,
             save_every_n_steps=25,
             export_for_inference=True,
             only_save_most_recent=False,
@@ -705,5 +723,6 @@ if __name__ == "__main__":
             gait_freq_upper=1.5,
             reward_clip_min=0.0,
             reward_clip_max=1000.0,
+            stand_still=False,
         ),
     )

@@ -431,6 +431,8 @@ class FeetPhaseReward(ksim.Reward):
     ctrl_dt: float = 0.02
     sensitivity: float = 0.01
     foot_default_height: float = 0.0
+    stand_still: bool = attrs.field(default=False)
+    stand_still_threshold: float = 0.1
 
     def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
         if self.feet_pos_obs_name not in trajectory.obs:
@@ -456,6 +458,12 @@ class FeetPhaseReward(ksim.Reward):
         ideal_z = self.gait_phase(phase, swing_height=jnp.array(self.max_foot_height))
         error = jnp.sum(jnp.square(foot_z - ideal_z), axis=-1)
         reward = jnp.exp(-error / self.sensitivity)
+
+        if self.stand_still:
+            # no movement for small velocity command
+            command = trajectory.command["linear_velocity_command"]
+            command_norm = jnp.linalg.norm(command, axis=-1)
+            reward *= command_norm > self.stand_still_threshold
 
         return reward, None
 
