@@ -797,4 +797,3 @@ if __name__ == "__main__":
             domain_randomize=True,
         ),
     )
-
