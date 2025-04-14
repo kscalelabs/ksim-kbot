@@ -475,3 +475,19 @@ class FeetPhaseReward(ksim.Reward):
         stance = xax.cubic_bezier_interpolation(jnp.array(0), swing_height, 2 * x)
         swing = xax.cubic_bezier_interpolation(swing_height, jnp.array(0), 2 * x - 1)
         return jnp.where(x <= 0.5, stance, swing)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class KbotActionNearPositionPenalty(ksim.rewards.ActionNearPositionPenalty):
+    """Version of ActionNearPositionPenalty that only uses the position part of the action.
+    
+    This is useful for controllers that output both position and velocity targets,
+    but we only want to penalize the position part.
+    """
+    
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
+        current_position = trajectory.qpos[..., 7:]
+        # Only use the first half of the action (positions only, not velocities)
+        action_positions = trajectory.action[..., :current_position.shape[-1]]
+        out_of_bounds = jnp.abs(current_position - action_positions) > self.joint_threshold.array
+        return out_of_bounds.astype(trajectory.qpos.dtype).mean(axis=-1), None

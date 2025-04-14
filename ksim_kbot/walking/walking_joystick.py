@@ -11,7 +11,7 @@ import jax
 import jax.numpy as jnp
 import ksim
 import xax
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import Array, PRNGKeyArray, PyTree
 from kscale.web.gen.api import JointMetadataOutput
 from ksim.curriculum import ConstantCurriculum, Curriculum
 from xax.nn.export import export
@@ -210,6 +210,9 @@ class KbotWalkingTaskConfig(KbotStandingTaskConfig):
 
     gait_freq_lower: float = xax.field(value=1.25)
     gait_freq_upper: float = xax.field(value=1.25)
+    log_full_trajectory_on_first_step: bool = xax.field(value=False)
+    log_full_trajectory_every_n_steps: int = xax.field(value=0)
+    log_full_trajectory_every_n_seconds: float = xax.field(value=0.0)
 
 
 Config = TypeVar("Config", bound=KbotWalkingTaskConfig)
@@ -376,6 +379,27 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 floor_threshold=0.00,
             ),
             common.TrueHeightObservation(),
+            ksim.ActPosObservation.create(physics_model=physics_model, action_index=0, noise=0.0),
+            ksim.ActPosObservation.create(physics_model=physics_model, action_index=1, noise=0.0),
+            ksim.ActPosObservation.create(physics_model=physics_model, action_index=2, noise=0.0),
+            ksim.ActPosObservation.create(physics_model=physics_model, action_index=3, noise=0.0),
+            ksim.ActPosObservation.create(physics_model=physics_model, action_index=4, noise=0.0),
+            ksim.ActPosObservation.create(physics_model=physics_model, action_index=5, noise=0.0),
+            ksim.ActPosObservation.create(physics_model=physics_model, action_index=6, noise=0.0),
+            ksim.ActPosObservation.create(physics_model=physics_model, action_index=7, noise=0.0),
+            ksim.ActPosObservation.create(physics_model=physics_model, action_index=8, noise=0.0),
+            ksim.ActPosObservation.create(physics_model=physics_model, action_index=9, noise=0.0),
+            ksim.ActPosObservation.create(physics_model=physics_model, action_index=10, noise=0.0),
+            ksim.ActPosObservation.create(physics_model=physics_model, action_index=11, noise=0.0),
+            ksim.ActPosObservation.create(physics_model=physics_model, action_index=12, noise=0.0),
+            ksim.ActPosObservation.create(physics_model=physics_model, action_index=13, noise=0.0),
+            ksim.ActPosObservation.create(physics_model=physics_model, action_index=14, noise=0.0),
+            ksim.ActPosObservation.create(physics_model=physics_model, action_index=15, noise=0.0),
+            ksim.ActPosObservation.create(physics_model=physics_model, action_index=16, noise=0.0),
+            ksim.ActPosObservation.create(physics_model=physics_model, action_index=17, noise=0.0),
+            ksim.ActPosObservation.create(physics_model=physics_model, action_index=18, noise=0.0),
+            ksim.ActPosObservation.create(physics_model=physics_model, action_index=19, noise=0.0),
+            ksim.ActPosObservation.create(physics_model=physics_model, action_index=20, noise=0.0),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
@@ -479,6 +503,11 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             # ksim.ActuatorForcePenalty(scale=-0.005),
             # ksim.ActionSmoothnessPenalty(scale=-0.005),
             # ksim.AvoidLimitsReward(-0.01)
+            kbot_rewards.KbotActionNearPositionPenalty.create(
+                model=physics_model,
+                scale=-5.0,
+                threshold=0.01,
+            ),
         ]
 
         return rewards
@@ -695,7 +724,7 @@ if __name__ == "__main__":
             learning_rate=1e-4,
             clip_param=0.3,
             max_grad_norm=0.5,
-            log_full_trajectory_every_n_steps=5,
+            valid_every_n_steps=5,
             save_every_n_steps=25,
             export_for_inference=True,
             only_save_most_recent=False,
@@ -705,5 +734,8 @@ if __name__ == "__main__":
             gait_freq_upper=1.5,
             reward_clip_min=0.0,
             reward_clip_max=1000.0,
+            log_full_trajectory_on_first_step=False,
+            log_full_trajectory_every_n_steps=0,
+            log_full_trajectory_every_n_seconds=0.0,
         ),
     )
