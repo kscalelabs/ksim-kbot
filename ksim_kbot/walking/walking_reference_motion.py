@@ -3,7 +3,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generic, TypeVar
+from typing import Callable, Generic, TypeVar
 
 import attrs
 import bvhio
@@ -17,19 +17,20 @@ import xax
 from bvhio.lib.hierarchy import Joint as BvhioJoint
 from jaxtyping import Array, PRNGKeyArray
 from ksim.types import PhysicsModel
-import ksim_kbot.common as common
 from ksim.utils.reference_motion import (
     ReferenceMapping,
-    get_reference_qpos,
-    get_reference_joint_id,
-    visualize_reference_motion,
+    get_local_xpos,
     get_reference_cartesian_poses,
+    get_reference_joint_id,
+    get_reference_qpos,
+    local_to_absolute,
+    visualize_reference_motion,
 )
 from scipy.spatial.transform import Rotation as R
 
+import ksim_kbot.common as common
 import ksim_kbot.rewards as kbot_rewards
-from ksim_kbot.walking.walking_rnn import RnnModel, WalkingRnnTask, WalkingRnnTaskConfig, NUM_JOINTS
-
+from ksim_kbot.walking.walking_rnn import NUM_JOINTS, RnnModel, WalkingRnnTask, WalkingRnnTaskConfig
 
 HUMANOID_REFERENCE_MAPPINGS = (
     ReferenceMapping("CC_Base_L_ThighTwist01", "RS03_5"),  # hip
@@ -216,6 +217,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
     config: Config
     reference_qpos: xax.HashableArray
     reference_motion: xax.FrozenDict[int, xax.HashableArray]
+    tracked_body_ids: tuple[int, ...]
     mj_base_id: int
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
@@ -224,11 +226,12 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 success_reward=1.0,
                 scale=8.0,
             ),
-            kbot_rewards.OrientationPenalty(scale=self.config.orientation_penalty),
+            # kbot_rewards.SensorOrientationPenalty(scale=self.config.orientation_penalty),
             CartesianReferenceMotionReward(
                 reference_motion=self.reference_motion,
                 mj_base_id=self.mj_base_id,
                 ctrl_dt=self.config.ctrl_dt,
+                scale=1.0,
             ),
             QposReferenceMotionReward(
                 reference_qpos=self.reference_qpos,
@@ -265,14 +268,9 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
             kbot_rewards.FeetSlipPenalty(scale=-2.0),
             kbot_rewards.FeetAirTimeReward(
                 scale=8.0,
-                # threshold_min=0.0,
-                # threshold_max=0.4,
             ),
             NaiveForwardReward(scale=1.5, vel_clip_max=0.5),
             ksim.LinearVelocityPenalty(index="z", scale=-2.0),
-            kbot_rewards.ContactForcePenalty(
-                scale=-0.01,
-            ),
             kbot_rewards.TargetHeightReward(target_height=1.0, scale=1.0),
         ]
 
@@ -306,10 +304,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 foot_right_geom_names="KB_D_501R_R_LEG_FOOT_collision_box",
                 floor_geom_names="floor",
             ),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_force", noise=0.0),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_force", noise=0.0),
             ksim.TimestepObservation(),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="upvector_origin", noise=0.0),
         ]
 
     def get_ppo_variables(
@@ -363,6 +358,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
+        argmax: bool = False,
     ) -> ksim.Action:
         actor_carry_in, critic_carry_in = model_carry
 
@@ -374,12 +370,23 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
             carry=actor_carry_in,
         )
 
-        action_j = action_dist_j.sample(seed=rng)
+        if argmax:
+            action_j = action_dist_j.mode()
+        else:
+            action_j = action_dist_j.sample(seed=rng)
+
+        # Getting the local cartesian positions for all tracked bodies.
+        tracked_positions: dict[int, Array] = {}
+        for body_id in self.tracked_body_ids:
+            body_pos = get_local_xpos(physics_state.data.xpos, body_id, self.mj_base_id)
+            tracked_positions[body_id] = jnp.array(body_pos)
 
         return ksim.Action(
             action=action_j,
             carry=(actor_carry, critic_carry_in),
-            aux_outputs=None,  # No auxiliary outputs needed for qpos matching
+            aux_outputs=MotionAuxOutputs(
+                tracked_pos=xax.FrozenDict(tracked_positions),
+            ),
         )
 
     def run(self) -> None:
@@ -393,16 +400,6 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
             quat = R.from_euler("xyz", euler_rotation).as_quat(scalar_first=True)
             root.applyRotation(glm.quat(*quat), bake=True)
 
-        cartesian_motion = get_reference_cartesian_poses(
-            mappings=HUMANOID_REFERENCE_MAPPINGS,
-            model=mj_model,
-            root=root,
-            reference_base_id=reference_base_id,
-            root_callback=rotation_callback,
-            scaling_factor=self.config.bvh_scaling_factor,
-            offset=np.array(self.config.bvh_offset),
-        )
-
         np_reference_qpos = get_reference_qpos(
             model=mj_model,
             mj_base_id=self.mj_base_id,
@@ -412,7 +409,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
             bvh_offset=np.array(self.config.bvh_offset),
             bvh_root_callback=rotation_callback,
             bvh_scaling_factor=self.config.bvh_scaling_factor,
-            neutral_qpos=None,  # Or provide a neutral pose if desired
+            neutral_qpos=None,
             neutral_similarity_weight=0.1,
             temporal_consistency_weight=0.1,
             n_restarts=3,
@@ -423,14 +420,26 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
             verbose=False,
         )
         self.reference_qpos = xax.hashable_array(jnp.array(np_reference_qpos))
-        self.reference_motion = xax.hashable_dict(cartesian_motion)
 
-        # Visualize reference motion (optional)
+        np_reference_motion = get_reference_cartesian_poses(
+            mappings=HUMANOID_REFERENCE_MAPPINGS,
+            model=mj_model,
+            root=root,
+            reference_base_id=reference_base_id,
+            root_callback=rotation_callback,
+            scaling_factor=self.config.bvh_scaling_factor,
+            offset=np.array(self.config.bvh_offset),
+        )
+        self.reference_motion: xax.FrozenDict[int, xax.HashableArray] = jax.tree.map(
+            lambda x: xax.hashable_array(jnp.array(x)), np_reference_motion
+        )
+        self.tracked_body_ids = tuple(self.reference_motion.keys())
+
         if self.config.visualize_reference_motion:
             visualize_reference_motion(
                 mj_model,
                 reference_qpos=np_reference_qpos,
-                cartesian_motion=cartesian_motion,
+                cartesian_motion=np_reference_motion,
                 mj_base_id=self.mj_base_id,
             )
         else:
