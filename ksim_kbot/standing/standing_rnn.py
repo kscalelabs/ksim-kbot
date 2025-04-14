@@ -401,7 +401,6 @@ if __name__ == "__main__":
             clip_param=0.3,
             max_grad_norm=0.5,
             use_mit_actuators=True,
-            log_full_trajectory_every_n_steps=5,
             save_every_n_steps=25,
             export_for_inference=True,
             domain_randomize=True,
