@@ -16,7 +16,8 @@ import numpy as np
 import xax
 from bvhio.lib.hierarchy import Joint as BvhioJoint
 from jaxtyping import Array, PRNGKeyArray
-from ksim.types import PhysicsModel
+from ksim.types import PhysicsModel, PhysicsState
+from ksim import ObservationState
 from ksim.utils.reference_motion import (
     ReferenceMapping,
     get_local_xpos,
@@ -30,7 +31,19 @@ from scipy.spatial.transform import Rotation as R
 
 import ksim_kbot.common as common
 import ksim_kbot.rewards as kbot_rewards
-from ksim_kbot.walking.walking_rnn import NUM_JOINTS, RnnModel, WalkingRnnTask, WalkingRnnTaskConfig
+
+# Import necessary components from walking_rnn
+from ksim_kbot.walking.walking_rnn import (
+    NUM_JOINTS,
+    NUM_INPUTS,  # Import base actor input size
+    NUM_CRITIC_INPUTS, # Import base critic input size
+    RnnActor,
+    RnnCritic,
+    RnnModel,
+    WalkingRnnTask,
+    WalkingRnnTaskConfig,
+)
+import distrax # Import distrax
 
 HUMANOID_REFERENCE_MAPPINGS = (
     ReferenceMapping("CC_Base_L_ThighTwist01", "RS03_5"),  # hip
@@ -100,6 +113,21 @@ class NaiveForwardReward(ksim.Reward):
         vel = trajectory.qvel[..., 0]
         clipped_vel = jnp.clip(vel, a_max=self.vel_clip_max)
         return clipped_vel, None
+
+@attrs.define(frozen=True)
+class TargetLinearVelocityReward(ksim.Reward):
+    """Reward for forward motion."""
+
+    index: int = attrs.field(default=0)
+    target_vel: float = attrs.field(default=0.0)
+    norm: xax.NormType = attrs.field(default="l1")
+    monotonic_fn: str = attrs.field(default="inv")
+    temp: float = attrs.field(default=1.0)
+
+    def __call__(self, trajectory: ksim.Trajectory, _: None) -> tuple[Array, None]:
+        vel = trajectory.qvel[..., self.index]
+        error = xax.get_norm(vel - self.target_vel, self.norm)
+        return ksim.norm_to_reward(error, temp=self.temp, monotonic_fn=self.monotonic_fn), None
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -177,14 +205,14 @@ class CartesianReferenceMotionReward(ksim.Reward):
         step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
         return jax.tree.map(lambda x: jnp.take(x, step_number, axis=0), reference_motion)
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+    def __call__(self, trajectory: ksim.Trajectory, _: None) -> tuple[Array, None]:
         target_pos = self.get_target_pos(trajectory)
         tracked_pos = self.get_tracked_pos(trajectory)
         error = jax.tree.map(lambda target, tracked: xax.get_norm(target - tracked, self.norm), target_pos, tracked_pos)
         mean_error_over_bodies = jax.tree.reduce(jnp.add, error) / len(error)
         mean_error = mean_error_over_bodies.mean(axis=-1)
         reward = jnp.exp(-mean_error * self.sensitivity)
-        return reward
+        return reward, None
 
     def get_markers(self) -> list[ksim.Marker]:
         markers = []
@@ -213,12 +241,208 @@ class CartesianReferenceMotionReward(ksim.Reward):
         return markers
 
 
+@attrs.define(frozen=True, kw_only=True)
+class ReferenceQposObservation(ksim.Observation):
+    """Observation for the reference joint positions."""
+
+    reference_qpos: xax.HashableArray
+    ctrl_dt: float
+    speed: float = attrs.field(default=1.0)
+
+    @property
+    def num_frames(self) -> int:
+        return self.reference_qpos.array.shape[0]
+
+    def observe(self, state: ObservationState, rng: PRNGKeyArray) -> Array:
+        physics_state = state.physics_state
+        step_number = jnp.int32(jnp.round(self.speed * physics_state.data.time / self.ctrl_dt)) % self.num_frames
+        reference_qpos_at_step = jnp.take(self.reference_qpos.array, step_number, axis=0)
+        return reference_qpos_at_step[..., 7:]
+
+
+@attrs.define(frozen=True, kw_only=True)
+class ReferenceLocalXposObservation(ksim.Observation):
+    """Observation for the reference local cartesian positions of tracked bodies."""
+
+    reference_motion: xax.FrozenDict[int, xax.HashableArray]
+    tracked_body_ids: tuple[int, ...]
+    ctrl_dt: float
+
+    @property
+    def num_frames(self) -> int:
+        # Assuming all bodies have the same number of frames
+        return list(self.reference_motion.values())[0].array.shape[0]
+
+    def observe(self, state: ObservationState, rng: PRNGKeyArray) -> Array:
+        physics_state = state.physics_state
+        reference_motion: xax.FrozenDict[int, Array] = jax.tree.map(lambda x: x.array, self.reference_motion)
+        step_number = jnp.int32(jnp.round(physics_state.data.time / self.ctrl_dt)) % self.num_frames
+        target_pos_dict = jax.tree.map(lambda x: jnp.take(x, step_number, axis=0), reference_motion)
+        target_pos_list = [target_pos_dict[body_id] for body_id in self.tracked_body_ids]
+        return jnp.concatenate(target_pos_list, axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class TrackedLocalXposObservation(ksim.Observation):
+    """Observation for the current local cartesian positions of tracked bodies."""
+
+    tracked_body_ids: tuple[int, ...]
+    mj_base_id: int
+
+    def observe(self, state: ObservationState, rng: PRNGKeyArray) -> Array:
+        physics_state = state.physics_state
+        tracked_positions_list: list[Array] = []
+        for body_id in self.tracked_body_ids:
+            body_pos = get_local_xpos(physics_state.data.xpos, body_id, self.mj_base_id)
+            tracked_positions_list.append(jnp.array(body_pos))
+        return jnp.concatenate(tracked_positions_list, axis=-1)
+
+
+# Actor inputs are the same as the base class for now
+NUM_ACTOR_INPUTS_REF = NUM_INPUTS
+
+# Critic inputs are the base class inputs plus the new reference observations
+NUM_CRITIC_INPUTS_REF = (
+    NUM_CRITIC_INPUTS
+    + NUM_JOINTS  # reference_qpos
+    + (len(HUMANOID_REFERENCE_MAPPINGS) * 3) # reference_local_xpos
+    + (len(HUMANOID_REFERENCE_MAPPINGS) * 3) # tracked_local_xpos
+)
+
+
 class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
     config: Config
     reference_qpos: xax.HashableArray
     reference_motion: xax.FrozenDict[int, xax.HashableArray]
     tracked_body_ids: tuple[int, ...]
     mj_base_id: int
+    qpos_reference_speed: float
+
+    def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
+        return [
+            ksim.StaticFrictionRandomizer(),
+            ksim.ArmatureRandomizer(),
+            ksim.MassMultiplicationRandomizer.from_body_name(physics_model, "Torso_Side_Right"),
+            ksim.JointDampingRandomizer(),
+            ksim.JointZeroPositionRandomizer(),
+        ]
+
+    def get_model(self, key: PRNGKeyArray) -> RnnModel:
+        """Overrides the base method to use reference motion input sizes."""
+        num_tracked_bodies = len(self.tracked_body_ids)
+        num_critic_inputs_actual = (
+            NUM_CRITIC_INPUTS
+            + NUM_JOINTS  # reference_qpos
+            + (num_tracked_bodies * 3) # reference_local_xpos
+            + (num_tracked_bodies * 3) # tracked_local_xpos
+        )
+        assert num_critic_inputs_actual == NUM_CRITIC_INPUTS_REF, \
+            f"Calculated critic inputs ({num_critic_inputs_actual}) != constant ({NUM_CRITIC_INPUTS_REF})"
+
+        return RnnModel(
+            key,
+            num_inputs=NUM_ACTOR_INPUTS_REF, # Use actor size derived from base
+            num_critic_inputs=num_critic_inputs_actual, # Use dynamically calculated critic size
+            min_std=0.01,
+            max_std=1.0,
+            mean_scale=self.config.action_scale,
+            hidden_size=self.config.hidden_size,
+            depth=self.config.depth,
+        )
+
+    def run_actor(
+        self,
+        model: RnnActor,
+        observations: xax.FrozenDict[str, Array],
+        commands: xax.FrozenDict[str, Array],
+        carry: Array,
+    ) -> tuple[distrax.Distribution, Array]:
+        """Overrides the base method to define actor inputs for this task."""
+        timestep_1 = observations["timestep_observation"]
+        joint_pos_j = observations["joint_position_observation"]
+        joint_vel_j = observations["joint_velocity_observation"]
+        imu_acc_3 = observations["sensor_observation_imu_acc"]
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        joystick_cmd_1 = commands["joystick_command"]
+        joystick_cmd_ohe_6 = jax.nn.one_hot(joystick_cmd_1, num_classes=6).squeeze(-2)
+
+        # Concatenate observations for the actor (same as base class for now)
+        obs_n = jnp.concatenate(
+            [
+                jnp.cos(timestep_1),  # 1
+                jnp.sin(timestep_1),  # 1
+                joint_pos_j,  # NUM_JOINTS
+                joint_vel_j / 10.0,  # NUM_JOINTS
+                imu_acc_3 / 50.0,  # 3
+                imu_gyro_3 / 3.0,  # 3
+                joystick_cmd_ohe_6,  # 6
+            ],
+            axis=-1,
+        )
+        assert obs_n.shape[-1] == NUM_ACTOR_INPUTS_REF, \
+            f"Actor input shape ({obs_n.shape[-1]}) != constant ({NUM_ACTOR_INPUTS_REF})"
+
+        return model.forward(obs_n, carry)
+
+    def run_critic(
+        self,
+        model: RnnCritic,
+        observations: xax.FrozenDict[str, Array],
+        commands: xax.FrozenDict[str, Array],
+        carry: Array,
+    ) -> tuple[Array, Array]:
+        """Overrides the base method to include reference observations for the critic."""
+        timestep_1 = observations["timestep_observation"]
+        dh_joint_pos_j = observations["joint_position_observation"]
+        dh_joint_vel_j = observations["joint_velocity_observation"]
+        com_inertia_n = observations["center_of_mass_inertia_observation"]
+        com_vel_n = observations["center_of_mass_velocity_observation"]
+        imu_acc_3 = observations["sensor_observation_imu_acc"]
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        act_frc_obs_n = observations["actuator_force_observation"]
+        base_pos_3 = observations["base_position_observation"]
+        base_quat_4 = observations["base_orientation_observation"]
+        lin_vel_obs_3 = observations["base_linear_velocity_observation"]
+        ang_vel_obs_3 = observations["base_angular_velocity_observation"]
+        joystick_cmd_1 = commands["joystick_command"]
+        joystick_cmd_ohe_6 = jax.nn.one_hot(joystick_cmd_1, num_classes=6).squeeze(-2)
+        # New reference observations
+        ref_qpos_j = observations["reference_qpos_observation"]
+        ref_local_xpos_n = observations["reference_local_xpos_observation"]
+        tracked_local_xpos_n = observations["tracked_local_xpos_observation"]
+
+
+        # Concatenate observations for the critic, including new ones
+        obs_n = jnp.concatenate(
+            [
+                jnp.cos(timestep_1),  # 1
+                jnp.sin(timestep_1),  # 1
+                dh_joint_pos_j,  # NUM_JOINTS
+                dh_joint_vel_j / 10.0,  # NUM_JOINTS
+                com_inertia_n,  # 160
+                com_vel_n,  # 96
+                imu_acc_3 / 50.0,  # 3
+                imu_gyro_3 / 3.0,  # 3
+                act_frc_obs_n / 100.0,  # NUM_JOINTS
+                base_pos_3,  # 3
+                base_quat_4,  # 4
+                lin_vel_obs_3,  # 3
+                ang_vel_obs_3,  # 3
+                joystick_cmd_ohe_6,  # 6
+                # Add reference observations
+                ref_qpos_j, # NUM_JOINTS
+                ref_local_xpos_n, # num_tracked_bodies * 3
+                tracked_local_xpos_n, # num_tracked_bodies * 3
+            ],
+            axis=-1,
+        )
+
+        assert obs_n.shape[-1] == NUM_CRITIC_INPUTS_REF, \
+             f"Critic input shape ({obs_n.shape[-1]}) != constant ({NUM_CRITIC_INPUTS_REF})"
+
+
+        return model.forward(obs_n, carry)
+
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards: list[ksim.Reward] = [
@@ -227,17 +451,17 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 scale=8.0,
             ),
             # kbot_rewards.SensorOrientationPenalty(scale=self.config.orientation_penalty),
-            CartesianReferenceMotionReward(
-                reference_motion=self.reference_motion,
-                mj_base_id=self.mj_base_id,
-                ctrl_dt=self.config.ctrl_dt,
-                scale=1.0,
-            ),
+            # CartesianReferenceMotionReward(
+            #     reference_motion=self.reference_motion,
+            #     mj_base_id=self.mj_base_id,
+            #     ctrl_dt=self.config.ctrl_dt,
+            #     scale=1.0,
+            # ),
             QposReferenceMotionReward(
                 reference_qpos=self.reference_qpos,
                 ctrl_dt=self.config.ctrl_dt,
                 scale=15.0,
-                speed=1.8,
+                speed=self.qpos_reference_speed,
                 joint_weights=(
                     # right arm
                     1.0,
@@ -269,7 +493,17 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
             kbot_rewards.FeetAirTimeReward(
                 scale=8.0,
             ),
-            NaiveForwardReward(scale=1.5, vel_clip_max=0.5),
+            TargetLinearVelocityReward(
+                index=0, # x-axis
+                target_vel=0.5,
+                scale=1.5,
+            ),
+            TargetLinearVelocityReward(
+                index=1, # y-axis
+                target_vel=0.0,
+                scale=1.5,
+            ),
+            # NaiveForwardReward(scale=1.5, vel_clip_max=0.5),
             ksim.LinearVelocityPenalty(index="z", scale=-2.0),
             kbot_rewards.TargetHeightReward(target_height=1.0, scale=1.0),
         ]
@@ -305,6 +539,20 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 floor_geom_names="floor",
             ),
             ksim.TimestepObservation(),
+            ReferenceQposObservation(
+                reference_qpos=self.reference_qpos,
+                ctrl_dt=self.config.ctrl_dt,
+                speed=self.qpos_reference_speed,
+            ),
+            ReferenceLocalXposObservation(
+                reference_motion=self.reference_motion,
+                tracked_body_ids=self.tracked_body_ids,
+                ctrl_dt=self.config.ctrl_dt,
+            ),
+            TrackedLocalXposObservation(
+                tracked_body_ids=self.tracked_body_ids,
+                mj_base_id=self.mj_base_id,
+            ),
         ]
 
     def get_ppo_variables(
@@ -394,6 +642,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
         root: BvhioJoint = bvhio.readAsHierarchy(self.config.bvh_path)
         reference_base_id = get_reference_joint_id(root, self.config.reference_base_name)
         self.mj_base_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, self.config.mj_base_name)
+        self.qpos_reference_speed = 1.8
 
         def rotation_callback(root: BvhioJoint) -> None:
             euler_rotation = np.array(self.config.rotate_bvh_euler)
