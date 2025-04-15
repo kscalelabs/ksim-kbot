@@ -523,7 +523,6 @@ class ContactPenalty(ksim.Reward):
             else:
                 raise ValueError("contact_flag.ndim should not be less than target_shape")
 
-
         contact_value = jnp.where(is_contact, 1.0, 0.0)
         return contact_value, None
 
