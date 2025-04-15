@@ -10,9 +10,11 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .dmypy.json
+.DS_Store
 
 # Databases
 *.db
+*.pdf
 
 # Build artifacts
 build/
@@ -23,6 +25,11 @@ out*/
 # Training artifacts
 run_*/
 experimental/
+
+# Deployment Assets
+*/deploy/assets/*/*
+
+*.pkl
 
 # Development
 scratch/
