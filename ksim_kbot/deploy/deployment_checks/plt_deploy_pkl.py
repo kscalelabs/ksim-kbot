@@ -331,23 +331,6 @@ if __name__ == "__main__":
     deployment_data = load_latest_deployment()
     if deployment_data:
         data, filename = deployment_data
-        print(data)
-        # For 'command', it is a list over time, with each item being a list
-        # representing actuator data. Plot different subplots for each actuator.
-        # There are likely 20 actuators.
-        # For 'pos_diff', 'vel_obs', and 'prev_action', each is a list similar
-        # to 'command', but each entry is a single list. Use the nn_id to map
-        # positions to actuator names for labeling.
-        # For 'imu_obs', it is a list of lists with shape (6,) per time instance.
-        # The first three values are accelerometer data, and the last three are
-        # gyroscope data.
-        # For 'controller_cmd', it is a list of lists with shape (2,) per time
-        # instance. The first value is x, and the second is y.
-        # For 'phase', it is a list of lists with shape (2,) per time instance,
-        # derived from phase_vec = np.array([np.cos(self.phase), np.sin(self.phase)]).flatten().
-
-        # Create output directory based on pickle filename (without extension)
         output_dir = os.path.join("plots", os.path.splitext(filename)[0])
 
-        # Plot the deployment data
         plot_deployment_data(data, output_dir)

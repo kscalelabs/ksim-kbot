@@ -10,10 +10,6 @@ from loguru import logger
 
 from ksim_kbot.deploy.deploy import Deploy, FixedArmDeploy
 
-# *********************#
-# * Joystick Deploy    #
-# *********************#
-
 
 class JoystickDeploy(Deploy):
     """Deploy class for joystick-controlled policies."""
@@ -145,6 +141,9 @@ def main() -> None:
 
     deploy = JoystickDeploy(args.enable_joystick, model_path, args.mode, args.ip)
     deploy.ACTION_SCALE = args.scale_action
+
+    if args.mode == "real-deploy":
+        input("Press Enter to start REAL deployment...")
 
     try:
         asyncio.run(deploy.run(args.episode_length))

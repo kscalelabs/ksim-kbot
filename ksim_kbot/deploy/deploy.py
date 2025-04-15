@@ -13,7 +13,6 @@ import pykos
 import tensorflow as tf
 from loguru import logger
 
-
 @dataclass
 class Actuator:
     actuator_id: int
@@ -23,12 +22,6 @@ class Actuator:
     max_torque: float
     joint_name: str
 
-
-# *********************#
-# * Base Deploy Class  #
-# *********************#
-
-
 class Deploy(ABC):
     """Abstract base class for deploying a SavedModel on K-Bot."""
 
@@ -37,7 +30,6 @@ class Deploy(ABC):
     GRAVITY = 9.81  # m/s
     ACTION_SCALE = 1.0
 
-    #! Was different between sim and real_deployment
     actuator_list: list[Actuator] = [
         # Right arm (nn_id 0-4)
         Actuator(actuator_id=21, nn_id=0, kp=40.0, kd=4.0, max_torque=40.0, joint_name="dof_right_shoulder_pitch_03"),
@@ -81,7 +73,6 @@ class Deploy(ABC):
 
         self.prev_action = np.zeros(len(self.actuator_list) * 2)
 
-        # * Fields defined in child classes
         self.rollout_dict = None
 
     async def send_actions(self, position: np.ndarray, velocity: np.ndarray) -> None:
@@ -137,9 +128,6 @@ class Deploy(ABC):
 
             await self.kos.actuator.command_actuators(reset_commands)
         elif self.mode == "sim":
-            logger.debug(f"Resetting to: {self.default_positions_deg}")
-
-            #! In original script, reset was using joints in kos.sim.reset() does not work
             await self.kos.sim.reset(
                 pos={"x": 0.0, "y": 0.0, "z": 1.01},
                 quat={"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
@@ -220,7 +208,7 @@ class Deploy(ABC):
 
                 action = np.array(self.model.infer(observation)).reshape(-1)
 
-                #! Only Scale Action on observation but not onto Default Positions
+                #! Only scale action on observation but not onto default positions
                 position = action[: len(self.actuator_list)] * self.ACTION_SCALE + self.default_positions_rad
                 velocity = action[len(self.actuator_list) :] * self.ACTION_SCALE
 
@@ -231,6 +219,7 @@ class Deploy(ABC):
                 self.prev_action = action.copy()
 
                 if time.time() < target_time:
+                    logger.debug(f"Sleeping for {max(0, target_time - time.time())} seconds")
                     await asyncio.sleep(max(0, target_time - time.time()))
                 else:
                     logger.info(f"Loop overran by {time.time() - target_time} seconds")
@@ -281,14 +270,8 @@ class FixedArmDeploy(Deploy):
         if self.mode == "real-deploy":
             await self.kos.actuator.command_actuators(actuator_commands)
         elif self.mode == "real-check":
-            logger.info(f"Sending actuator commands: {actuator_commands}")
             self.rollout_dict["command"].append(actuator_commands)
         elif self.mode == "sim":
             # For all other modes, log and send commands
             await self.kos.actuator.command_actuators(actuator_commands)
             self.rollout_dict["command"].append(actuator_commands)
-
-
-if __name__ == "__main__":
-    logger.error("Not a standalone script")
-    sys.exit(1)
