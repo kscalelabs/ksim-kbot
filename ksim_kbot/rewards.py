@@ -521,10 +521,8 @@ class ContactPenalty(ksim.Reward):
                 reduction_axes = tuple(range(len(target_shape), contact_flag.ndim))
                 is_contact = is_contact | jnp.any(contact_flag, axis=reduction_axes)
             else:
-                broadcast_contact = jnp.broadcast_to(
-                    jnp.any(contact_flag) if contact_flag.ndim > 0 else contact_flag, target_shape
-                )
-                is_contact = is_contact | broadcast_contact
+                raise ValueError("contact_flag.ndim should not be less than target_shape")
+
 
         contact_value = jnp.where(is_contact, 1.0, 0.0)
         return contact_value, None
