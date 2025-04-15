@@ -22,12 +22,13 @@ class JoystickDeploy(FixedArmDeploy):
         self.default_positions_rad = np.array(
             [
                 0,
-                np.deg2rad(7),
+                np.deg2rad(-12),
                 0,
                 np.deg2rad(30),
                 0,  # right arm
                 0,
-                np.deg2rad(-7),
+                np.deg2rad(12
+                           ),
                 0,
                 np.deg2rad(-30),
                 0,  # left arm
@@ -98,7 +99,7 @@ class JoystickDeploy(FixedArmDeploy):
 
         cmd = self.get_command()
 
-        if self.mode in ["sim", "real-check"]:
+        if self.mode in ["sim", "real-check", "real-deploy"]:
             self.rollout_dict["pos_diff"].append(pos_diff)
             self.rollout_dict["vel_obs"].append(vel_obs)
             self.rollout_dict["imu_accel"].append(imu_accel)
