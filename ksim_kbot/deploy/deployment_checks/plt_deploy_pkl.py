@@ -55,7 +55,7 @@ def load_latest_deployment() -> tuple[dict, str] | None:
     current_dir = os.path.dirname(os.path.abspath(__file__))
 
     # Find all pickle files matching the pattern
-    pkl_files = glob.glob(os.path.join(current_dir, "sim_*.pkl"))
+    pkl_files = glob.glob(os.path.join(current_dir, "real-check_*.pkl"))
 
     if not pkl_files:
         print("No deployment pickle files found.")
@@ -208,8 +208,33 @@ def plot_vector_data(data: dict, key: str, output_dir: str = "plots") -> None:
             fig.savefig(osp.join(output_dir, f"{key}_group{i+1}.pdf"))
             plt.close(fig)
 
+    elif key in ["imu_accel", "imu_gyro"]:
+        # Plot IMU acceleration or gyroscope data
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+        # Extract x, y, and z components
+        x_data = [float(step_data[0]) for step_data in data[key]]
+        y_data = [float(step_data[1]) for step_data in data[key]]
+        z_data = [float(step_data[2]) for step_data in data[key]]
+
+        # Plot the data
+        ax.plot(steps[: len(x_data)], x_data[: len(steps)], label="X")
+        ax.plot(steps[: len(y_data)], y_data[: len(steps)], label="Y")
+        ax.plot(steps[: len(z_data)], z_data[: len(steps)], label="Z")
+        
+        component_type = "Acceleration" if key == "imu_accel" else "Gyroscope"
+        ax.set_ylabel(f"IMU {component_type}")
+        ax.set_xlabel("Steps")
+        ax.legend()
+        ax.grid(True)
+
+        fig.suptitle(f"IMU {component_type} over time")
+        fig.tight_layout()
+        fig.savefig(osp.join(output_dir, f"{key}.pdf"))
+        plt.close(fig)
+
     elif key == "imu_obs":
-        # imu_obs has shape (6,) with first 3 being accel and last 3 being gyro
+        # For backward compatibility: imu_obs has shape (6,) with first 3 being accel and last 3 being gyro
         fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 15), sharex=True)
 
         # Extract accel and gyro data
@@ -264,8 +289,8 @@ def plot_vector_data(data: dict, key: str, output_dir: str = "plots") -> None:
         fig.savefig(osp.join(output_dir, "imu_obs.pdf"))
         plt.close(fig)
 
-    elif key == "cmd":
-        # controller_cmd has shape (2,) with first being x, second being y
+    elif key == "controller_cmd" or key == "cmd":
+        # Handle both new controller_cmd and old cmd for backward compatibility
         fig, ax = plt.subplots(figsize=(10, 6))
 
         # Extract x and y data
@@ -282,7 +307,7 @@ def plot_vector_data(data: dict, key: str, output_dir: str = "plots") -> None:
 
         fig.suptitle("Controller Commands over time")
         fig.tight_layout()
-        fig.savefig(osp.join(output_dir, "controller_cmd.pdf"))
+        fig.savefig(osp.join(output_dir, f"{key}.pdf"))
         plt.close(fig)
 
     elif key == "phase":
@@ -320,7 +345,19 @@ def plot_deployment_data(data: dict, output_dir: str = "plots") -> None:
     plot_command_data(data, output_dir)
 
     # Plot other vector data
-    for key in ["pos_diff", "vel_obs", "imu_obs", "cmd", "prev_action", "phase"]:
+    keys_to_plot = [
+        "pos_diff", 
+        "vel_obs", 
+        "imu_accel", 
+        "imu_gyro", 
+        "imu_obs",  # For backward compatibility
+        "controller_cmd", 
+        "cmd",  # For backward compatibility
+        "prev_action", 
+        "phase"
+    ]
+    
+    for key in keys_to_plot:
         if key in data:
             plot_vector_data(data, key, output_dir)
 
@@ -331,23 +368,6 @@ if __name__ == "__main__":
     deployment_data = load_latest_deployment()
     if deployment_data:
         data, filename = deployment_data
-        print(data)
-        # For 'command', it is a list over time, with each item being a list
-        # representing actuator data. Plot different subplots for each actuator.
-        # There are likely 20 actuators.
-        # For 'pos_diff', 'vel_obs', and 'prev_action', each is a list similar
-        # to 'command', but each entry is a single list. Use the nn_id to map
-        # positions to actuator names for labeling.
-        # For 'imu_obs', it is a list of lists with shape (6,) per time instance.
-        # The first three values are accelerometer data, and the last three are
-        # gyroscope data.
-        # For 'controller_cmd', it is a list of lists with shape (2,) per time
-        # instance. The first value is x, and the second is y.
-        # For 'phase', it is a list of lists with shape (2,) per time instance,
-        # derived from phase_vec = np.array([np.cos(self.phase), np.sin(self.phase)]).flatten().
-
-        # Create output directory based on pickle filename (without extension)
         output_dir = os.path.join("plots", os.path.splitext(filename)[0])
 
-        # Plot the deployment data
         plot_deployment_data(data, output_dir)
