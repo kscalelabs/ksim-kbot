@@ -221,7 +221,7 @@ def plot_vector_data(data: dict, key: str, output_dir: str = "plots") -> None:
         ax.plot(steps[: len(x_data)], x_data[: len(steps)], label="X")
         ax.plot(steps[: len(y_data)], y_data[: len(steps)], label="Y")
         ax.plot(steps[: len(z_data)], z_data[: len(steps)], label="Z")
-        
+
         component_type = "Acceleration" if key == "imu_accel" else "Gyroscope"
         ax.set_ylabel(f"IMU {component_type}")
         ax.set_xlabel("Steps")
@@ -289,7 +289,7 @@ def plot_vector_data(data: dict, key: str, output_dir: str = "plots") -> None:
         fig.savefig(osp.join(output_dir, "imu_obs.pdf"))
         plt.close(fig)
 
-    elif key == "controller_cmd" or key == "cmd":
+    elif key in ["controller_cmd", "cmd"]:
         # Handle both new controller_cmd and old cmd for backward compatibility
         fig, ax = plt.subplots(figsize=(10, 6))
 
@@ -346,17 +346,17 @@ def plot_deployment_data(data: dict, output_dir: str = "plots") -> None:
 
     # Plot other vector data
     keys_to_plot = [
-        "pos_diff", 
-        "vel_obs", 
-        "imu_accel", 
-        "imu_gyro", 
+        "pos_diff",
+        "vel_obs",
+        "imu_accel",
+        "imu_gyro",
         "imu_obs",  # For backward compatibility
-        "controller_cmd", 
+        "controller_cmd",
         "cmd",  # For backward compatibility
-        "prev_action", 
-        "phase"
+        "prev_action",
+        "phase",
     ]
-    
+
     for key in keys_to_plot:
         if key in data:
             plot_vector_data(data, key, output_dir)

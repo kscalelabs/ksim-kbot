@@ -206,7 +206,7 @@ class Deploy(ABC):
         actuator_commands: list[pykos.services.actuator.ActuatorCommand] = [
             {
                 "actuator_id": 12,
-                "position": 7.0/2.0,
+                "position": 7.0 / 2.0,
                 "velocity": 0.0,
             },
             {
@@ -229,13 +229,13 @@ class Deploy(ABC):
         await self.kos.actuator.command_actuators(actuator_commands)
 
         reset_commands: list[pykos.services.actuator.ActuatorCommand] = [
-                {
-                    "actuator_id": ac.actuator_id,
-                    "position": pos,
-                    "velocity": 0.0,
-                }
-                for ac, pos in zip(self.actuator_list, self.default_positions_deg)
-            ]
+            {
+                "actuator_id": ac.actuator_id,
+                "position": pos,
+                "velocity": 0.0,
+            }
+            for ac, pos in zip(self.actuator_list, self.default_positions_deg)
+        ]
 
         await self.kos.actuator.command_actuators(reset_commands)
 
