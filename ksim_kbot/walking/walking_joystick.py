@@ -10,7 +10,6 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import ksim
-import numpy as np
 import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
@@ -31,13 +30,13 @@ JOINT_TARGETS = (
     0.0,
     0.0,
     0.0,
-    np.deg2rad(90.0),
+    0.0,
     0.0,
     # left arm
     0.0,
     0.0,
     0.0,
-    np.deg2rad(-90.0),
+    0.0,
     0.0,
     # right leg
     -0.23,
@@ -410,6 +409,12 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             ),
             ContactObservation.create(
                 physics_model=physics_model,
+                geom_names=("left_forearm_collision", "legs_collision"),
+                contact_group="left_forearm_legs",
+            ),
+            
+            ContactObservation.create(
+                physics_model=physics_model,
                 geom_names=("right_upper_arm_collision", "torso_collision"),
                 contact_group="right_upper_arm_body",
             ),
@@ -417,6 +422,11 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 physics_model=physics_model,
                 geom_names=("right_forearm_collision", "torso_collision"),
                 contact_group="right_forearm_body",
+            ),
+            ContactObservation.create(
+                physics_model=physics_model,
+                geom_names=("right_forearm_collision", "legs_collision"),
+                contact_group="right_forearm_legs",
             ),
             common.TrueHeightObservation(),
             # NOTE: Add collisions to hands
@@ -541,8 +551,10 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 contact_obs_tuple=(
                     "contact_observation_left_upper_arm_body",
                     "contact_observation_left_forearm_body",
+                    "contact_observation_left_forearm_legs",
                     "contact_observation_right_upper_arm_body",
                     "contact_observation_right_forearm_body",
+                    "contact_observation_right_forearm_legs",
                 ),
                 scale=-1.0,
                 name_suffix="arm_body_contact_penalty",
