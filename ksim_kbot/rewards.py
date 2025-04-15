@@ -483,3 +483,50 @@ class FeetPhaseReward(ksim.Reward):
         stance = xax.cubic_bezier_interpolation(jnp.array(0), swing_height, 2 * x)
         swing = xax.cubic_bezier_interpolation(swing_height, jnp.array(0), 2 * x - 1)
         return jnp.where(x <= 0.5, stance, swing)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class ContactPenalty(ksim.Reward):
+    """Penalizes the robot when contact is detected on the specified body parts.
+    
+    Uses the contact observation to determine if the robot is in contact with the specified body parts.
+    """
+
+    contact_obs_list: list[str] = attrs.field()
+    scale: float = attrs.field(default=-1.0)
+    name_suffix: str = attrs.field(default="contact_penalty")
+    
+    @classmethod
+    def create(cls, contact_obs_list: list[str], scale: float = -1.0, name_suffix: str = "contact_penalty") -> Self:
+        return cls(contact_obs_list=contact_obs_list, scale=scale, name_suffix=name_suffix)
+
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[jnp.ndarray, None]:
+        target_shape = trajectory.done.shape
+        
+        is_contact = jnp.zeros(target_shape, dtype=bool)
+        for obs_key in self.contact_obs_list:
+            if obs_key not in trajectory.obs:
+                raise ValueError(f"Observation {obs_key} not found in trajectory")
+                
+            contact_flag = trajectory.obs[obs_key]
+            
+            # Handle different shapes based on batched vs single environment
+            if target_shape:
+                if contact_flag.ndim < len(target_shape):
+                    is_contact = is_contact | jnp.broadcast_to(contact_flag, target_shape)
+                elif contact_flag.ndim == len(target_shape) + 1:
+                    is_contact = is_contact | jnp.any(contact_flag, axis=-1)
+                else:
+                    is_contact = is_contact | contact_flag
+            else:
+                if contact_flag.ndim > 0:
+                    is_contact = is_contact | jnp.any(contact_flag)
+                else:
+                    is_contact = is_contact | contact_flag
+
+        contact_value = jnp.where(is_contact, 1.0, 0.0)
+        return contact_value, None
+
+    @property
+    def reward_name(self) -> str:
+        return self.name_suffix

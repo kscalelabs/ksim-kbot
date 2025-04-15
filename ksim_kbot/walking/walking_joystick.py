@@ -3,7 +3,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Generic, TypeVar, Self, Any
+from typing import Callable, Generic, TypeVar
 
 import distrax
 import equinox as eqx
@@ -11,103 +11,18 @@ import jax
 import jax.numpy as jnp
 import ksim
 import xax
-import attrs
 import numpy as np
-from jaxtyping import Array, PRNGKeyArray, PyTree
+from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from ksim.curriculum import Curriculum
 from xax.nn.export import export
 
-from ksim.observation import ContactObservation, ObservationState
-from ksim import Reward
-from ksim.types import Trajectory
+from ksim.observation import ContactObservation
 from ksim_kbot import common, rewards as kbot_rewards
+from ksim_kbot.rewards import ContactPenalty
 from ksim_kbot.standing.standing import MAX_TORQUE, KbotStandingTask, KbotStandingTaskConfig
 
 
-@attrs.define(frozen=True, kw_only=True)
-class FeetContactPenalty(Reward):
-    """Penalizes the robot when foot contact is detected.
-
-    This reward reads the precomputed contact observation from the trajectory. The
-    observation is expected to be a boolean array of shape (2,) in a single-environment
-    rollout or (num_envs, 2) in batched training mode. The reward reduces along the
-    last axis to yield a scalar per environment.
-    """
-
-    # The key under which the contact observation is stored.
-    contact_obs_key: str = attrs.field(default="contact_observation_feet")
-    # Use the reward object's scale field to set the penalty magnitude.
-    scale: float = attrs.field(default=-1.0)
-
-    def __call__(self, trajectory: Trajectory, reward_carry=None) -> tuple[jnp.ndarray, Any]:
-        target_shape = trajectory.done.shape  # Expected shape: () for a single env or (num_envs,) in batched mode.
-        contact_flag = trajectory.obs[self.contact_obs_key]
-
-        # If running in batched mode, ensure contact_flag has one extra dimension at the end.
-        if target_shape and contact_flag.ndim < (len(target_shape) + 1):
-            contact_flag = jnp.broadcast_to(contact_flag, target_shape + (contact_flag.shape[-1],))
-
-        # For single-environment mode (target_shape == ()), simply reduce the (2,) vector.
-        if not target_shape:
-            is_contact = jnp.any(contact_flag)
-        else:
-            # Now contact_flag is (batch, 2). Reduce along the last axis.
-            is_contact = jnp.any(contact_flag, axis=-1)
-
-        # Convert the Boolean to float: 1.0 if any contact, 0.0 otherwise.
-        contact_value = jnp.where(is_contact, 1.0, 0.0)
-        return contact_value, reward_carry
-
-    @property
-    def reward_name(self) -> str:
-        return "feet_contact_penalty"
-    
-@attrs.define(frozen=True, kw_only=True)
-class ArmBodyContactPenalty(Reward):
-    """Penalizes the robot when left arm body contact is detected.
-
-    This reward reads the precomputed contact observation from the trajectory. The
-    observation is expected to be a boolean array of shape (2,) in a single-environment
-    rollout or (num_envs, 2) in batched training mode. The reward reduces along the
-    last axis to yield a scalar per environment.
-    """
-
-    # The key under which the contact observation is stored.
-    contact_obs_key: str = None
-    # Use the reward object's scale field to set the penalty magnitude.
-    scale: float = attrs.field(default=-1.0)
-    
-    @classmethod
-    def create(cls, contact_obs_key: str) -> Self:
-        # Correct prefix for ContactObservation
-        obs_key = f"contact_observation_{contact_obs_key}"
-        return cls(contact_obs_key=obs_key)
-
-    def __call__(self, trajectory: Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[jnp.ndarray, xax.FrozenDict[str, PyTree]]:
-        target_shape = trajectory.done.shape  # Expected shape: () for a single env or (num_envs,) in batched mode.
-        contact_flag = trajectory.obs[self.contact_obs_key]
-
-        # If running in batched mode, ensure contact_flag has one extra dimension at the end.
-        if target_shape and contact_flag.ndim < (len(target_shape) + 1):
-            contact_flag = jnp.broadcast_to(contact_flag, target_shape + (contact_flag.shape[-1],))
-
-        # For single-environment mode (target_shape == ()), simply reduce the (2,) vector.
-        if not target_shape:
-            is_contact = jnp.any(contact_flag)
-        else:
-            # Now contact_flag is (batch, 2). Reduce along the last axis.
-            is_contact = jnp.any(contact_flag, axis=-1)
-
-        # Convert the Boolean to float: 1.0 if any contact, 0.0 otherwise.
-        contact_value = jnp.where(is_contact, 1.0, 0.0)
-        return contact_value, None
-
-    @property
-    def reward_name(self) -> str:
-        # Extract the original key without the observation prefix for reward naming
-        key = self.contact_obs_key.replace("contact_observation_", "")
-        return f"{key}_penalty"
 
 OBS_SIZE = 20 * 2 + 4 + 3 + 3 + 40  # = position + velocity + phase + imu_acc + imu_gyro + last_action
 CMD_SIZE = 2 + 1 + 1
@@ -118,13 +33,13 @@ JOINT_TARGETS = (
     0.0,
     0.0,
     0.0,
-    0.0,
+    np.deg2rad(90.0),
     0.0,
     # left arm
     0.0,
     0.0,
     0.0,
-    0.0,
+    np.deg2rad(-90.0),
     0.0,
     # right leg
     -0.23,
@@ -487,13 +402,23 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             ),
             ContactObservation.create(
                 physics_model=physics_model,
+                geom_names=("left_upper_arm_collision", "torso_collision"),
+                contact_group="left_upper_arm_body",
+            ),
+            ContactObservation.create(
+                physics_model=physics_model,
                 geom_names=("left_forearm_collision", "torso_collision"),
-                contact_group="left_arm_body",
+                contact_group="left_forearm_body",
+            ),
+            ContactObservation.create(
+                physics_model=physics_model,
+                geom_names=("right_upper_arm_collision", "torso_collision"),
+                contact_group="right_upper_arm_body",
             ),
             ContactObservation.create(
                 physics_model=physics_model,
                 geom_names=("right_forearm_collision", "torso_collision"),
-                contact_group="right_arm_body",
+                contact_group="right_forearm_body",
             ),
             common.TrueHeightObservation(),
             # NOTE: Add collisions to hands
@@ -614,8 +539,16 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             ksim.ActionSmoothnessPenalty(scale=-0.005),
             ksim.JointVelocityPenalty(scale=-0.005),
             # ksim.AvoidLimitsReward(-0.01)
-            ArmBodyContactPenalty.create(contact_obs_key="left_arm_body"),
-            ArmBodyContactPenalty.create(contact_obs_key="right_arm_body"),
+            ContactPenalty.create(
+                contact_obs_list=[
+                    "contact_observation_left_upper_arm_body",
+                    "contact_observation_left_forearm_body",
+                    "contact_observation_right_upper_arm_body",
+                    "contact_observation_right_forearm_body",
+                ],
+                scale=-1.0,
+                name_suffix="arm_body_contact_penalty"
+            ),
         ]
 
         return rewards
