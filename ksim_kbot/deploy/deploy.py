@@ -108,42 +108,19 @@ class Deploy(ABC):
                 logger.warning("Rollout dictionary is not initialized, initializing...")
             self.rollout_dict["command"].append(actuator_commands)
 
-    async def configure_actuators(self) -> None:
-        """Configure all actuators with their respective parameters."""
-        for ac in self.actuator_list:
-            await self.kos.actuator.configure_actuator(
-                actuator_id=ac.actuator_id,
-                kp=ac.kp,
-                kd=ac.kd,
-                torque_enabled=False,
-                max_torque=ac.max_torque,
-            )
-            
-
     async def reset(self) -> None:
         """Reset all actuators to their default positions."""
         if self.mode in {"real-check", "real-deploy"}:
-            await self.enable()
-            breakpoint()
-            commands = [{'actuator_id': id, 'position': 0.0, 'velocity': 0.0} for id in range(60)]
-            await self.kos.actuator.command_actuators(commands)
+            reset_commands: list[pykos.services.actuator.ActuatorCommand] = [
+                {
+                    "actuator_id": ac.actuator_id,
+                    "position": 0.0,
+                    "velocity": 0.0,
+                }
+                for ac, pos in zip(self.actuator_list, self.default_positions_deg)
+            ]
 
-            # for ac in self.actuator_list:
-            #     await self.kos.actuator.configure_actuator(
-            #         actuator_id=ac.actuator_id,
-            #         torque_enabled=True,
-            #     )
-
-            # reset_commands: list[pykos.services.actuator.ActuatorCommand] = [
-            #     {
-            #         "actuator_id": ac.actuator_id,
-            #         "position": pos,
-            #         "velocity": 0.0,
-            #     }
-            #     for ac, pos in zip(self.actuator_list, self.default_positions_deg)
-            # ]
-
-            # await self.kos.actuator.command_actuators(reset_commands)
+            await self.kos.actuator.command_actuators(reset_commands)
 
         elif self.mode == "sim":
             await self.kos.sim.reset(
@@ -171,7 +148,10 @@ class Deploy(ABC):
         for ac in self.actuator_list:
             await self.kos.actuator.configure_actuator(
                 actuator_id=ac.actuator_id,
+                kp=ac.kp,
+                kd=ac.kd,
                 torque_enabled=False,
+                max_torque=ac.max_torque,
             )
 
     async def enable(self) -> None:
@@ -179,8 +159,12 @@ class Deploy(ABC):
         for ac in self.actuator_list:
             await self.kos.actuator.configure_actuator(
                 actuator_id=ac.actuator_id,
+                kp=ac.kp,
+                kd=ac.kd,
                 torque_enabled=True,
+                max_torque=ac.max_torque,
             )
+        
 
     def save_rollout(self) -> None:
         """Save the rollout to a file."""
@@ -204,19 +188,10 @@ class Deploy(ABC):
         self.model = tf.saved_model.load(self.model_path)
         self.kos = pykos.KOS(ip=self.ip)
 
-        # await self.disable()
-        # time.sleep(1)
-        # logger.info("Configuring actuators...")
-        await self.configure_actuators()
         await self.enable()
-        # await asyncio.sleep(1)
+        await asyncio.sleep(1)
         logger.info("Resetting...")
         await self.reset()
-
-      
-
-
-        breakpoint()
 
         zero_pos_target_list = []
         for ac in self.actuator_list:
@@ -227,44 +202,69 @@ class Deploy(ABC):
                 }
             )
 
+        actuator_commands: list[pykos.services.actuator.ActuatorCommand] = [
+                    {
+                        "actuator_id": 12,
+                        "position": 7.0,
+                        "velocity": 0.0,
+                    }, 
+                    {
+                        "actuator_id": 22,
+                        "position": -7.0,
+                        "velocity": 0.0,
+                    }, 
+                    {
+                        "actuator_id": 14,
+                        "position": -15.0,
+                        "velocity": 0.0,
+                    },
+                    {
+                        "actuator_id": 24,
+                        "position": 15.0,
+                        "velocity": 0.0,
+                    }
+                ]
+
+        await self.kos.actuator.command_actuators(actuator_commands)
+
+
+        actuator_commands: list[pykos.services.actuator.ActuatorCommand] = [
+                    {
+                        "actuator_id": 12,
+                        "position": 15.0,
+                        "velocity": 0.0,
+                    }, 
+                    {
+                        "actuator_id": 22,
+                        "position": -15.0,
+                        "velocity": 0.0,
+                    }, 
+                    {
+                        "actuator_id": 14,
+                        "position": -30.0,
+                        "velocity": 0.0,
+                    },
+                    {
+                        "actuator_id": 24,
+                        "position": 30.0,
+                        "velocity": 0.0,
+                    }
+                ]
+
+        await self.kos.actuator.command_actuators(actuator_commands)
+
+
+        breakpoint()
+        
+
         logger.warning(f"Deploying with Action Scale: {self.ACTION_SCALE}")
         if self.mode == "real-deploy":
             input("Press Enter to continue...")
 
-        await self.enable()
-
         observation = await self.get_observation()
-        # warm up model
         self.model.infer(observation)
 
-        await self.kos.actuator.move_to_position(
-            positions=zero_pos_target_list,
-            num_seconds=3.0,
-            torque_enabled=True,
-        )
-
-        await self.kos.actuator.move_to_position(
-            positions=[
-                {
-                    "actuator_id": 14,
-                    "position": -30.0,
-                },
-                {
-                    "actuator_id": 24,
-                    "position": 30.0,
-                },
-                {
-                    "actuator_id": 12,
-                    "position": 12.0,
-                },
-                {
-                    "actuator_id": 22,
-                    "position": -12.0,
-                },
-            ],
-            num_seconds=5.0,
-        )
-
+      
         if self.mode == "real-deploy":
             for i in range(5, -1, -1):
                 logger.info(f"Starting in {i} seconds...")

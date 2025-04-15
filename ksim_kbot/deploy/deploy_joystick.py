@@ -22,12 +22,12 @@ class JoystickDeploy(FixedArmDeploy):
         self.default_positions_rad = np.array(
             [
                 0,
-                np.deg2rad(12),
+                np.deg2rad(5),
                 0,
                 np.deg2rad(30),
                 0,  # right arm
                 0,
-                np.deg2rad(-12),
+                np.deg2rad(-5),
                 0,
                 np.deg2rad(-30),
                 0,  # left arm
@@ -143,9 +143,6 @@ def main() -> None:
 
     deploy = JoystickDeploy(args.enable_joystick, model_path, args.mode, args.ip)
     deploy.ACTION_SCALE = args.scale_action
-
-    if args.mode == "real-deploy":
-        input("Press Enter to start REAL deployment...")
 
     try:
         asyncio.run(deploy.run(args.episode_length))
