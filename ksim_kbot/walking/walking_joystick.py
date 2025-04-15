@@ -13,7 +13,7 @@ import ksim
 import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
-from ksim.curriculum import ConstantCurriculum, Curriculum
+from ksim.curriculum import Curriculum
 from xax.nn.export import export
 
 from ksim_kbot import common, rewards as kbot_rewards
@@ -270,10 +270,13 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
     def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
         if self.config.domain_randomize:
             return [
-                ksim.StaticFrictionRandomizer(scale_lower=0.9, scale_upper=1.1),
+                ksim.FloorFrictionRandomizer.from_geom_name(physics_model, "floor", scale_lower=0.1, scale_upper=2.0),
+                ksim.StaticFrictionRandomizer(scale_lower=0.5, scale_upper=1.5),
                 ksim.ArmatureRandomizer(),
                 # ksim.AllBodiesMassMultiplicationRandomizer(),
-                ksim.MassAdditionRandomizer.from_body_name(physics_model, "Torso_Side_Right"),
+                ksim.MassAdditionRandomizer.from_body_name(
+                    physics_model, "Torso_Side_Right", scale_lower=-1.0, scale_upper=1.0
+                ),
                 ksim.JointDampingRandomizer(),
                 ksim.JointZeroPositionRandomizer(scale_lower=-0.03, scale_upper=0.03),
             ]
@@ -305,21 +308,31 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         if self.config.domain_randomize:
             return [
                 common.XYPushEvent(
-                    interval_range=(5.0, 10.0),
-                    force_range=(0.1, 0.5),
+                    interval_range=(2.0, 4.0),
+                    force_range=(0.0, 1.8),
+                ),
+                common.TorquePushEvent(
+                    interval_range=(2.0, 4.0),
+                    ang_vel_range=(0.0, 1.8),
                 ),
             ]
         else:
             return []
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> Curriculum:
-        return ConstantCurriculum(level=1.0)
+        return ksim.EpisodeLengthCurriculum(
+            num_levels=10,
+            increase_threshold=20.0,
+            decrease_threshold=10.0,
+            min_level_steps=5,
+            dt=self.config.ctrl_dt,  # not sure what this is for
+        )
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         if self.config.domain_randomize:
             vel_obs_noise = 0.0
             imu_acc_noise = 0.5
-            imu_gyro_noise = 0.2
+            imu_gyro_noise = 0.5
             gvec_noise = 0.0
             base_position_noise = 0.0
             base_orientation_noise = 0.0
@@ -410,12 +423,12 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 y_range=(-0.2, 0.2),
                 x_zero_prob=0.1,
                 y_zero_prob=0.2,
-                switch_prob=0.0,
+                switch_prob=self.config.ctrl_dt / 3,
             ),
             common.AngularVelocityCommand(
                 scale=0.1,
                 zero_prob=0.9,
-                switch_prob=0.0,
+                switch_prob=self.config.ctrl_dt / 3,
             ),
             common.GaitFrequencyCommand(
                 gait_freq_lower=self.config.gait_freq_lower,
@@ -497,8 +510,9 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
             ),
             # NOTE: Investigate the effect of these penalties
-            # ksim.ActuatorForcePenalty(scale=-0.005),
-            # ksim.ActionSmoothnessPenalty(scale=-0.005),
+            ksim.ActuatorForcePenalty(scale=-0.005),
+            ksim.ActionSmoothnessPenalty(scale=-0.005),
+            ksim.JointVelocityPenalty(scale=-0.005),
             # ksim.AvoidLimitsReward(-0.01)
             kbot_rewards.StandStillPenalty(
                 scale=-1.0,
@@ -709,9 +723,10 @@ if __name__ == "__main__":
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,
-            max_action_latency=0.0,
+            max_action_latency=0.005,
             min_action_latency=0.0,
-            rollout_length_seconds=1.25,
+            rollout_length_seconds=5.0,
+            render_length_seconds=5.0,
             # PPO parameters
             action_scale=1.0,
             gamma=0.97,
