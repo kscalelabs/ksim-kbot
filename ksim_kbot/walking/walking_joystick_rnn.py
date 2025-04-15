@@ -365,14 +365,13 @@ class KbotWalkingJoystickRNNTask(KbotWalkingTask[Config], Generic[Config]):
         )
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
-        return ksim.ConstantCurriculum(level=0.1)
-        # return ksim.EpisodeLengthCurriculum(
-        #     num_levels=10,
-        #     increase_threshold=60.0,
-        #     decrease_threshold=10.0,
-        #     min_level_steps=5,
-        #     dt=self.config.ctrl_dt,  # not sure what this is for
-        # )
+        return ksim.EpisodeLengthCurriculum(
+            num_levels=10,
+            increase_threshold=60.0,
+            decrease_threshold=10.0,
+            min_level_steps=5,
+            dt=self.config.ctrl_dt,  # not sure what this is for
+        )
 
     def get_ppo_variables(
         self,
