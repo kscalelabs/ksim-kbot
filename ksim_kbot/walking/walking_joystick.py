@@ -423,12 +423,12 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 y_range=(-0.2, 0.2),
                 x_zero_prob=0.1,
                 y_zero_prob=0.2,
-                switch_prob=0.0,
+                switch_prob=self.config.ctrl_dt / 3,
             ),
             common.AngularVelocityCommand(
                 scale=0.1,
                 zero_prob=0.9,
-                switch_prob=0.0,
+                switch_prob=self.config.ctrl_dt / 3,
             ),
             common.GaitFrequencyCommand(
                 gait_freq_lower=self.config.gait_freq_lower,
