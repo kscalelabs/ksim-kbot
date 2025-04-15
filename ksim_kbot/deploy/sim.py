@@ -18,7 +18,7 @@ from askin import KeyboardController
 
 logger = logging.getLogger(__name__)
 DT = 0.02  # time step (50Hz)
-GAIT_DT = 1.25
+GAIT = np.asarray([1.25])
 DEFAULT_POSITIONS = np.array(
     [
         0,
@@ -47,7 +47,7 @@ DEFAULT_POSITIONS = np.array(
 
 class CommandState:
     def __init__(self) -> None:
-        self.cmd = np.array([0.3, 0.0])
+        self.cmd = np.array([0.0, 0.0, 0.0])
         self.step_size = 0.01
 
     async def update_from_key(self, key: str) -> None:
@@ -66,8 +66,10 @@ class CommandState:
         return self.cmd.copy()
 
 
-OBS_SIZE = 20 + 20 + 3 + 3 + 3 + 40 + 4  # pos_diff (20) + vel_obs (20) + imu (6) - adjust if needed
-CMD_SIZE = 2
+OBS_SIZE = (
+    20 + 20 + 4 + 3 + 3 + 3 + 1 + 40
+)  # phase (4) + pos_diff (20) + vel_obs (20) + cmd (3) + imu (6) + gait (1) - adjust if needed
+CMD_SIZE = 3
 
 
 @dataclass
@@ -82,34 +84,34 @@ class Actuator:
 
 ACTUATOR_LIST: list[Actuator] = [
     # right arm
-    Actuator(21, 0, 40.0, 4.0, 60.0, "dof_right_shoulder_pitch_03"),
-    Actuator(22, 1, 40.0, 4.0, 60.0, "dof_right_shoulder_roll_03"),
-    Actuator(23, 2, 30.0, 1.0, 17.0, "dof_right_shoulder_yaw_02"),
-    Actuator(24, 3, 30.0, 1.0, 17.0, "dof_right_elbow_02"),
+    Actuator(21, 0, 40.0, 4.0, 40.0, "dof_right_shoulder_pitch_03"),
+    Actuator(22, 1, 40.0, 4.0, 40.0, "dof_right_shoulder_roll_03"),
+    Actuator(23, 2, 30.0, 1.0, 14.0, "dof_right_shoulder_yaw_02"),
+    Actuator(24, 3, 30.0, 1.0, 14.0, "dof_right_elbow_02"),
     Actuator(25, 4, 20.0, 0.45473329537059787, 1.0, "dof_right_wrist_00"),
     # left arm
-    Actuator(11, 5, 40.0, 4.0, 60.0, "dof_left_shoulder_pitch_03"),
-    Actuator(12, 6, 40.0, 4.0, 60.0, "dof_left_shoulder_roll_03"),
-    Actuator(13, 7, 30.0, 1.0, 17.0, "dof_left_shoulder_yaw_02"),
-    Actuator(14, 8, 30.0, 1.0, 17.0, "dof_left_elbow_02"),
+    Actuator(11, 5, 40.0, 4.0, 40.0, "dof_left_shoulder_pitch_03"),
+    Actuator(12, 6, 40.0, 4.0, 40.0, "dof_left_shoulder_roll_03"),
+    Actuator(13, 7, 30.0, 1.0, 14.0, "dof_left_shoulder_yaw_02"),
+    Actuator(14, 8, 30.0, 1.0, 14.0, "dof_left_elbow_02"),
     Actuator(15, 9, 20.0, 0.45473329537059787, 1.0, "dof_left_wrist_00"),
     # right leg
-    Actuator(41, 10, 85.0, 5.0, 80.0, "dof_right_hip_pitch_04"),
-    Actuator(42, 11, 40.0, 4.0, 60.0, "dof_right_hip_roll_03"),
-    Actuator(43, 12, 40.0, 4.0, 60.0, "dof_right_hip_yaw_03"),
-    Actuator(44, 13, 85.0, 5.0, 80.0, "dof_right_knee_04"),
-    Actuator(45, 14, 30.0, 1.0, 17.0, "dof_right_ankle_02"),
+    Actuator(41, 10, 85.0, 5.0, 60.0, "dof_right_hip_pitch_04"),
+    Actuator(42, 11, 40.0, 4.0, 40.0, "dof_right_hip_roll_03"),
+    Actuator(43, 12, 40.0, 4.0, 40.0, "dof_right_hip_yaw_03"),
+    Actuator(44, 13, 85.0, 5.0, 60.0, "dof_right_knee_04"),
+    Actuator(45, 14, 30.0, 1.0, 14.0, "dof_right_ankle_02"),
     # left leg
-    Actuator(31, 15, 85.0, 5.0, 80.0, "dof_left_hip_pitch_04"),
-    Actuator(32, 16, 40.0, 4.0, 60.0, "dof_left_hip_roll_03"),
-    Actuator(33, 17, 40.0, 4.0, 60.0, "dof_left_hip_yaw_03"),
-    Actuator(34, 18, 85.0, 5.0, 80.0, "dof_left_knee_04"),
-    Actuator(35, 19, 30.0, 1.0, 17.0, "dof_left_ankle_02"),
+    Actuator(31, 15, 85.0, 5.0, 60.0, "dof_left_hip_pitch_04"),
+    Actuator(32, 16, 40.0, 4.0, 40.0, "dof_left_hip_roll_03"),
+    Actuator(33, 17, 40.0, 4.0, 40.0, "dof_left_hip_yaw_03"),
+    Actuator(34, 18, 85.0, 5.0, 60.0, "dof_left_knee_04"),
+    Actuator(35, 19, 30.0, 1.0, 14.0, "dof_left_ankle_02"),
 ]
 
 
 async def get_observation(
-    kos: pykos.KOS, prev_action: np.ndarray, cmd: np.ndarray, phase: np.ndarray
+    kos: pykos.KOS, prev_action: np.ndarray, cmd: np.ndarray, phase: np.ndarray, gait: np.ndarray = GAIT
 ) -> tuple[np.ndarray, np.ndarray]:
     ids = [ac.actuator_id for ac in ACTUATOR_LIST]
     act_states, imu, raw_quat = await asyncio.gather(
@@ -122,13 +124,13 @@ async def get_observation(
     vel_dict = {s.actuator_id: s.velocity for s in act_states.states}
     vel_obs = np.deg2rad([vel_dict[ac.actuator_id] for ac in sorted(ACTUATOR_LIST, key=lambda x: x.nn_id)])
 
-    imu_obs = np.array([imu.accel_x, imu.accel_y, imu.accel_z, imu.gyro_x, imu.gyro_y, imu.gyro_z])
+    imu_accel = np.array([imu.accel_x, imu.accel_y, imu.accel_z])
+    imu_gyro = np.array([imu.gyro_x, imu.gyro_y, imu.gyro_z])
 
-    phase += 2 * np.pi * GAIT_DT * DT
+    phase += 2 * np.pi * gait * DT
     phase = np.fmod(phase + np.pi, 2 * np.pi) - np.pi
     phase_vec = np.array([np.cos(phase), np.sin(phase)]).flatten()
-
-    obs = np.concatenate([pos_diff, vel_obs, imu_obs, cmd, prev_action, phase_vec])
+    obs = np.concatenate([phase_vec, pos_diff, vel_obs, imu_accel, imu_gyro, cmd, gait, prev_action])
     return obs, phase
 
 
@@ -204,7 +206,7 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
     await keyboard_controller.start()
 
     phase = np.array([0, np.pi])
-    prev_action = np.zeros(len(ACTUATOR_LIST) * 2)
+    prev_action = np.concatenate([DEFAULT_POSITIONS, np.zeros(len(ACTUATOR_LIST))])
 
     obs, phase = await get_observation(kos, prev_action, command_state.get_command(), phase)
     if no_render:
@@ -238,12 +240,12 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
 
 
 # Run with:
-# python -m ksim_kbot.deploy.sim --model_path ksim_kbot/deploy/assets/mlp_example
+# python -m ksim_kbot.deploy.sim --model_path ksim_kbot/deploy/assets/joystick_example/tf_model_1200
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_path", type=str, required=True)
     parser.add_argument("--ip", type=str, default="localhost")
-    parser.add_argument("--episode_length", type=int, default=5)
+    parser.add_argument("--episode_length", type=int, default=20)
     parser.add_argument("--no-render", action="store_true")
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
