@@ -460,7 +460,7 @@ class KbotWalkingPseudoIKTask(KbotWalkingTask[Config], Generic[Config]):
         return rewards
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
-        return [common.GVecTermination.create(physics_model, sensor_name="upvector_origin")]
+        return [common.GVecTermination.create(physics_model, sensor_name="upvector_origin", min_z=0.1)]
 
     def get_initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
         return None, None
