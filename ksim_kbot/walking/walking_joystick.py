@@ -408,8 +408,8 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             common.LinearVelocityCommand(
                 x_range=(-0.3, 0.7),
                 y_range=(-0.2, 0.2),
-                x_zero_prob=1.0,
-                y_zero_prob=1.0,
+                x_zero_prob=0.1,
+                y_zero_prob=0.2,
                 switch_prob=0.0,
             ),
             common.AngularVelocityCommand(
