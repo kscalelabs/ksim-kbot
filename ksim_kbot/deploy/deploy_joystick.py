@@ -8,7 +8,7 @@ import sys
 import numpy as np
 from loguru import logger
 
-from ksim_kbot.deploy.deploy import Deploy, FixedArmDeploy
+from ksim_kbot.deploy.deploy import FixedArmDeploy
 
 
 class JoystickDeploy(FixedArmDeploy):
@@ -107,12 +107,14 @@ class JoystickDeploy(FixedArmDeploy):
             self.rollout_dict["prev_action"].append(self.prev_action)
             self.rollout_dict["phase"].append(phase_vec)
 
-        observation = np.concatenate([phase_vec, pos_diff, vel_obs, imu_accel, imu_gyro, cmd, self.gait, self.prev_action]).reshape(1, -1)
+        observation = np.concatenate(
+            [phase_vec, pos_diff, vel_obs, imu_accel, imu_gyro, cmd, self.gait, self.prev_action]
+        ).reshape(1, -1)
 
         return observation
 
 
-# * python -m ksim_kbot.deploy.deploy_joystick --model_path mlp_example --mode sim --scale_action 0.5 --debug
+# * python -m ksim_kbot.deploy.deploy_joystick --model_path ksim_kbot/deploy/assets/noisy_joystick_example/tf_model_1576 --mode sim --scale_action 1.0 --debug
 def main() -> None:
     """Parse arguments and run the deploy script."""
     parser = argparse.ArgumentParser(description="Deploy a SavedModel on K-Bot")

@@ -12,6 +12,7 @@ import pykos
 import tensorflow as tf
 from loguru import logger
 
+
 @dataclass
 class Actuator:
     actuator_id: int
@@ -20,6 +21,7 @@ class Actuator:
     kd: float
     max_torque: float
     joint_name: str
+
 
 class Deploy(ABC):
     """Abstract base class for deploying a SavedModel on K-Bot."""
@@ -272,6 +274,7 @@ class Deploy(ABC):
         self.save_rollout()
         await self.disable()
 
+
 class FixedArmDeploy(Deploy):
     """Deploy class for fixed-arm policies."""
 
@@ -292,7 +295,9 @@ class FixedArmDeploy(Deploy):
         actuator_commands: list[pykos.services.actuator.ActuatorCommand] = [
             {
                 "actuator_id": ac.actuator_id,
-                "position": (self.arm_positions[ac.actuator_id] if ac.actuator_id in self.arm_positions else position[ac.nn_id]),
+                "position": (
+                    self.arm_positions[ac.actuator_id] if ac.actuator_id in self.arm_positions else position[ac.nn_id]
+                ),
                 "velocity": (0.0 if ac.actuator_id in self.arm_positions else velocity[ac.nn_id]),
             }
             for ac in self.actuator_list
