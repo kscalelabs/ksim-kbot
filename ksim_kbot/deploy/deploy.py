@@ -12,6 +12,7 @@ import pykos
 import tensorflow as tf
 from loguru import logger
 
+
 @dataclass
 class Actuator:
     actuator_id: int
@@ -20,6 +21,7 @@ class Actuator:
     kd: float
     max_torque: float
     joint_name: str
+
 
 class Deploy(ABC):
     """Abstract base class for deploying a SavedModel on K-Bot."""
@@ -164,7 +166,6 @@ class Deploy(ABC):
                 torque_enabled=True,
                 max_torque=ac.max_torque,
             )
-        
 
     def save_rollout(self) -> None:
         """Save the rollout to a file."""
@@ -203,59 +204,54 @@ class Deploy(ABC):
             )
 
         actuator_commands: list[pykos.services.actuator.ActuatorCommand] = [
-                    {
-                        "actuator_id": 12,
-                        "position": 7.0,
-                        "velocity": 0.0,
-                    }, 
-                    {
-                        "actuator_id": 22,
-                        "position": -7.0,
-                        "velocity": 0.0,
-                    }, 
-                    {
-                        "actuator_id": 14,
-                        "position": -15.0,
-                        "velocity": 0.0,
-                    },
-                    {
-                        "actuator_id": 24,
-                        "position": 15.0,
-                        "velocity": 0.0,
-                    }
-                ]
+            {
+                "actuator_id": 12,
+                "position": 7.0,
+                "velocity": 0.0,
+            },
+            {
+                "actuator_id": 22,
+                "position": -7.0,
+                "velocity": 0.0,
+            },
+            {
+                "actuator_id": 14,
+                "position": -15.0,
+                "velocity": 0.0,
+            },
+            {
+                "actuator_id": 24,
+                "position": 15.0,
+                "velocity": 0.0,
+            },
+        ]
 
         await self.kos.actuator.command_actuators(actuator_commands)
-
 
         actuator_commands: list[pykos.services.actuator.ActuatorCommand] = [
-                    {
-                        "actuator_id": 12,
-                        "position": 15.0,
-                        "velocity": 0.0,
-                    }, 
-                    {
-                        "actuator_id": 22,
-                        "position": -15.0,
-                        "velocity": 0.0,
-                    }, 
-                    {
-                        "actuator_id": 14,
-                        "position": -30.0,
-                        "velocity": 0.0,
-                    },
-                    {
-                        "actuator_id": 24,
-                        "position": 30.0,
-                        "velocity": 0.0,
-                    }
-                ]
+            {
+                "actuator_id": 12,
+                "position": 15.0,
+                "velocity": 0.0,
+            },
+            {
+                "actuator_id": 22,
+                "position": -15.0,
+                "velocity": 0.0,
+            },
+            {
+                "actuator_id": 14,
+                "position": -30.0,
+                "velocity": 0.0,
+            },
+            {
+                "actuator_id": 24,
+                "position": 30.0,
+                "velocity": 0.0,
+            },
+        ]
 
         await self.kos.actuator.command_actuators(actuator_commands)
-
-
-        breakpoint()
-        
 
         logger.warning(f"Deploying with Action Scale: {self.ACTION_SCALE}")
         if self.mode == "real-deploy":
@@ -264,7 +260,6 @@ class Deploy(ABC):
         observation = await self.get_observation()
         self.model.infer(observation)
 
-      
         if self.mode == "real-deploy":
             for i in range(5, -1, -1):
                 logger.info(f"Starting in {i} seconds...")
@@ -310,6 +305,7 @@ class Deploy(ABC):
         self.save_rollout()
         await self.disable()
 
+
 class FixedArmDeploy(Deploy):
     """Deploy class for fixed-arm policies."""
 
@@ -341,7 +337,9 @@ class FixedArmDeploy(Deploy):
         actuator_commands: list[pykos.services.actuator.ActuatorCommand] = [
             {
                 "actuator_id": ac.actuator_id,
-                "position": (self.arm_positions[ac.actuator_id] if ac.actuator_id in self.arm_positions else position[ac.nn_id]),
+                "position": (
+                    self.arm_positions[ac.actuator_id] if ac.actuator_id in self.arm_positions else position[ac.nn_id]
+                ),
                 "velocity": (0.0 if ac.actuator_id in self.arm_positions else velocity[ac.nn_id]),
             }
             for ac in self.actuator_list
