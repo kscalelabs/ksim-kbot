@@ -373,11 +373,15 @@ class XYPushEvent(ksim.Event):
         self, data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
     ) -> tuple[ksim.PhysicsData, Array]:
         push_theta = jax.random.uniform(rng, maxval=2 * jnp.pi)
-        push_magnitude = jax.random.uniform(
-            rng,
-            minval=self.force_range[0],
-            maxval=self.force_range[1],
-        ) * curriculum_level * self.curriculum_scale
+        push_magnitude = (
+            jax.random.uniform(
+                rng,
+                minval=self.force_range[0],
+                maxval=self.force_range[1],
+            )
+            * curriculum_level
+            * self.curriculum_scale
+        )
         push = jnp.array([jnp.cos(push_theta), jnp.sin(push_theta)])
         random_forces = push * push_magnitude + data.qvel[:2]
         new_qvel = slice_update(data, "qvel", slice(0, 2), random_forces)

@@ -13,7 +13,7 @@ import ksim
 import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
-from ksim.curriculum import ConstantCurriculum, Curriculum
+from ksim.curriculum import Curriculum
 from xax.nn.export import export
 
 from ksim_kbot import common, rewards as kbot_rewards
@@ -273,7 +273,9 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 ksim.StaticFrictionRandomizer(scale_lower=0.5, scale_upper=1.5),
                 ksim.ArmatureRandomizer(),
                 # ksim.AllBodiesMassMultiplicationRandomizer(),
-                ksim.MassAdditionRandomizer.from_body_name(physics_model, "Torso_Side_Right", scale_lower=-1.0, scale_upper=1.0),
+                ksim.MassAdditionRandomizer.from_body_name(
+                    physics_model, "Torso_Side_Right", scale_lower=-1.0, scale_upper=1.0
+                ),
                 ksim.JointDampingRandomizer(),
                 ksim.JointZeroPositionRandomizer(scale_lower=-0.03, scale_upper=0.03),
             ]
@@ -322,7 +324,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             increase_threshold=20.0,
             decrease_threshold=10.0,
             min_level_steps=5,
-            dt=self.config.ctrl_dt, # not sure what this is for
+            dt=self.config.ctrl_dt,  # not sure what this is for
         )
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
