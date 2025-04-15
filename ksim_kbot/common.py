@@ -67,6 +67,11 @@ class TargetPositionMITActuators(ksim.MITPositionVelocityActuators):
             current_pos = physics_data.qpos[:]
             current_vel = physics_data.qvel[:]
 
+        # To be removed
+        # Zero out the first
+        action = action.at[:10].set(0.0)
+        action = action.at[20:30].set(0.0)
+
         # Adds position and velocity noise.
         target_position = action[: len(current_pos)] * self.action_scale + self.default_targets
         target_velocity = action[len(current_pos) :] * self.action_scale
