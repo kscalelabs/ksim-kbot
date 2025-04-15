@@ -191,6 +191,34 @@ class Deploy(ABC):
         if self.mode == "real-deploy":
             input("Press Enter to continue...")
 
+        zero_pos_target_list = []
+        for ac in self.actuator_list:
+            zero_pos_target_list.append(
+                {
+                    "actuator_id": ac.actuator_id,
+                    "position": 0.0,
+                }
+            )
+
+        await self.kos.actuator.move_to_position(
+            positions=zero_pos_target_list,
+            num_seconds=3.0,
+        )
+
+        await self.kos.actuator.move_to_position(
+            positions=[
+                {
+                    "actuator_id": 14,
+                    "position": -90.0,
+                },
+                {
+                    "actuator_id": 24,
+                    "position": 90.0,
+                },
+            ],
+            num_seconds=3.0,
+        )
+
         if self.mode == "real":
             for i in range(5, -1, -1):
                 logger.info(f"Starting in {i} seconds...")
