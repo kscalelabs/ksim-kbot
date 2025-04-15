@@ -540,12 +540,12 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             ksim.JointVelocityPenalty(scale=-0.005),
             # ksim.AvoidLimitsReward(-0.01)
             ContactPenalty.create(
-                contact_obs_list=[
+                contact_obs_tuple=(
                     "contact_observation_left_upper_arm_body",
                     "contact_observation_left_forearm_body",
                     "contact_observation_right_upper_arm_body",
                     "contact_observation_right_forearm_body",
-                ],
+                ),
                 scale=-1.0,
                 name_suffix="arm_body_contact_penalty"
             ),
