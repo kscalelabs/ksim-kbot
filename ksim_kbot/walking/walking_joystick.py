@@ -10,19 +10,17 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import ksim
-import xax
 import numpy as np
+import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from ksim.curriculum import Curriculum
+from ksim.observation import ContactObservation
 from xax.nn.export import export
 
-from ksim.observation import ContactObservation
 from ksim_kbot import common, rewards as kbot_rewards
 from ksim_kbot.rewards import ContactPenalty
 from ksim_kbot.standing.standing import MAX_TORQUE, KbotStandingTask, KbotStandingTaskConfig
-
-
 
 OBS_SIZE = 20 * 2 + 4 + 3 + 3 + 40  # = position + velocity + phase + imu_acc + imu_gyro + last_action
 CMD_SIZE = 2 + 1 + 1
@@ -547,7 +545,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                     "contact_observation_right_forearm_body",
                 ),
                 scale=-1.0,
-                name_suffix="arm_body_contact_penalty"
+                name_suffix="arm_body_contact_penalty",
             ),
         ]
 

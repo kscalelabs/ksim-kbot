@@ -488,28 +488,32 @@ class FeetPhaseReward(ksim.Reward):
 @attrs.define(frozen=True, kw_only=True)
 class ContactPenalty(ksim.Reward):
     """Penalizes the robot when contact is detected on the specified body parts.
-    
+
     Uses the contact observation to determine if the robot is in contact with the specified body parts.
     """
 
     contact_obs_tuple: tuple[str, ...] = attrs.field()
     scale: float = attrs.field(default=-1.0)
     name_suffix: str = attrs.field(default="contact_penalty")
-    
+
     @classmethod
-    def create(cls, contact_obs_tuple: tuple[str, ...], scale: float = -1.0, name_suffix: str = "contact_penalty") -> Self:
+    def create(
+        cls, contact_obs_tuple: tuple[str, ...], scale: float = -1.0, name_suffix: str = "contact_penalty"
+    ) -> Self:
         return cls(contact_obs_tuple=contact_obs_tuple, scale=scale, name_suffix=name_suffix)
 
-    def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[jnp.ndarray, None]:
+    def __call__(
+        self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]
+    ) -> tuple[jnp.ndarray, None]:
         target_shape = trajectory.done.shape
-        
+
         is_contact = jnp.zeros(target_shape, dtype=bool)
         for obs_key in self.contact_obs_tuple:
             if obs_key not in trajectory.obs:
                 raise ValueError(f"Observation {obs_key} not found in trajectory")
-                
+
             contact_flag = trajectory.obs[obs_key]
-            
+
             # Handle different shapes based on batched vs single environment
             if contact_flag.shape == target_shape:
                 is_contact = is_contact | contact_flag
@@ -518,8 +522,7 @@ class ContactPenalty(ksim.Reward):
                 is_contact = is_contact | jnp.any(contact_flag, axis=reduction_axes)
             else:
                 broadcast_contact = jnp.broadcast_to(
-                    jnp.any(contact_flag) if contact_flag.ndim > 0 else contact_flag, 
-                    target_shape
+                    jnp.any(contact_flag) if contact_flag.ndim > 0 else contact_flag, target_shape
                 )
                 is_contact = is_contact | broadcast_contact
 
