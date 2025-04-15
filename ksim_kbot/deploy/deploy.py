@@ -96,6 +96,10 @@ class Deploy(ABC):
 
         if self.mode == "real-deploy":
             await self.kos.actuator.command_actuators(actuator_commands)
+            if self.rollout_dict is None:
+                self.rollout_dict = {"command": []}
+                logger.warning("Rollout dictionary is not initialized, initializing...")
+            self.rollout_dict["command"].append(actuator_commands)
         elif self.mode == "real-check":
             logger.info(f"Sending actuator commands: {actuator_commands}")
             if self.rollout_dict is None:
@@ -186,9 +190,6 @@ class Deploy(ABC):
         Args:
             episode_length: Length of the episode in seconds
         """
-        self.model = tf.saved_model.load(self.model_path)
-        self.kos = pykos.KOS(ip=self.ip)
-
         await self.enable()
         await asyncio.sleep(1)
         logger.info("Resetting...")
@@ -206,12 +207,12 @@ class Deploy(ABC):
         actuator_commands: list[pykos.services.actuator.ActuatorCommand] = [
             {
                 "actuator_id": 12,
-                "position": 7.0 / 2.0,
+                "position": -12.0 / 2.0,
                 "velocity": 0.0,
             },
             {
                 "actuator_id": 22,
-                "position": -7.0 / 2.0,
+                "position": 12.0 / 2.0,
                 "velocity": 0.0,
             },
             {
@@ -251,12 +252,13 @@ class Deploy(ABC):
                 logger.info(f"Starting in {i} seconds...")
                 await asyncio.sleep(1)
 
-        await self.reset()
-
         target_time = time.time() + self.DT
         observation = await self.get_observation()
 
         end_time = time.time() + episode_length
+
+        if self.mode == "sim":
+            await self.kos.sim.reset(pos={"x": 0.0, "y": 0.0, "z": 1.01}, quat={"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0})
 
         try:
             while time.time() < end_time:
@@ -300,11 +302,11 @@ class FixedArmDeploy(Deploy):
         # Override the arm positions.
         self.arm_positions = {
             11: 0.0,
-            12: 7.0,
+            12: 12.0,
             13: 0.0,
             14: -30.0,
             21: 0.0,
-            22: -7.0,
+            22: -12.0,
             23: 0.0,
             24: 30.0,
             25: 0.0,
@@ -333,6 +335,10 @@ class FixedArmDeploy(Deploy):
 
         if self.mode == "real-deploy":
             await self.kos.actuator.command_actuators(actuator_commands)
+            if self.rollout_dict is None:
+                self.rollout_dict = {"command": []}
+                logger.warning("Rollout dictionary is not initialized, initializing...")
+            self.rollout_dict["command"].append(actuator_commands)
         elif self.mode == "real-check":
             if self.rollout_dict is None:
                 self.rollout_dict = {"command": []}
