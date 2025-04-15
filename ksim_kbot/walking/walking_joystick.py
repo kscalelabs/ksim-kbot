@@ -270,6 +270,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
     def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
         if self.config.domain_randomize:
             return [
+                ksim.FloorFrictionRandomizer.from_geom_name(physics_model, "floor", scale_lower=0.1, scale_upper=2.0),
                 ksim.StaticFrictionRandomizer(scale_lower=0.5, scale_upper=1.5),
                 ksim.ArmatureRandomizer(),
                 # ksim.AllBodiesMassMultiplicationRandomizer(),
@@ -715,7 +716,7 @@ if __name__ == "__main__":
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,
-            max_action_latency=0.05,
+            max_action_latency=0.005,
             min_action_latency=0.0,
             rollout_length_seconds=5.0,
             render_length_seconds=5.0,
