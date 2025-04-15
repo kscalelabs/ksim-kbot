@@ -37,13 +37,14 @@ from ksim_kbot import common
 from ksim_kbot.walking.walking_rnn import (
     NUM_CRITIC_INPUTS,  # Import base critic input size
     NUM_INPUTS,  # Import base actor input size
-    NUM_JOINTS,
     RnnActor,
     RnnCritic,
     RnnModel,
     WalkingRnnTask,
     WalkingRnnTaskConfig,
 )
+
+NUM_JOINTS = 20
 
 HUMANOID_REFERENCE_MAPPINGS = (
     ReferenceMapping("CC_Base_L_ThighTwist01", "RS03_5"),  # hip
