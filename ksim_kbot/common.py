@@ -346,6 +346,7 @@ class XYPushEvent(ksim.Event):
 
     interval_range: tuple[float, float] = attrs.field()
     force_range: tuple[float, float] = attrs.field()
+    curriculum_scale: float = attrs.field(default=1.0)
 
     def __call__(
         self,
@@ -372,10 +373,14 @@ class XYPushEvent(ksim.Event):
         self, data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
     ) -> tuple[ksim.PhysicsData, Array]:
         push_theta = jax.random.uniform(rng, maxval=2 * jnp.pi)
-        push_magnitude = jax.random.uniform(
-            rng,
-            minval=self.force_range[0],
-            maxval=self.force_range[1],
+        push_magnitude = (
+            jax.random.uniform(
+                rng,
+                minval=self.force_range[0],
+                maxval=self.force_range[1],
+            )
+            * curriculum_level
+            * self.curriculum_scale
         )
         push = jnp.array([jnp.cos(push_theta), jnp.sin(push_theta)])
         random_forces = push * push_magnitude + data.qvel[:2]
@@ -385,6 +390,69 @@ class XYPushEvent(ksim.Event):
         # Chooses a new remaining interval.
         minval, maxval = self.interval_range
         time_remaining = jax.random.uniform(rng, (), minval=minval, maxval=maxval)
+
+        return updated_data, time_remaining
+
+    def get_initial_event_state(self, rng: PRNGKeyArray) -> Array:
+        minval, maxval = self.interval_range
+        return jax.random.uniform(rng, (), minval=minval, maxval=maxval)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class TorquePushEvent(ksim.Event):
+    """Randomly push the robot with torque (angular velocity) after some interval."""
+
+    interval_range: tuple[float, float] = attrs.field()
+    ang_vel_range: tuple[float, float] = attrs.field()  # Min/max push angular velocity per axis
+    curriculum_scale: float = attrs.field(default=1.0)
+
+    def __call__(
+        self,
+        model: ksim.PhysicsModel,
+        data: ksim.PhysicsData,
+        event_state: Array,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> tuple[ksim.PhysicsData, Array]:
+        dt = jnp.float32(model.opt.timestep)
+        time_remaining = event_state - dt
+
+        # Update the data if the time remaining is less than 0.
+        updated_data, time_remaining = jax.lax.cond(
+            time_remaining <= 0.0,
+            lambda: self._apply_random_angular_velocity_push(data, curriculum_level, rng),
+            lambda: (data, time_remaining),
+        )
+
+        return updated_data, time_remaining
+
+    def _apply_random_angular_velocity_push(
+        self, data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
+    ) -> tuple[ksim.PhysicsData, Array]:
+        """Applies a random angular velocity push to the root body."""
+        rng_push, rng_interval = jax.random.split(rng)
+
+        # Sample angular velocity push components
+        min_ang_vel, max_ang_vel = self.ang_vel_range
+        push_ang_vel = jax.random.uniform(
+            rng_push,
+            shape=(3,),  # Angular velocity is 3D (wx, wy, wz)
+            minval=min_ang_vel,
+            maxval=max_ang_vel,
+        )
+        scaled_push_ang_vel = push_ang_vel * curriculum_level * self.curriculum_scale
+
+        # Apply the push to angular velocity (qvel indices 3:6 for free joint)
+        ang_vel_indices = slice(3, 6)
+
+        # Add the push to the current angular velocity
+        current_ang_vel = data.qvel[ang_vel_indices]
+        new_ang_vel_val = current_ang_vel + scaled_push_ang_vel
+        new_qvel = slice_update(data, "qvel", ang_vel_indices, new_ang_vel_val)
+        updated_data = update_data_field(data, "qvel", new_qvel)
+
+        minval_interval, maxval_interval = self.interval_range
+        time_remaining = jax.random.uniform(rng_interval, (), minval=minval_interval, maxval=maxval_interval)
 
         return updated_data, time_remaining
 
