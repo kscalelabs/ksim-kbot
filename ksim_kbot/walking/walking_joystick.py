@@ -421,14 +421,14 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             common.LinearVelocityCommand(
                 x_range=(-0.3, 0.7),
                 y_range=(-0.2, 0.2),
-                x_zero_prob=0.1,
-                y_zero_prob=0.2,
-                switch_prob=self.config.ctrl_dt / 3,
+                x_zero_prob=1.0,
+                y_zero_prob=1.0,
+                switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
             ),
             common.AngularVelocityCommand(
                 scale=0.1,
-                zero_prob=0.9,
-                switch_prob=self.config.ctrl_dt / 3,
+                zero_prob=1.0,
+                switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
             ),
             common.GaitFrequencyCommand(
                 gait_freq_lower=self.config.gait_freq_lower,
@@ -509,11 +509,9 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 scale=-0.01,
                 sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
             ),
-            # NOTE: Investigate the effect of these penalties
             ksim.ActuatorForcePenalty(scale=-0.005),
             ksim.ActionSmoothnessPenalty(scale=-0.005),
             ksim.JointVelocityPenalty(scale=-0.005),
-            # ksim.AvoidLimitsReward(-0.01)
             kbot_rewards.StandStillPenalty(
                 scale=-1.0,
                 linear_velocity_cmd_name="linear_velocity_command",
