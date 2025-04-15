@@ -24,7 +24,7 @@ class Actuator:
 
 
 class Deploy(ABC):
-    """Abstract base class for deploying a SavedModel on K-Bot."""
+    """Abstract base class for deploying a policy on K-Bot."""
 
     # Class-level constants
     DT = 0.02  # Policy time step (50Hz)
