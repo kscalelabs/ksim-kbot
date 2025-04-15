@@ -152,11 +152,11 @@ def plot_command_data(data: dict, output_dir: str = "plots") -> None:
 
     # Save the figures
     for i, (fig, _) in enumerate(pos_figs):
-        fig.savefig(osp.join(output_dir, f"command_positions_group{i+1}.pdf"))
+        fig.savefig(osp.join(output_dir, f"command_positions_group{i + 1}.pdf"))
         plt.close(fig)
 
     for i, (fig, _) in enumerate(vel_figs):
-        fig.savefig(osp.join(output_dir, f"command_velocities_group{i+1}.pdf"))
+        fig.savefig(osp.join(output_dir, f"command_velocities_group{i + 1}.pdf"))
         plt.close(fig)
 
 
@@ -205,7 +205,7 @@ def plot_vector_data(data: dict, key: str, output_dir: str = "plots") -> None:
 
         # Save the figures
         for i, (fig, _) in enumerate(figs):
-            fig.savefig(osp.join(output_dir, f"{key}_group{i+1}.pdf"))
+            fig.savefig(osp.join(output_dir, f"{key}_group{i + 1}.pdf"))
             plt.close(fig)
 
     elif key == "imu_obs":

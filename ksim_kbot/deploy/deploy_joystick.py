@@ -8,7 +8,7 @@ import sys
 import numpy as np
 from loguru import logger
 
-from ksim_kbot.deploy.deploy import Deploy, FixedArmDeploy
+from ksim_kbot.deploy.deploy import Deploy
 
 
 class JoystickDeploy(Deploy):
@@ -107,7 +107,9 @@ class JoystickDeploy(Deploy):
             self.rollout_dict["prev_action"].append(self.prev_action)
             self.rollout_dict["phase"].append(phase_vec)
 
-        observation = np.concatenate([phase_vec, pos_diff, vel_obs, imu_accel, imu_gyro, cmd, self.gait, self.prev_action]).reshape(1, -1)
+        observation = np.concatenate(
+            [phase_vec, pos_diff, vel_obs, imu_accel, imu_gyro, cmd, self.gait, self.prev_action]
+        ).reshape(1, -1)
 
         return observation
 

@@ -3,7 +3,6 @@
 import asyncio
 import os
 import pickle
-import sys
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -13,6 +12,7 @@ import pykos
 import tensorflow as tf
 from loguru import logger
 
+
 @dataclass
 class Actuator:
     actuator_id: int
@@ -21,6 +21,7 @@ class Actuator:
     kd: float
     max_torque: float
     joint_name: str
+
 
 class Deploy(ABC):
     """Abstract base class for deploying a SavedModel on K-Bot."""
@@ -68,12 +69,12 @@ class Deploy(ABC):
         self.model = tf.saved_model.load(model_path)
         self.kos = pykos.KOS(ip=self.ip)
 
-        self.default_positions_deg = None
-        self.default_positions_rad = None
+        self.default_positions_deg = np.zeros(len(self.actuator_list))
+        self.default_positions_rad = np.zeros(len(self.actuator_list))
 
         self.prev_action = np.zeros(len(self.actuator_list) * 2)
 
-        self.rollout_dict = None
+        self.rollout_dict: dict[str, list[list[pykos.services.actuator.ActuatorCommand]]] | None = None
 
     async def send_actions(self, position: np.ndarray, velocity: np.ndarray) -> None:
         """Send actions to the robot's actuators.
@@ -97,10 +98,16 @@ class Deploy(ABC):
             await self.kos.actuator.command_actuators(actuator_commands)
         elif self.mode == "real-check":
             logger.info(f"Sending actuator commands: {actuator_commands}")
+            if self.rollout_dict is None:
+                self.rollout_dict = {"command": []}
+                logger.warning("Rollout dictionary is not initialized, initializing...")
             self.rollout_dict["command"].append(actuator_commands)
         elif self.mode == "sim":
             # For all other modes, log and send commands
             await self.kos.actuator.command_actuators(actuator_commands)
+            if self.rollout_dict is None:
+                self.rollout_dict = {"command": []}
+                logger.warning("Rollout dictionary is not initialized, initializing...")
             self.rollout_dict["command"].append(actuator_commands)
 
     async def configure_actuators(self) -> None:
@@ -132,6 +139,7 @@ class Deploy(ABC):
                 pos={"x": 0.0, "y": 0.0, "z": 1.01},
                 quat={"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
             )
+            assert self.default_positions_deg is not None, "Default positions are not initialized"
 
             reset_commands: list[pykos.services.actuator.ActuatorCommand] = [
                 {
@@ -191,7 +199,7 @@ class Deploy(ABC):
         if self.mode == "real-deploy":
             input("Press Enter to continue...")
 
-        zero_pos_target_list = []
+        zero_pos_target_list: list[pykos.services.actuator.ActuatorPosition] = []
         for ac in self.actuator_list:
             zero_pos_target_list.append(
                 {
@@ -233,7 +241,6 @@ class Deploy(ABC):
 
         try:
             while time.time() < end_time:
-
                 action = np.array(self.model.infer(observation)).reshape(-1)
 
                 #! Only scale action on observation but not onto default positions
@@ -298,8 +305,14 @@ class FixedArmDeploy(Deploy):
         if self.mode == "real-deploy":
             await self.kos.actuator.command_actuators(actuator_commands)
         elif self.mode == "real-check":
+            if self.rollout_dict is None:
+                self.rollout_dict = {"command": []}
+                logger.warning("Rollout dictionary is not initialized, initializing...")
             self.rollout_dict["command"].append(actuator_commands)
         elif self.mode == "sim":
             # For all other modes, log and send commands
             await self.kos.actuator.command_actuators(actuator_commands)
+            if self.rollout_dict is None:
+                self.rollout_dict = {"command": []}
+                logger.warning("Rollout dictionary is not initialized, initializing...")
             self.rollout_dict["command"].append(actuator_commands)
