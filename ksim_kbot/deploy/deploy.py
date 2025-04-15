@@ -119,7 +119,7 @@ class Deploy(ABC):
                     "position": 0.0,
                     "velocity": 0.0,
                 }
-                for ac, pos in zip(self.actuator_list, self.default_positions_deg)
+                for ac in self.actuator_list
             ]
 
             await self.kos.actuator.command_actuators(reset_commands)
@@ -134,10 +134,10 @@ class Deploy(ABC):
             reset_commands: list[pykos.services.actuator.ActuatorCommand] = [
                 {
                     "actuator_id": ac.actuator_id,
-                    "position": pos,
+                    "position": 0.0,
                     "velocity": 0.0,
                 }
-                for ac, pos in zip(self.actuator_list, self.default_positions_deg)
+                for ac in self.actuator_list
             ]
 
             await self.kos.actuator.command_actuators(reset_commands)
@@ -228,30 +228,16 @@ class Deploy(ABC):
 
         await self.kos.actuator.command_actuators(actuator_commands)
 
-        actuator_commands: list[pykos.services.actuator.ActuatorCommand] = [
-            {
-                "actuator_id": 12,
-                "position": 15.0,
-                "velocity": 0.0,
-            },
-            {
-                "actuator_id": 22,
-                "position": -15.0,
-                "velocity": 0.0,
-            },
-            {
-                "actuator_id": 14,
-                "position": -30.0,
-                "velocity": 0.0,
-            },
-            {
-                "actuator_id": 24,
-                "position": 30.0,
-                "velocity": 0.0,
-            },
-        ]
+        reset_commands: list[pykos.services.actuator.ActuatorCommand] = [
+                {
+                    "actuator_id": ac.actuator_id,
+                    "position": pos,
+                    "velocity": 0.0,
+                }
+                for ac, pos in zip(self.actuator_list, self.default_positions_deg)
+            ]
 
-        await self.kos.actuator.command_actuators(actuator_commands)
+        await self.kos.actuator.command_actuators(reset_commands)
 
         logger.warning(f"Deploying with Action Scale: {self.ACTION_SCALE}")
         if self.mode == "real-deploy":
