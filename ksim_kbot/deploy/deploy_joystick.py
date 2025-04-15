@@ -19,7 +19,7 @@ class JoystickDeploy(FixedArmDeploy):
         self.enable_joystick = enable_joystick
         self.gait = np.asarray([1.25])
 
-        self.default_positions_rad = np.array(
+        self.default_positions_rad: np.ndarray = np.array(
             [
                 0,
                 np.deg2rad(-12),
@@ -44,7 +44,7 @@ class JoystickDeploy(FixedArmDeploy):
             ]
         )
 
-        self.default_positions_deg = np.rad2deg(self.default_positions_rad)
+        self.default_positions_deg: np.ndarray = np.rad2deg(self.default_positions_rad)
         self.phase = np.array([0, np.pi])
 
         self.rollout_dict = {
