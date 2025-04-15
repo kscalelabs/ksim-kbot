@@ -6,7 +6,7 @@ import os
 import sys
 
 import numpy as np
-from loguru import logger
+from loguru import logger  # to be removed
 
 from ksim_kbot.deploy.deploy import FixedArmDeploy
 
@@ -147,7 +147,7 @@ def main() -> None:
         asyncio.run(deploy.run(args.episode_length))
     except Exception as e:
         logger.error("Error: %s", e)
-        deploy.disable()
+        asyncio.run(deploy.disable())
         raise e
 
 

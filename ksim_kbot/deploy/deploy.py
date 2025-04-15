@@ -6,6 +6,7 @@ import pickle
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Any, Dict, List
 
 import numpy as np
 import pykos
@@ -74,7 +75,7 @@ class Deploy(ABC):
 
         self.prev_action = np.zeros(len(self.actuator_list) * 2)
 
-        self.rollout_dict = None
+        self.rollout_dict: Dict[str, List[Any]] = {"command": []}
 
     async def send_actions(self, position: np.ndarray, velocity: np.ndarray) -> None:
         """Send actions to the robot's actuators.
@@ -96,36 +97,26 @@ class Deploy(ABC):
 
         if self.mode == "real-deploy":
             await self.kos.actuator.command_actuators(actuator_commands)
-            if self.rollout_dict is None:
-                self.rollout_dict = {"command": []}
-                logger.warning("Rollout dictionary is not initialized, initializing...")
             self.rollout_dict["command"].append(actuator_commands)
         elif self.mode == "real-check":
             logger.info(f"Sending actuator commands: {actuator_commands}")
-            if self.rollout_dict is None:
-                self.rollout_dict = {"command": []}
-                logger.warning("Rollout dictionary is not initialized, initializing...")
             self.rollout_dict["command"].append(actuator_commands)
         elif self.mode == "sim":
             # For all other modes, log and send commands
             await self.kos.actuator.command_actuators(actuator_commands)
-            if self.rollout_dict is None:
-                self.rollout_dict = {"command": []}
-                logger.warning("Rollout dictionary is not initialized, initializing...")
             self.rollout_dict["command"].append(actuator_commands)
 
     async def reset(self) -> None:
         """Reset all actuators to their default positions."""
+        reset_commands: list[pykos.services.actuator.ActuatorCommand] = [
+            {
+                "actuator_id": ac.actuator_id,
+                "position": 0.0,
+                "velocity": 0.0,
+            }
+            for ac in self.actuator_list
+        ]
         if self.mode in {"real-check", "real-deploy"}:
-            reset_commands: list[pykos.services.actuator.ActuatorCommand] = [
-                {
-                    "actuator_id": ac.actuator_id,
-                    "position": 0.0,
-                    "velocity": 0.0,
-                }
-                for ac in self.actuator_list
-            ]
-
             await self.kos.actuator.command_actuators(reset_commands)
 
         elif self.mode == "sim":
@@ -134,16 +125,6 @@ class Deploy(ABC):
                 quat={"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
             )
             assert self.default_positions_deg is not None, "Default positions are not initialized"
-
-            reset_commands: list[pykos.services.actuator.ActuatorCommand] = [
-                {
-                    "actuator_id": ac.actuator_id,
-                    "position": 0.0,
-                    "velocity": 0.0,
-                }
-                for ac in self.actuator_list
-            ]
-
             await self.kos.actuator.command_actuators(reset_commands)
 
         else:
@@ -335,19 +316,10 @@ class FixedArmDeploy(Deploy):
 
         if self.mode == "real-deploy":
             await self.kos.actuator.command_actuators(actuator_commands)
-            if self.rollout_dict is None:
-                self.rollout_dict = {"command": []}
-                logger.warning("Rollout dictionary is not initialized, initializing...")
             self.rollout_dict["command"].append(actuator_commands)
         elif self.mode == "real-check":
-            if self.rollout_dict is None:
-                self.rollout_dict = {"command": []}
-                logger.warning("Rollout dictionary is not initialized, initializing...")
             self.rollout_dict["command"].append(actuator_commands)
         elif self.mode == "sim":
             # For all other modes, log and send commands
             await self.kos.actuator.command_actuators(actuator_commands)
-            if self.rollout_dict is None:
-                self.rollout_dict = {"command": []}
-                logger.warning("Rollout dictionary is not initialized, initializing...")
             self.rollout_dict["command"].append(actuator_commands)

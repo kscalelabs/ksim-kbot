@@ -114,8 +114,8 @@ def plot_command_data(data: dict, output_dir: str = "plots") -> None:
 
     # Extract commands for each actuator over time
     steps = np.arange(len(data["command"]))
-    actuator_positions = {i: [] for i in range(20)}
-    actuator_velocities = {i: [] for i in range(20)}
+    actuator_positions: dict[int, list[float]] = {i: [] for i in range(20)}
+    actuator_velocities: dict[int, list[float]] = {i: [] for i in range(20)}
 
     for step_data in data["command"]:
         # Each step_data is a list of actuator commands
@@ -181,7 +181,7 @@ def plot_vector_data(data: dict, key: str, output_dir: str = "plots") -> None:
         figs = [(fig1, axs1), (fig2, axs2), (fig3, axs3), (fig4, axs4)]
 
         # Extract data for each nn_id over time
-        nn_id_data = {i: [] for i in range(vector_len)}
+        nn_id_data: dict[int, list[float]] = {i: [] for i in range(vector_len)}
 
         for step_data in data[key]:
             for i in range(vector_len):
