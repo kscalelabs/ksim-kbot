@@ -282,7 +282,6 @@ class Deploy(ABC):
                 action = np.array(self.model.infer(observation)).reshape(-1)
 
                 #! Only scale action on observation but not onto default positions
-                #! Only scale action on observation but not onto default positions
                 position = action[: len(self.actuator_list)] * self.ACTION_SCALE + self.default_positions_rad
                 velocity = action[len(self.actuator_list) :] * self.ACTION_SCALE
 
@@ -293,7 +292,6 @@ class Deploy(ABC):
                 self.prev_action = action.copy()
 
                 if time.time() < target_time:
-                    logger.debug(f"Sleeping for {max(0, target_time - time.time())} seconds")
                     logger.debug(f"Sleeping for {max(0, target_time - time.time())} seconds")
                     await asyncio.sleep(max(0, target_time - time.time()))
                 else:
