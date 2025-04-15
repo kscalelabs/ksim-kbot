@@ -206,22 +206,22 @@ class Deploy(ABC):
         actuator_commands: list[pykos.services.actuator.ActuatorCommand] = [
             {
                 "actuator_id": 12,
-                "position": 7.0,
+                "position": 7.0/2.0,
                 "velocity": 0.0,
             },
             {
                 "actuator_id": 22,
-                "position": -7.0,
+                "position": -7.0 / 2.0,
                 "velocity": 0.0,
             },
             {
                 "actuator_id": 14,
-                "position": -15.0,
+                "position": -30.0 / 2.0,
                 "velocity": 0.0,
             },
             {
                 "actuator_id": 24,
-                "position": 15.0,
+                "position": 30.0 / 2.0,
                 "velocity": 0.0,
             },
         ]
@@ -300,11 +300,11 @@ class FixedArmDeploy(Deploy):
         # Override the arm positions.
         self.arm_positions = {
             11: 0.0,
-            12: 12.0,
+            12: 7.0,
             13: 0.0,
             14: -30.0,
             21: 0.0,
-            22: -12.0,
+            22: -7.0,
             23: 0.0,
             24: 30.0,
             25: 0.0,
@@ -332,8 +332,7 @@ class FixedArmDeploy(Deploy):
         ]
 
         if self.mode == "real-deploy":
-            # await self.kos.actuator.command_actuators(actuator_commands)
-            pass
+            await self.kos.actuator.command_actuators(actuator_commands)
         elif self.mode == "real-check":
             if self.rollout_dict is None:
                 self.rollout_dict = {"command": []}
