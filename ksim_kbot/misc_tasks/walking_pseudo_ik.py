@@ -1,38 +1,38 @@
 # mypy: ignore-errors
 """Defines simple task for training a walking + pseudo ik policy for K-Bot."""
 
+import os
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Generic, TypeVar
+from typing import Generic, TypeVar
 
 import distrax
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import ksim
+import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from ksim.curriculum import Curriculum
-from xax.nn.export import export
-import uuid
-import os
-import mujoco
-import mujoco.mjx as mjx
+from mujoco import mjx
 
-from ksim_kbot import common, rewards as kbot_rewards
+from ksim_kbot import common
+from ksim_kbot.misc_tasks.pseudo_ik import BodyPositionObservation, CartesianBodyTargetVectorReward
 from ksim_kbot.walking.walking_joystick import (
-    KbotWalkingTask,
-    KbotWalkingTaskConfig,
+    JOINT_TARGETS,
+    NUM_CRITIC_INPUTS,
     NUM_INPUTS,
     NUM_OUTPUTS,
-    NUM_CRITIC_INPUTS,
-    JOINT_TARGETS,
+    KbotWalkingTask,
+    KbotWalkingTaskConfig,
 )
-from ksim_kbot.misc_tasks.pseudo_ik import BodyPositionObservation, CartesianBodyTargetVectorReward
 
 EXTRA_INPUTS = 3
 EXTRA_CRITIC_INPUTS = 3
+
 
 class KbotActor(eqx.Module):
     """Actor for the walking + pseudo ik task."""
@@ -397,23 +397,6 @@ class KbotWalkingPseudoIKTask(KbotWalkingTask[Config], Generic[Config]):
                 physics_model=physics_model,
                 body_name="ik_target",
             ),
-            # NOTE: Add collisions to hands
-            # ksim.ContactObservation(
-            #     physics_model=physics_model,
-            #     geom_names=(
-            #         "KB_C_501X_Right_Bayonet_Adapter_Hard_Stop",
-            #         "RS03_4",
-            #     ),
-            #     contact_group="right_hand_leg",
-            # ),
-            # ksim.ContactObservation(
-            #     physics_model=physics_model,
-            #     geom_names=(
-            #         "KB_C_501X_Left_Bayonet_Adapter_Hard_Stop",
-            #         "RS03_5",
-            #     ),
-            #     contact_group="left_hand_leg",
-            # ),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
@@ -460,14 +443,14 @@ class KbotWalkingPseudoIKTask(KbotWalkingTask[Config], Generic[Config]):
                     base_body_name="floating_base_link",
                     scale=10.0,
                     command_name="target_position_command",
-            ),
-            CartesianBodyTargetVectorReward.create(
-                model=physics_model,
-                command_name="target_position_command",
-                tracked_body_name="ik_target",
-                base_body_name="floating_base_link",
-                scale=3.0,
-                normalize_velocity=True,
+                ),
+                CartesianBodyTargetVectorReward.create(
+                    model=physics_model,
+                    command_name="target_position_command",
+                    tracked_body_name="ik_target",
+                    base_body_name="floating_base_link",
+                    scale=3.0,
+                    normalize_velocity=True,
                     distance_threshold=0.1,
                     dt=self.config.dt,
                 ),
@@ -478,9 +461,6 @@ class KbotWalkingPseudoIKTask(KbotWalkingTask[Config], Generic[Config]):
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [common.GVecTermination.create(physics_model, sensor_name="upvector_origin")]
-
-    def get_model(self, key: PRNGKeyArray) -> KbotModel:
-        return KbotModel(key)
 
     def get_initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
         return None, None
@@ -538,9 +518,9 @@ class KbotWalkingPseudoIKTask(KbotWalkingTask[Config], Generic[Config]):
 if __name__ == "__main__":
     # python -m ksim_kbot.walking.walking_joystick num_envs=2 batch_size=2
     # To run training, use the following command:
-    # python -m ksim_kbot.walking.walking_joystick.py disable_multiprocessing=True
+    # python -m ksim_kbot.misc_tasks.walking_pseudo_ik.py disable_multiprocessing=True
     # To visualize the environment, use the following command:
-    # python -m ksim_kbot.walking.walking_joystick.py run_environment=True \
+    # python -m ksim_kbot.misc_tasks.walking_pseudo_ik.py run_environment=True \
     #  run_environment_num_seconds=1 \
     #  run_environment_save_path=videos/test.mp4
     KbotWalkingPseudoIKTask.launch(
