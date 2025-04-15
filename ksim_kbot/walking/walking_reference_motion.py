@@ -490,7 +490,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
             TargetLinearVelocityReward(
                 index="x",
                 target_vel=0.5,
-                scale=1.5,
+                scale=3.0,
             ),
             TargetLinearVelocityReward(
                 index="y",
@@ -694,8 +694,8 @@ if __name__ == "__main__":
             batch_size=256,
             num_passes=10,
             epochs_per_log_step=1,
-            rollout_length_seconds=15.0,
-            render_length_seconds=15.0,
+            rollout_length_seconds=10.0,
+            render_length_seconds=10.0,
             increase_threshold=5.0,
             decrease_threshold=3.0,
             # Simulation parameters.
