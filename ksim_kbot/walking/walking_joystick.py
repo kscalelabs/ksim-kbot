@@ -556,7 +556,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                     "contact_observation_right_forearm_body",
                     "contact_observation_right_forearm_legs",
                 ),
-                scale=-1.0,
+                scale=-0.1,
                 name_suffix="arm_body_contact_penalty",
             ),
         ]
