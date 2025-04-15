@@ -208,6 +208,11 @@ class KbotStandingTaskConfig(ksim.PPOConfig):
         help="The path to the assets directory for the robot.",
     )
 
+    mjcf_type: str = xax.field(
+        value="robot",
+        help="The type of MJCF model to use. Options are 'robot' or 'collisions_simplified'",
+    )
+
     action_scale: float = xax.field(
         value=1.0,
         help="The scale to apply to the actions.",
@@ -270,7 +275,14 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         return optimizer
 
     def get_mujoco_model(self) -> mujoco.MjModel:
-        mjcf_path = (Path(self.config.robot_urdf_path) / "robot_scene_collisions_simplified.mjcf").resolve().as_posix()
+        if self.config.mjcf_type == "robot":
+            mjcf_path = (Path(self.config.robot_urdf_path) / "robot_scene.mjcf").resolve().as_posix()
+        elif self.config.mjcf_type == "collisions_simplified":
+            mjcf_path = (
+                (Path(self.config.robot_urdf_path) / "robot_scene_collisions_simplified.mjcf").resolve().as_posix()
+            )
+        else:
+            raise ValueError(f"Invalid MJCF type: {self.config.mjcf_type}")
         logger.info("Loading MJCF model from %s", mjcf_path)
         mj_model = load_mjmodel(mjcf_path, scene="smooth")
 

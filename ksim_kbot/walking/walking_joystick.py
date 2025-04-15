@@ -351,7 +351,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             base_linear_velocity_noise = 0.0
             base_angular_velocity_noise = 0.0
             base_angular_velocity_noise = 0.0
-        return [
+        obs = [
             common.TimestepPhaseObservation(),
             common.JointPositionObservation(
                 default_targets=JOINT_TARGETS,
@@ -397,37 +397,6 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 foot_right_site_name="right_foot",
                 floor_threshold=0.00,
             ),
-            ContactObservation.create(
-                physics_model=physics_model,
-                geom_names=("left_upper_arm_collision", "torso_collision"),
-                contact_group="left_upper_arm_body",
-            ),
-            ContactObservation.create(
-                physics_model=physics_model,
-                geom_names=("left_forearm_collision", "torso_collision"),
-                contact_group="left_forearm_body",
-            ),
-            ContactObservation.create(
-                physics_model=physics_model,
-                geom_names=("left_forearm_collision", "legs_collision"),
-                contact_group="left_forearm_legs",
-            ),
-            
-            ContactObservation.create(
-                physics_model=physics_model,
-                geom_names=("right_upper_arm_collision", "torso_collision"),
-                contact_group="right_upper_arm_body",
-            ),
-            ContactObservation.create(
-                physics_model=physics_model,
-                geom_names=("right_forearm_collision", "torso_collision"),
-                contact_group="right_forearm_body",
-            ),
-            ContactObservation.create(
-                physics_model=physics_model,
-                geom_names=("right_forearm_collision", "legs_collision"),
-                contact_group="right_forearm_legs",
-            ),
             common.TrueHeightObservation(),
             # NOTE: Add collisions to hands
             # ksim.ContactObservation(
@@ -447,6 +416,44 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             #     contact_group="left_hand_leg",
             # ),
         ]
+
+        if self.config.mjcf_type == "collisions_simplified":
+            obs.extend(
+                [
+                    ContactObservation.create(
+                        physics_model=physics_model,
+                        geom_names=("left_upper_arm_collision", "torso_collision"),
+                        contact_group="left_upper_arm_body",
+                    ),
+                    ContactObservation.create(
+                        physics_model=physics_model,
+                        geom_names=("left_forearm_collision", "torso_collision"),
+                        contact_group="left_forearm_body",
+                    ),
+                    ContactObservation.create(
+                        physics_model=physics_model,
+                        geom_names=("left_forearm_collision", "legs_collision"),
+                        contact_group="left_forearm_legs",
+                    ),
+                    ContactObservation.create(
+                        physics_model=physics_model,
+                        geom_names=("right_upper_arm_collision", "torso_collision"),
+                        contact_group="right_upper_arm_body",
+                    ),
+                    ContactObservation.create(
+                        physics_model=physics_model,
+                        geom_names=("right_forearm_collision", "torso_collision"),
+                        contact_group="right_forearm_body",
+                    ),
+                    ContactObservation.create(
+                        physics_model=physics_model,
+                        geom_names=("right_forearm_collision", "legs_collision"),
+                        contact_group="right_forearm_legs",
+                    ),
+                ]
+            )
+
+        return obs
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         # NOTE: increase to 360
