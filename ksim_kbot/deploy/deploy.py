@@ -3,7 +3,6 @@
 import asyncio
 import os
 import pickle
-import sys
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -68,8 +67,8 @@ class Deploy(ABC):
         self.model = tf.saved_model.load(model_path)
         self.kos = pykos.KOS(ip=self.ip)
 
-        self.default_positions_deg = None
-        self.default_positions_rad = None
+        self.default_positions_deg = np.zeros(len(self.actuator_list))
+        self.default_positions_rad = np.zeros(len(self.actuator_list))
 
         self.prev_action = np.zeros(len(self.actuator_list) * 2)
 
@@ -97,10 +96,16 @@ class Deploy(ABC):
             await self.kos.actuator.command_actuators(actuator_commands)
         elif self.mode == "real-check":
             logger.info(f"Sending actuator commands: {actuator_commands}")
+            if self.rollout_dict is None:
+                self.rollout_dict = {"command": []}
+                logger.warning("Rollout dictionary is not initialized, initializing...")
             self.rollout_dict["command"].append(actuator_commands)
         elif self.mode == "sim":
             # For all other modes, log and send commands
             await self.kos.actuator.command_actuators(actuator_commands)
+            if self.rollout_dict is None:
+                self.rollout_dict = {"command": []}
+                logger.warning("Rollout dictionary is not initialized, initializing...")
             self.rollout_dict["command"].append(actuator_commands)
 
     async def configure_actuators(self) -> None:
@@ -145,6 +150,7 @@ class Deploy(ABC):
                 pos={"x": 0.0, "y": 0.0, "z": 1.01},
                 quat={"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
             )
+            assert self.default_positions_deg is not None, "Default positions are not initialized"
 
             reset_commands: list[pykos.services.actuator.ActuatorCommand] = [
                 {
@@ -273,9 +279,9 @@ class Deploy(ABC):
 
         try:
             while time.time() < end_time:
-
                 action = np.array(self.model.infer(observation)).reshape(-1)
 
+                #! Only scale action on observation but not onto default positions
                 #! Only scale action on observation but not onto default positions
                 position = action[: len(self.actuator_list)] * self.ACTION_SCALE + self.default_positions_rad
                 velocity = action[len(self.actuator_list) :] * self.ACTION_SCALE
@@ -287,6 +293,7 @@ class Deploy(ABC):
                 self.prev_action = action.copy()
 
                 if time.time() < target_time:
+                    logger.debug(f"Sleeping for {max(0, target_time - time.time())} seconds")
                     logger.debug(f"Sleeping for {max(0, target_time - time.time())} seconds")
                     await asyncio.sleep(max(0, target_time - time.time()))
                 else:
@@ -346,8 +353,14 @@ class FixedArmDeploy(Deploy):
             # await self.kos.actuator.command_actuators(actuator_commands)
             pass
         elif self.mode == "real-check":
+            if self.rollout_dict is None:
+                self.rollout_dict = {"command": []}
+                logger.warning("Rollout dictionary is not initialized, initializing...")
             self.rollout_dict["command"].append(actuator_commands)
         elif self.mode == "sim":
             # For all other modes, log and send commands
             await self.kos.actuator.command_actuators(actuator_commands)
+            if self.rollout_dict is None:
+                self.rollout_dict = {"command": []}
+                logger.warning("Rollout dictionary is not initialized, initializing...")
             self.rollout_dict["command"].append(actuator_commands)

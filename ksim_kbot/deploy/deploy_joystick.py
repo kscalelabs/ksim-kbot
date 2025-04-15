@@ -18,6 +18,7 @@ class JoystickDeploy(FixedArmDeploy):
         super().__init__(model_path, mode, ip)
         self.enable_joystick = enable_joystick
         self.gait = np.asarray([1.25])
+        self.gait = np.asarray([1.25])
 
         self.default_positions_rad = np.array(
             [
@@ -53,6 +54,8 @@ class JoystickDeploy(FixedArmDeploy):
             "vel_obs": [],
             "imu_accel": [],
             "imu_gyro": [],
+            "imu_accel": [],
+            "imu_gyro": [],
             "controller_cmd": [],
             "prev_action": [],
             "phase": [],
@@ -78,6 +81,8 @@ class JoystickDeploy(FixedArmDeploy):
         )
         imu_accel = np.array([imu.accel_x, imu.accel_y, imu.accel_z])
         imu_gyro = np.array([imu.gyro_x, imu.gyro_y, imu.gyro_z])
+        imu_accel = np.array([imu.accel_x, imu.accel_y, imu.accel_z])
+        imu_gyro = np.array([imu.gyro_x, imu.gyro_y, imu.gyro_z])
 
         # * Pos Diff. Difference of current position from default position
         state_dict_pos = {state.actuator_id: state.position for state in actuator_states.states}
@@ -93,6 +98,7 @@ class JoystickDeploy(FixedArmDeploy):
 
         # * Phase, tracking a sinusoidal
         self.phase += 2 * np.pi * self.gait * self.DT
+        self.phase += 2 * np.pi * self.gait * self.DT
         self.phase = np.fmod(self.phase + np.pi, 2 * np.pi) - np.pi
         phase_vec = np.array([np.cos(self.phase), np.sin(self.phase)]).flatten()
 
@@ -101,6 +107,8 @@ class JoystickDeploy(FixedArmDeploy):
         if self.mode in ["sim", "real-check"]:
             self.rollout_dict["pos_diff"].append(pos_diff)
             self.rollout_dict["vel_obs"].append(vel_obs)
+            self.rollout_dict["imu_accel"].append(imu_accel)
+            self.rollout_dict["imu_gyro"].append(imu_gyro)
             self.rollout_dict["imu_accel"].append(imu_accel)
             self.rollout_dict["imu_gyro"].append(imu_gyro)
             self.rollout_dict["controller_cmd"].append(cmd)
@@ -141,6 +149,9 @@ def main() -> None:
 
     deploy = JoystickDeploy(args.enable_joystick, model_path, args.mode, args.ip)
     deploy.ACTION_SCALE = args.scale_action
+
+    if args.mode == "real-deploy":
+        input("Press Enter to start REAL deployment...")
 
     try:
         asyncio.run(deploy.run(args.episode_length))

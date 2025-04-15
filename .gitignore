@@ -29,5 +29,7 @@ experimental/
 # Deployment Assets
 */deploy/assets/*/*
 
+*.pkl
+
 # Development
 scratch/
