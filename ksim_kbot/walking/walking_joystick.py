@@ -310,7 +310,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                     interval_range=(2.0, 4.0),
                     force_range=(0.5, 1.8),
                 ),
-                common.AngularVelocityPushEvent(
+                common.TorquePushEvent(
                     interval_range=(2.0, 4.0),
                     ang_vel_range=(0.5, 1.8),
                 ),
