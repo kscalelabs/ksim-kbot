@@ -69,8 +69,8 @@ class Deploy(ABC):
         self.model = tf.saved_model.load(model_path)
         self.kos = pykos.KOS(ip=self.ip)
 
-        self.default_positions_deg = {ac.actuator_id: 0.0 for ac in self.actuator_list}
-        self.default_positions_rad = {ac.actuator_id: 0.0 for ac in self.actuator_list}
+        self.default_positions_deg = np.zeros(len(self.actuator_list))
+        self.default_positions_rad = np.zeros(len(self.actuator_list))
 
         self.prev_action = np.zeros(len(self.actuator_list) * 2)
 
@@ -119,7 +119,7 @@ class Deploy(ABC):
                     "position": 0.0,
                     "velocity": 0.0,
                 }
-                for ac in self.actuator_list
+                for ac, pos in zip(self.actuator_list, self.default_positions_deg)
             ]
 
             await self.kos.actuator.command_actuators(reset_commands)
@@ -134,10 +134,10 @@ class Deploy(ABC):
             reset_commands: list[pykos.services.actuator.ActuatorCommand] = [
                 {
                     "actuator_id": ac.actuator_id,
-                    "position": 0.0,
+                    "position": pos,
                     "velocity": 0.0,
                 }
-                for ac in self.actuator_list
+                for ac, pos in zip(self.actuator_list, self.default_positions_deg)
             ]
 
             await self.kos.actuator.command_actuators(reset_commands)
@@ -167,35 +167,6 @@ class Deploy(ABC):
                 max_torque=ac.max_torque,
             )
 
-    async def reset_to_default_positions(self) -> None:
-        """Move all actuators to their default positions."""
-        
-        first_step_actuator_commands: list[pykos.services.actuator.ActuatorCommand] = [
-            {
-                "actuator_id": actuator_id,
-                "position": position/2,
-                "velocity": 0.0,
-            }
-            for actuator_id, position in self.default_positions_deg.items()
-            if actuator_id in [12, 22, 14, 24]
-        ]
-
-        await self.kos.actuator.command_actuators(first_step_actuator_commands)
-        
-        second_step_actuator_commands: list[pykos.services.actuator.ActuatorCommand] = [
-            {
-                "actuator_id": actuator_id,
-                "position": position,
-                "velocity": 0.0,
-            }
-            for actuator_id, position in self.default_positions_deg.items()
-        ]
-
-        logger.warning(f"Resetting to default positions... {second_step_actuator_commands}")
-        await self.kos.actuator.command_actuators(second_step_actuator_commands)
-
-        breakpoint()
-
     def save_rollout(self) -> None:
         """Save the rollout to a file."""
         if self.rollout_dict is not None:
@@ -215,12 +186,72 @@ class Deploy(ABC):
         Args:
             episode_length: Length of the episode in seconds
         """
+        self.model = tf.saved_model.load(self.model_path)
+        self.kos = pykos.KOS(ip=self.ip)
+
         await self.enable()
         await asyncio.sleep(1)
         logger.info("Resetting...")
         await self.reset()
-        await asyncio.sleep(1)
-        await self.reset_to_default_positions()
+
+        zero_pos_target_list = []
+        for ac in self.actuator_list:
+            zero_pos_target_list.append(
+                {
+                    "actuator_id": ac.actuator_id,
+                    "position": 0.0,
+                }
+            )
+
+        actuator_commands: list[pykos.services.actuator.ActuatorCommand] = [
+            {
+                "actuator_id": 12,
+                "position": 7.0,
+                "velocity": 0.0,
+            },
+            {
+                "actuator_id": 22,
+                "position": -7.0,
+                "velocity": 0.0,
+            },
+            {
+                "actuator_id": 14,
+                "position": -15.0,
+                "velocity": 0.0,
+            },
+            {
+                "actuator_id": 24,
+                "position": 15.0,
+                "velocity": 0.0,
+            },
+        ]
+
+        await self.kos.actuator.command_actuators(actuator_commands)
+
+        actuator_commands: list[pykos.services.actuator.ActuatorCommand] = [
+            {
+                "actuator_id": 12,
+                "position": 15.0,
+                "velocity": 0.0,
+            },
+            {
+                "actuator_id": 22,
+                "position": -15.0,
+                "velocity": 0.0,
+            },
+            {
+                "actuator_id": 14,
+                "position": -30.0,
+                "velocity": 0.0,
+            },
+            {
+                "actuator_id": 24,
+                "position": 30.0,
+                "velocity": 0.0,
+            },
+        ]
+
+        await self.kos.actuator.command_actuators(actuator_commands)
 
         logger.warning(f"Deploying with Action Scale: {self.ACTION_SCALE}")
         if self.mode == "real-deploy":
@@ -234,25 +265,19 @@ class Deploy(ABC):
                 logger.info(f"Starting in {i} seconds...")
                 await asyncio.sleep(1)
 
+        await self.reset()
 
         target_time = time.time() + self.DT
         observation = await self.get_observation()
 
         end_time = time.time() + episode_length
 
-        if self.mode == "sim":
-           await self.kos.sim.reset(
-                pos={"x": 0.0, "y": 0.0, "z": 1.01},
-                quat={"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
-            )
-
         try:
             while time.time() < end_time:
                 action = np.array(self.model.infer(observation)).reshape(-1)
 
                 #! Only scale action on observation but not onto default positions
-                default_pos_rad_array = np.array([self.default_positions_rad[ac.actuator_id] for ac in sorted(self.actuator_list, key=lambda x: x.nn_id)])
-                position = action[: len(self.actuator_list)] * self.ACTION_SCALE + default_pos_rad_array
+                position = action[: len(self.actuator_list)] * self.ACTION_SCALE + self.default_positions_rad
                 velocity = action[len(self.actuator_list) :] * self.ACTION_SCALE
 
                 observation, _ = await asyncio.gather(
@@ -286,6 +311,18 @@ class FixedArmDeploy(Deploy):
 
     def __init__(self, model_path: str, mode: str, ip: str) -> None:
         super().__init__(model_path, mode, ip)
+        # Override the arm positions.
+        self.arm_positions = {
+            11: 0.0,
+            12: 12.0,
+            13: 0.0,
+            14: -30.0,
+            21: 0.0,
+            22: -12.0,
+            23: 0.0,
+            24: 30.0,
+            25: 0.0,
+        }
 
     async def send_actions(self, position: np.ndarray, velocity: np.ndarray) -> None:
         """Send actions to the robot's actuators with additional functionality.
@@ -301,15 +338,16 @@ class FixedArmDeploy(Deploy):
             {
                 "actuator_id": ac.actuator_id,
                 "position": (
-                    self.default_positions_deg[ac.actuator_id] if ac.actuator_id in [11, 12, 13, 14, 15, 21, 22, 23, 24, 25] else position[ac.nn_id]
+                    self.arm_positions[ac.actuator_id] if ac.actuator_id in self.arm_positions else position[ac.nn_id]
                 ),
-                "velocity": (0.0 if ac.actuator_id in [11, 12, 13, 14, 15, 21, 22, 23, 24, 25] else velocity[ac.nn_id]),
+                "velocity": (0.0 if ac.actuator_id in self.arm_positions else velocity[ac.nn_id]),
             }
             for ac in self.actuator_list
         ]
 
         if self.mode == "real-deploy":
-            await self.kos.actuator.command_actuators(actuator_commands)
+            # await self.kos.actuator.command_actuators(actuator_commands)
+            pass
         elif self.mode == "real-check":
             if self.rollout_dict is None:
                 self.rollout_dict = {"command": []}

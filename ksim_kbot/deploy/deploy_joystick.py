@@ -19,29 +19,32 @@ class JoystickDeploy(FixedArmDeploy):
         self.enable_joystick = enable_joystick
         self.gait = np.asarray([1.25])
 
-        self.default_positions_rad = {
-            11: 0,
-            12: np.deg2rad(15),
-            13: 0,
-            14: np.deg2rad(-30),
-            15: 0,  # right arm
-            21: 0,
-            22: np.deg2rad(-15),
-            23: 0,
-            24: np.deg2rad(30),
-            25: 0,  # left arm
-            31: -0.23,
-            32: 0,
-            33: 0,
-            34: -0.441,
-            35: 0.195,  # right leg
-            41: 0.23,
-            42: 0,
-            43: 0,
-            44: 0.441,
-            45: -0.195,  # left leg
-        }
-        self.default_positions_deg = {k: np.rad2deg(v) for k, v in self.default_positions_rad.items()}
+        self.default_positions_rad = np.array(
+            [
+                0,
+                np.deg2rad(5),
+                0,
+                np.deg2rad(30),
+                0,  # right arm
+                0,
+                np.deg2rad(-5),
+                0,
+                np.deg2rad(-30),
+                0,  # left arm
+                -0.23,
+                0,
+                0,
+                -0.441,
+                0.195,  # right leg
+                0.23,
+                0,
+                0,
+                0.441,
+                -0.195,  # left leg
+            ]
+        )
+
+        self.default_positions_deg = np.rad2deg(self.default_positions_rad)
         self.phase = np.array([0, np.pi])
 
         self.rollout_dict = {
@@ -58,7 +61,6 @@ class JoystickDeploy(FixedArmDeploy):
     def get_command(self) -> np.ndarray:
         """Get command from the joystick."""
         if self.enable_joystick:
-            # TODO: Implement actual joystick command retrieval
             return np.array([0.0, 0.0, 0.0])
         else:
             return np.array([0.0, 0.0, 0.0])
@@ -81,9 +83,7 @@ class JoystickDeploy(FixedArmDeploy):
         state_dict_pos = {state.actuator_id: state.position for state in actuator_states.states}
         pos_obs = [state_dict_pos[ac.actuator_id] for ac in sorted(self.actuator_list, key=lambda x: x.nn_id)]
         pos_obs = np.deg2rad(np.array(pos_obs))
-        
-        default_pos_rad = np.array([self.default_positions_rad[ac.actuator_id] for ac in sorted(self.actuator_list, key=lambda x: x.nn_id)])
-        pos_diff = pos_obs - default_pos_rad  #! K-Sim is in radians
+        pos_diff = pos_obs - self.default_positions_rad  #! K-Sim is in radians
 
         # * Vel Obs. Velocity at each joint
         state_dict_vel = {state.actuator_id: state.velocity for state in actuator_states.states}
@@ -101,6 +101,8 @@ class JoystickDeploy(FixedArmDeploy):
         if self.mode in ["sim", "real-check"]:
             self.rollout_dict["pos_diff"].append(pos_diff)
             self.rollout_dict["vel_obs"].append(vel_obs)
+            self.rollout_dict["imu_accel"].append(imu_accel)
+            self.rollout_dict["imu_gyro"].append(imu_gyro)
             self.rollout_dict["imu_accel"].append(imu_accel)
             self.rollout_dict["imu_gyro"].append(imu_gyro)
             self.rollout_dict["controller_cmd"].append(cmd)
@@ -124,7 +126,7 @@ def main() -> None:
     )
     parser.add_argument("--enable_joystick", action="store_true", help="Enable joystick")
     parser.add_argument("--scale_action", type=float, default=0.1, help="Action Scale, default 0.1")
-    parser.add_argument("--ip", type=str, default="100.101.101.48", help="IP address of KOS")
+    parser.add_argument("--ip", type=str, default="localhost", help="IP address of KOS")
     parser.add_argument("--episode_length", type=int, default=5, help="Length of episode in seconds")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
