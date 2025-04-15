@@ -387,9 +387,9 @@ class KbotRnnWalkingTask(KbotWalkingTask[Config], Generic[Config]):
 if __name__ == "__main__":
     # python -m ksim_kbot.walking.walking_joystick_rnn num_envs=2 batch_size=2
     # To run training, use the following command:
-    # python -m ksim_kbot.walking.walking_joystick_rnn.py disable_multiprocessing=True
+    # python -m ksim_kbot.walking.walking_joystick_rnn disable_multiprocessing=True
     # To visualize the environment, use the following command:
-    # python -m ksim_kbot.walking.walking_joystick_rnn.py run_environment=True \
+    # python -m ksim_kbot.walking.walking_joystick_rnn run_environment=True \
     #  run_environment_num_seconds=1 \
     #  run_environment_save_path=videos/test.mp4
     KbotRnnWalkingTask.launch(

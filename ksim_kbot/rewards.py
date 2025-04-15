@@ -421,17 +421,39 @@ class FeetAirTimeReward(ksim.Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class StandStillPenalty(ksim.Reward):
+    """Penalty for standing still."""
+
+    scale: float = -1.0
+    norm: xax.NormType = attrs.field(default="l1")
+    stand_still_threshold: float = 0.05
+    linear_velocity_cmd_name: str = attrs.field(default="linear_velocity_command")
+    angular_velocity_cmd_name: str = attrs.field(default="angular_velocity_command")
+    joint_targets: tuple[float, ...] = attrs.field()
+
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
+        vel_cmd = trajectory.command[self.linear_velocity_cmd_name]
+        ang_vel_cmd = trajectory.command[self.angular_velocity_cmd_name]
+        cmd_norm = jnp.linalg.norm(jnp.concatenate([vel_cmd, ang_vel_cmd], axis=-1), axis=-1)
+
+        cost = xax.get_norm(trajectory.qpos[..., 7:] - jnp.array(self.joint_targets), self.norm).sum(axis=-1)
+        cost *= cmd_norm < self.stand_still_threshold
+        return cost, None
+
+
+@attrs.define(frozen=True, kw_only=True)
 class FeetPhaseReward(ksim.Reward):
     """Reward for tracking the desired foot height."""
 
     scale: float = 1.0
     feet_pos_obs_name: str = attrs.field(default="feet_position_observation")
+    linear_velocity_cmd_name: str = attrs.field(default="linear_velocity_command")
+    angular_velocity_cmd_name: str = attrs.field(default="angular_velocity_command")
     gait_freq_cmd_name: str = attrs.field(default="gait_frequency_command")
     max_foot_height: float = 0.12
     ctrl_dt: float = 0.02
     sensitivity: float = 0.01
     foot_default_height: float = 0.0
-    stand_still: bool = attrs.field(default=False)
     stand_still_threshold: float = 0.1
 
     def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
@@ -459,11 +481,11 @@ class FeetPhaseReward(ksim.Reward):
         error = jnp.sum(jnp.square(foot_z - ideal_z), axis=-1)
         reward = jnp.exp(-error / self.sensitivity)
 
-        if self.stand_still:
-            # no movement for small velocity command
-            command = trajectory.command["linear_velocity_command"]
-            command_norm = jnp.linalg.norm(command, axis=-1)
-            reward *= command_norm > self.stand_still_threshold
+        # no movement for small velocity command
+        vel_cmd = trajectory.command[self.linear_velocity_cmd_name]
+        ang_vel_cmd = trajectory.command[self.angular_velocity_cmd_name]
+        command_norm = jnp.linalg.norm(jnp.concatenate([vel_cmd, ang_vel_cmd], axis=-1), axis=-1)
+        reward *= command_norm > self.stand_still_threshold
 
         return reward, None
 

@@ -215,7 +215,7 @@ class KbotWalkingTaskConfig(KbotStandingTaskConfig):
     log_full_trajectory_on_first_step: bool = xax.field(value=False)
     log_full_trajectory_every_n_seconds: float = xax.field(value=1.0)
 
-    stand_still: bool = xax.field(value=True)
+    stand_still_threshold: float = xax.field(value=0.05)
 
 
 Config = TypeVar("Config", bound=KbotWalkingTaskConfig)
@@ -408,8 +408,8 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             common.LinearVelocityCommand(
                 x_range=(-0.3, 0.7),
                 y_range=(-0.2, 0.2),
-                x_zero_prob=0.1,
-                y_zero_prob=0.2,
+                x_zero_prob=1.0,
+                y_zero_prob=1.0,
                 switch_prob=0.0,
             ),
             common.AngularVelocityCommand(
@@ -483,7 +483,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 foot_default_height=0.04,
                 max_foot_height=0.12,
                 scale=2.1,
-                stand_still=self.config.stand_still,
+                stand_still_threshold=self.config.stand_still_threshold,
             ),
             kbot_rewards.FeetSlipPenalty(scale=-0.25),
             # force penalties
@@ -500,6 +500,13 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             # ksim.ActuatorForcePenalty(scale=-0.005),
             # ksim.ActionSmoothnessPenalty(scale=-0.005),
             # ksim.AvoidLimitsReward(-0.01)
+            kbot_rewards.StandStillPenalty(
+                scale=-1.0,
+                linear_velocity_cmd_name="linear_velocity_command",
+                angular_velocity_cmd_name="angular_velocity_command",
+                joint_targets=JOINT_TARGETS,
+                stand_still_threshold=self.config.stand_still_threshold,
+            ),
         ]
 
         return rewards
@@ -688,9 +695,9 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
 if __name__ == "__main__":
     # python -m ksim_kbot.walking.walking_joystick num_envs=2 batch_size=2
     # To run training, use the following command:
-    # python -m ksim_kbot.walking.walking_joystick.py disable_multiprocessing=True
+    # python -m ksim_kbot.walking.walking_joystick disable_multiprocessing=True
     # To visualize the environment, use the following command:
-    # python -m ksim_kbot.walking.walking_joystick.py run_environment=True \
+    # python -m ksim_kbot.walking.walking_joystick run_environment=True \
     #  run_environment_num_seconds=1 \
     #  run_environment_save_path=videos/test.mp4
     KbotWalkingTask.launch(
@@ -723,6 +730,6 @@ if __name__ == "__main__":
             gait_freq_upper=1.5,
             reward_clip_min=0.0,
             reward_clip_max=1000.0,
-            stand_still=False,
+            stand_still_threshold=0.05,
         ),
     )
