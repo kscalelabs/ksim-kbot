@@ -309,11 +309,11 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             return [
                 common.XYPushEvent(
                     interval_range=(2.0, 4.0),
-                    force_range=(0.5, 1.8),
+                    force_range=(0.0, 1.8),
                 ),
                 common.TorquePushEvent(
                     interval_range=(2.0, 4.0),
-                    ang_vel_range=(0.5, 1.8),
+                    ang_vel_range=(0.0, 1.8),
                 ),
             ]
         else:
