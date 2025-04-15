@@ -15,9 +15,9 @@ from jaxtyping import Array, PRNGKeyArray
 from xax.nn.export import export
 
 from ksim_kbot.walking.walking_joystick import (
+    NUM_CRITIC_INPUTS,
     NUM_INPUTS,
     NUM_OUTPUTS,
-    NUM_CRITIC_INPUTS,
     KbotWalkingTask,
     KbotWalkingTaskConfig,
 )
