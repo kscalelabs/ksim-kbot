@@ -23,12 +23,12 @@ class JoystickDeploy(FixedArmDeploy):
             11: 0,
             12: np.deg2rad(15),
             13: 0,
-            14: np.deg2rad(30),
+            14: np.deg2rad(-30),
             15: 0,  # right arm
             21: 0,
             22: np.deg2rad(-15),
             23: 0,
-            24: np.deg2rad(-30),
+            24: np.deg2rad(30),
             25: 0,  # left arm
             31: -0.23,
             32: 0,
@@ -124,7 +124,7 @@ def main() -> None:
     )
     parser.add_argument("--enable_joystick", action="store_true", help="Enable joystick")
     parser.add_argument("--scale_action", type=float, default=0.1, help="Action Scale, default 0.1")
-    parser.add_argument("--ip", type=str, default="localhost", help="IP address of KOS")
+    parser.add_argument("--ip", type=str, default="100.101.101.48", help="IP address of KOS")
     parser.add_argument("--episode_length", type=int, default=5, help="Length of episode in seconds")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
