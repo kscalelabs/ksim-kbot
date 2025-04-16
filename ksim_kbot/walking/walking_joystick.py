@@ -521,8 +521,8 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             ksim.ActuatorForcePenalty(scale=-0.005),
             ksim.ActionSmoothnessPenalty(scale=-0.005),
             ksim.JointVelocityPenalty(scale=-0.005),
-            kbot_rewards.StandStillPenalty(
-                scale=-1.0,
+            kbot_rewards.StandStillReward(
+                scale=1.0,
                 linear_velocity_cmd_name="linear_velocity_command",
                 angular_velocity_cmd_name="angular_velocity_command",
                 joint_targets=JOINT_TARGETS,
@@ -733,7 +733,7 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             max_action_latency=0.005,
             min_action_latency=0.0,
-            rollout_length_seconds=5.0,
+            rollout_length_seconds=1.25,
             render_length_seconds=5.0,
             # PPO parameters
             action_scale=1.0,

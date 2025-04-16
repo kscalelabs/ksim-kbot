@@ -435,24 +435,29 @@ class FeetAirTimeReward(ksim.Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class StandStillPenalty(ksim.Reward):
-    """Penalty for standing still."""
+class StandStillReward(ksim.Reward):
+    """Reward for standing still."""
 
-    scale: float = -1.0
+    scale: float = 1.0
+    sensitivity: float = 0.01
     norm: xax.NormType = attrs.field(default="l1")
-    stand_still_threshold: float = 0.05
     linear_velocity_cmd_name: str = attrs.field(default="linear_velocity_command")
     angular_velocity_cmd_name: str = attrs.field(default="angular_velocity_command")
     joint_targets: tuple[float, ...] = attrs.field()
+    stand_still_threshold: float = 0.05
 
     def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
         vel_cmd = trajectory.command[self.linear_velocity_cmd_name]
         ang_vel_cmd = trajectory.command[self.angular_velocity_cmd_name]
         cmd_norm = jnp.linalg.norm(jnp.concatenate([vel_cmd, ang_vel_cmd], axis=-1), axis=-1)
 
-        cost = xax.get_norm(trajectory.qpos[..., 7:] - jnp.array(self.joint_targets), self.norm).sum(axis=-1)
-        cost *= cmd_norm < self.stand_still_threshold
-        return cost, None
+        error = jnp.sum(
+            jnp.square(trajectory.qpos[..., 7:] - jnp.array(self.joint_targets)),
+            axis=-1,
+        )
+        reward = jnp.exp(-error / self.sensitivity)
+        reward *= cmd_norm < self.stand_still_threshold
+        return reward, None
 
 
 @attrs.define(frozen=True, kw_only=True)
