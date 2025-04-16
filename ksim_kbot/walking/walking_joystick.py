@@ -22,6 +22,7 @@ from ksim_kbot.standing.standing import MAX_TORQUE, KbotStandingTask, KbotStandi
 OBS_SIZE = 20 * 2 + 4 + 3 + 3 + 40  # = position + velocity + phase + imu_acc + imu_gyro + last_action
 CMD_SIZE = 2 + 1 + 1
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
+NUM_CRITIC_INPUTS = NUM_INPUTS + 2 + 6 + 3 + 3 + 4 + 3 + 3 + 20 + 1
 NUM_OUTPUTS = 20 * 2  # position + velocity
 JOINT_TARGETS = (
     # right arm
@@ -134,7 +135,7 @@ class KbotCritic(eqx.Module):
 
     def __init__(self, key: PRNGKeyArray) -> None:
         self.mlp = eqx.nn.MLP(
-            in_size=NUM_INPUTS + 2 + 6 + 3 + 3 + 4 + 3 + 3 + 20 + 1,
+            in_size=NUM_CRITIC_INPUTS,
             out_size=1,  # Always output a single critic value.
             width_size=256,
             depth=5,
@@ -330,9 +331,10 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         if self.config.domain_randomize:
-            vel_obs_noise = 0.0
+            vel_obs_noise = 2.5
             imu_acc_noise = 0.5
             imu_gyro_noise = 0.5
+            local_gvec_noise = 0.08
             gvec_noise = 0.0
             base_position_noise = 0.0
             base_orientation_noise = 0.0
@@ -344,6 +346,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             imu_acc_noise = 0.0
             imu_gyro_noise = 0.0
             gvec_noise = 0.0
+            local_gvec_noise = 0.0
             base_position_noise = 0.0
             base_orientation_noise = 0.0
             base_linear_velocity_noise = 0.0
@@ -368,6 +371,9 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 noise=imu_gyro_noise,
             ),
             common.ProjectedGravityObservation(noise=gvec_noise),
+            common.LocalProjectedGravityObservation.create(
+                physics_model=physics_model, sensor_name="base_link_quat", noise=local_gvec_noise
+            ),
             common.LastActionObservation(noise=0.0),
             # Additional critic observations
             ksim.BasePositionObservation(noise=base_position_noise),

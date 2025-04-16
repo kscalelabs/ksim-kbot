@@ -250,6 +250,8 @@ class KbotStandingTaskConfig(ksim.PPOConfig):
         help="Whether to export the model for inference.",
     )
 
+    terrain_type: str = xax.field(value="smooth", help="The type of terrain to use. Options are 'smooth' or 'rough'")
+
 
 class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     def get_optimizer(self) -> optax.GradientTransformation:
@@ -272,7 +274,8 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
     def get_mujoco_model(self) -> mujoco.MjModel:
         mjcf_path = (Path(self.config.robot_urdf_path) / "robot.mjcf").resolve().as_posix()
         logger.info("Loading MJCF model from %s", mjcf_path)
-        mj_model = load_mjmodel(mjcf_path, scene="smooth")
+
+        mj_model = load_mjmodel(mjcf_path, scene=self.config.terrain_type)
 
         mj_model.opt.timestep = jnp.array(self.config.dt)
         mj_model.opt.iterations = 6
