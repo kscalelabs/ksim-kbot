@@ -7,6 +7,7 @@ import sys
 
 import numpy as np
 from loguru import logger  # to be removed
+from scipy.spatial.transform import Rotation as R
 
 from ksim_kbot.deploy.deploy import FixedArmDeploy
 
@@ -14,10 +15,11 @@ from ksim_kbot.deploy.deploy import FixedArmDeploy
 class JoystickDeploy(FixedArmDeploy):
     """Deploy class for joystick-controlled policies."""
 
-    def __init__(self, enable_joystick: bool, model_path: str, mode: str, ip: str) -> None:
+    def __init__(self, enable_joystick: bool, model_path: str, mode: str, ip: str, imu_type: str) -> None:
         super().__init__(model_path, mode, ip)
         self.enable_joystick = enable_joystick
         self.gait = np.asarray([1.25])
+        self.imu_type = imu_type
 
         self.default_positions_rad: np.ndarray = np.array(
             [
@@ -51,12 +53,15 @@ class JoystickDeploy(FixedArmDeploy):
             "command": [],
             "pos_diff": [],
             "vel_obs": [],
-            "imu_accel": [],
-            "imu_gyro": [],
             "controller_cmd": [],
             "prev_action": [],
             "phase": [],
         }
+        if self.imu_type == "raw":
+            self.rollout_dict["imu_accel"] = []
+            self.rollout_dict["imu_gyro"] = []
+        else:
+            self.rollout_dict["proj_grav"] = []
 
     def get_command(self) -> np.ndarray:
         """Get command from the joystick."""
@@ -72,12 +77,23 @@ class JoystickDeploy(FixedArmDeploy):
             Observation vector and updated phase
         """
         # * IMU Observation
-        (actuator_states, imu) = await asyncio.gather(
+        (actuator_states, imu, raw_quat) = await asyncio.gather(
             self.kos.actuator.get_actuators_state([ac.actuator_id for ac in self.actuator_list]),
             self.kos.imu.get_imu_values(),
+            self.kos.imu.get_quaternion(),
         )
-        imu_accel = np.array([imu.accel_x, imu.accel_y, imu.accel_z])
-        imu_gyro = np.array([imu.gyro_x, imu.gyro_y, imu.gyro_z])
+
+
+        imu_obs = []
+        if self.imu_type == "raw":
+            imu_accel = np.array([imu.accel_x, imu.accel_y, imu.accel_z])
+            imu_gyro = np.array([imu.gyro_x, imu.gyro_y, imu.gyro_z])
+            imu_obs = [imu_accel, imu_gyro]
+        else:
+            r = R.from_quat([raw_quat.x, raw_quat.y, raw_quat.z, raw_quat.w])
+            proj_grav_world = r.apply(np.array([0.0, 0.0, -1.0]), inverse=True)
+            proj_grav = proj_grav_world
+            imu_obs = [proj_grav]
 
         # * Pos Diff. Difference of current position from default position
         state_dict_pos = {state.actuator_id: state.position for state in actuator_states.states}
@@ -101,14 +117,17 @@ class JoystickDeploy(FixedArmDeploy):
         if self.mode in ["sim", "real-check", "real-deploy"]:
             self.rollout_dict["pos_diff"].append(pos_diff)
             self.rollout_dict["vel_obs"].append(vel_obs)
-            self.rollout_dict["imu_accel"].append(imu_accel)
-            self.rollout_dict["imu_gyro"].append(imu_gyro)
+            if self.imu_type == "raw":
+                self.rollout_dict["imu_accel"].append(imu_accel)
+                self.rollout_dict["imu_gyro"].append(imu_gyro)
+            else:
+                self.rollout_dict["proj_grav"].append(proj_grav)
             self.rollout_dict["controller_cmd"].append(cmd)
             self.rollout_dict["prev_action"].append(self.prev_action)
             self.rollout_dict["phase"].append(phase_vec)
 
         observation = np.concatenate(
-            [phase_vec, pos_diff, vel_obs, imu_accel, imu_gyro, cmd, self.gait, self.prev_action]
+            [phase_vec, pos_diff, vel_obs] + imu_obs + [cmd, self.gait, self.prev_action]
         ).reshape(1, -1)
 
         return observation
@@ -122,12 +141,16 @@ def main() -> None:
         "--mode", type=str, required=True, choices=["sim", "real-deploy", "real-check"], help="Mode of deployment"
     )
     parser.add_argument("--enable_joystick", action="store_true", help="Enable joystick")
-    parser.add_argument("--scale_action", type=float, default=0.1, help="Action Scale, default 0.1")
+    parser.add_argument("--scale_action", type=float, default=1.0, help="Action Scale, default 0.1")
     parser.add_argument("--ip", type=str, default="localhost", help="IP address of KOS")
     parser.add_argument("--episode_length", type=int, default=5, help="Length of episode in seconds")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+    parser.add_argument("--imu_type", type=str, choices=["raw", "grav"], default="grav", help="Type of IMU data to use in observation ('raw' or 'grav')")
 
     args = parser.parse_args()
+    
+    if args.imu_type not in ["raw", "grav"]:
+        raise ValueError(f"Unknown imu_type: {args.imu_type}")
 
     file_dir = os.path.dirname(os.path.abspath(__file__))
     model_path = os.path.join(file_dir, "assets", args.model_path)
@@ -140,7 +163,7 @@ def main() -> None:
     logger.add(sys.stderr, level=log_level)  # This will keep the default colorized format
     logger.add(f"{file_dir}/deployment_checks/last_deployment.log", level=log_level)
 
-    deploy = JoystickDeploy(args.enable_joystick, model_path, args.mode, args.ip)
+    deploy = JoystickDeploy(args.enable_joystick, model_path, args.mode, args.ip, args.imu_type)
     deploy.ACTION_SCALE = args.scale_action
 
     try:
