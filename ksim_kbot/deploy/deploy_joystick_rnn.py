@@ -92,7 +92,7 @@ class JoystickRNNDeploy(FixedArmDeploy):
         r = Rotation.from_quat(np.array([quat.w, quat.x, quat.y, quat.z]), scalar_first=True)
         proj_grav_world = r.apply(np.array([0.0, 0.0, 1.0]), inverse=True)
         projected_gravity = proj_grav_world
-        print(projected_gravity)
+        # print(projected_gravity)
 
         # * Pos Diff. Difference of current position from default position
         state_dict_pos = {state.actuator_id: state.position for state in actuator_states.states}
