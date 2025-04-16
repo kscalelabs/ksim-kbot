@@ -116,7 +116,6 @@ class JointPositionObservation(ksim.Observation):
         diff = qpos - jnp.array(self.default_targets)
         return diff
 
-
 @attrs.define(frozen=True)
 class ProjectedGravityObservation(ksim.Observation):
     noise: float = attrs.field(default=0.0)
@@ -124,6 +123,24 @@ class ProjectedGravityObservation(ksim.Observation):
     def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
         gvec = xax.get_projected_gravity_vector_from_quat(state.physics_state.data.qpos[3:7])
         return gvec
+
+@attrs.define(frozen=True)
+class LocalProjectedGravityObservation(ksim.Observation):
+    sensor_idx_range: tuple[int, int] = attrs.field()
+    noise: float = attrs.field(default=0.0)
+    sensor_name: str = attrs.field(default="base_link_quat")
+
+    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
+        quat = state.physics_state.data.sensordata[self.sensor_idx_range[0]:self.sensor_idx_range[1]].ravel()
+        return xax.get_projected_gravity_vector_from_quat(quat)
+
+    @classmethod
+    def create(cls, physics_model: ksim.PhysicsModel, sensor_name: str, noise: float = 0.0) -> Self:
+        sensor_idx_range = get_sensor_data_idxs_by_name(physics_model)[sensor_name]
+        return cls(sensor_name=sensor_name, sensor_idx_range=sensor_idx_range, noise=noise)
+
+    def get_name(self) -> str:
+        return f"{self.sensor_name}_{super().get_name()}"
 
 
 @attrs.define(frozen=True)
