@@ -279,12 +279,7 @@ class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
         mjcf_path = (Path(self.config.robot_urdf_path) / "robot.mjcf").resolve().as_posix()
         logger.info("Loading MJCF model from %s", mjcf_path)
 
-        if self.config.terrain_type == "flat":
-            mj_model = load_mjmodel(mjcf_path, scene="smooth")
-        elif self.config.terrain_type == "rough":
-            mj_model = load_mjmodel(mjcf_path, scene="rough")
-        else:
-            raise ValueError(f"Invalid terrain type: {self.config.terrain_type}")
+        mj_model = load_mjmodel(mjcf_path, scene=self.config.terrain_type)
 
         mj_model.opt.timestep = jnp.array(self.config.dt)
         mj_model.opt.iterations = 6
