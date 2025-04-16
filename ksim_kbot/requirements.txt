@@ -3,3 +3,4 @@
 ksim
 askin
 mujoco-scenes
+loguru  # to be removed

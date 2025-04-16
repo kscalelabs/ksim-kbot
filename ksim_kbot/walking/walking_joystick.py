@@ -22,6 +22,7 @@ from ksim_kbot.standing.standing import MAX_TORQUE, KbotStandingTask, KbotStandi
 OBS_SIZE = 20 * 2 + 4 + 3 + 3 + 40  # = position + velocity + phase + imu_acc + imu_gyro + last_action
 CMD_SIZE = 2 + 1 + 1
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
+NUM_CRITIC_INPUTS = NUM_INPUTS + 2 + 6 + 3 + 3 + 4 + 3 + 3 + 20 + 1
 NUM_OUTPUTS = 20 * 2  # position + velocity
 JOINT_TARGETS = (
     # right arm
@@ -134,7 +135,7 @@ class KbotCritic(eqx.Module):
 
     def __init__(self, key: PRNGKeyArray) -> None:
         self.mlp = eqx.nn.MLP(
-            in_size=NUM_INPUTS + 2 + 6 + 3 + 3 + 4 + 3 + 3 + 20 + 1,
+            in_size=NUM_CRITIC_INPUTS,
             out_size=1,  # Always output a single critic value.
             width_size=256,
             depth=5,
