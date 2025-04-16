@@ -50,17 +50,17 @@ class Deploy(ABC):
             actuator_id=15, nn_id=9, kp=20.0, kd=0.45473329537059787, max_torque=1.0, joint_name="dof_left_wrist_00"
         ),
         # Right leg (nn_id 10-14)
-        Actuator(actuator_id=41, nn_id=10, kp=85.0, kd=5.0, max_torque=80.0, joint_name="dof_right_hip_pitch_04"),
-        Actuator(actuator_id=42, nn_id=11, kp=40.0, kd=4.0, max_torque=60.0, joint_name="dof_right_hip_roll_03"),
-        Actuator(actuator_id=43, nn_id=12, kp=40.0, kd=4.0, max_torque=60.0, joint_name="dof_right_hip_yaw_03"),
-        Actuator(actuator_id=44, nn_id=13, kp=85.0, kd=5.0, max_torque=80.0, joint_name="dof_right_knee_04"),
-        Actuator(actuator_id=45, nn_id=14, kp=30.0, kd=1.0, max_torque=17.0, joint_name="dof_right_ankle_02"),
+        Actuator(actuator_id=41, nn_id=10, kp=85.0, kd=5.0, max_torque=60.0, joint_name="dof_right_hip_pitch_04"),
+        Actuator(actuator_id=42, nn_id=11, kp=40.0, kd=4.0, max_torque=40.0, joint_name="dof_right_hip_roll_03"),
+        Actuator(actuator_id=43, nn_id=12, kp=40.0, kd=4.0, max_torque=40.0, joint_name="dof_right_hip_yaw_03"),
+        Actuator(actuator_id=44, nn_id=13, kp=85.0, kd=5.0, max_torque=60.0, joint_name="dof_right_knee_04"),
+        Actuator(actuator_id=45, nn_id=14, kp=30.0, kd=1.0, max_torque=14.0, joint_name="dof_right_ankle_02"),
         # Left leg (nn_id 15-19)
-        Actuator(actuator_id=31, nn_id=15, kp=85.0, kd=5.0, max_torque=80.0, joint_name="dof_left_hip_pitch_04"),
-        Actuator(actuator_id=32, nn_id=16, kp=40.0, kd=4.0, max_torque=60.0, joint_name="dof_left_hip_roll_03"),
-        Actuator(actuator_id=33, nn_id=17, kp=40.0, kd=4.0, max_torque=60.0, joint_name="dof_left_hip_yaw_03"),
-        Actuator(actuator_id=34, nn_id=18, kp=85.0, kd=5.0, max_torque=80.0, joint_name="dof_left_knee_04"),
-        Actuator(actuator_id=35, nn_id=19, kp=30.0, kd=1.0, max_torque=17.0, joint_name="dof_left_ankle_02"),
+        Actuator(actuator_id=31, nn_id=15, kp=85.0, kd=5.0, max_torque=60.0, joint_name="dof_left_hip_pitch_04"),
+        Actuator(actuator_id=32, nn_id=16, kp=40.0, kd=4.0, max_torque=40.0, joint_name="dof_left_hip_roll_03"),
+        Actuator(actuator_id=33, nn_id=17, kp=40.0, kd=4.0, max_torque=40.0, joint_name="dof_left_hip_yaw_03"),
+        Actuator(actuator_id=34, nn_id=18, kp=85.0, kd=5.0, max_torque=60.0, joint_name="dof_left_knee_04"),
+        Actuator(actuator_id=35, nn_id=19, kp=30.0, kd=1.0, max_torque=14.0, joint_name="dof_left_ankle_02"),
     ]
 
     def __init__(self, model_path: str, mode: str, ip: str) -> None:
