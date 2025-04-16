@@ -250,7 +250,7 @@ class KbotStandingTaskConfig(ksim.PPOConfig):
         help="Whether to export the model for inference.",
     )
 
-    terrain_type: str = xax.field(value="flat", help="The type of terrain to use. Options are 'flat' or 'rough'")
+    terrain_type: str = xax.field(value="smooth", help="The type of terrain to use. Options are 'smooth' or 'rough'")
 
 
 class KbotStandingTask(ksim.PPOTask[KbotStandingTaskConfig], Generic[Config]):
