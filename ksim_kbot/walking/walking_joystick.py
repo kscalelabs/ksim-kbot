@@ -331,10 +331,10 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         if self.config.domain_randomize:
-            vel_obs_noise = 0.0
+            vel_obs_noise = 2.5
             imu_acc_noise = 0.5
             imu_gyro_noise = 0.5
-            gvec_noise = 0.0
+            gvec_noise = 0.08
             base_position_noise = 0.0
             base_orientation_noise = 0.0
             base_linear_velocity_noise = 0.0
