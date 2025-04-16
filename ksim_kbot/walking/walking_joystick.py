@@ -335,6 +335,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         if self.config.domain_randomize:
+            dof_pos_noise = 0.05
             vel_obs_noise = 2.5
             imu_acc_noise = 0.5
             imu_gyro_noise = 0.5
@@ -345,6 +346,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             base_angular_velocity_noise = 0.0
             base_angular_velocity_noise = 0.0
         else:
+            dof_pos_noise = 0.0
             vel_obs_noise = 0.0
             imu_acc_noise = 0.0
             imu_gyro_noise = 0.0
@@ -358,7 +360,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             common.TimestepPhaseObservation(),
             common.JointPositionObservation(
                 default_targets=JOINT_TARGETS,
-                noise=0.01,
+                noise=dof_pos_noise,
             ),
             ksim.JointVelocityObservation(noise=vel_obs_noise),
             ksim.ActuatorForceObservation(),
