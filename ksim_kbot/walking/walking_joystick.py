@@ -272,14 +272,14 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         if self.config.domain_randomize:
             return [
                 ksim.FloorFrictionRandomizer.from_geom_name(physics_model, "floor", scale_lower=0.1, scale_upper=2.0),
-                ksim.StaticFrictionRandomizer(scale_lower=0.5, scale_upper=1.5),
+                ksim.StaticFrictionRandomizer(scale_lower=0.5, scale_upper=2.0),
                 ksim.ArmatureRandomizer(),
                 # ksim.AllBodiesMassMultiplicationRandomizer(),
                 ksim.MassAdditionRandomizer.from_body_name(
                     physics_model, "Torso_Side_Right", scale_lower=-1.0, scale_upper=1.0
                 ),
                 ksim.JointDampingRandomizer(),
-                ksim.JointZeroPositionRandomizer(scale_lower=-0.03, scale_upper=0.03),
+                ksim.JointZeroPositionRandomizer(scale_lower=-0.05, scale_upper=0.05),
             ]
         else:
             return []
