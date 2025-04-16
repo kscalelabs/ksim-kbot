@@ -95,8 +95,7 @@ class KbotRNNActor(eqx.Module):
         timestep_phase_4: Array,
         joint_pos_n: Array,
         joint_vel_n: Array,
-        imu_acc_3: Array,
-        imu_gyro_3: Array,
+        projected_gravity_3: Array,
         lin_vel_cmd_2: Array,
         ang_vel_cmd: Array,
         gait_freq_cmd: Array,
@@ -108,8 +107,7 @@ class KbotRNNActor(eqx.Module):
                 timestep_phase_4,  # 1
                 joint_pos_n,  # NUM_JOINTS
                 joint_vel_n,  # NUM_JOINTS
-                imu_acc_3,  # 3
-                imu_gyro_3,  # 3
+                projected_gravity_3,  # 3
                 lin_vel_cmd_2,  # 2
                 ang_vel_cmd,  # 1
                 gait_freq_cmd,  # 1
