@@ -4,18 +4,21 @@ import argparse
 import asyncio
 import os
 import sys
+import time
 
 import numpy as np
 from loguru import logger  # to be removed
-import time
 from scipy.spatial.transform import Rotation
+
 from ksim_kbot.deploy.deploy import FixedArmDeploy
 
 
 class JoystickRNNDeploy(FixedArmDeploy):
     """Deploy class for joystick-controlled policies."""
 
-    def __init__(self, enable_joystick: bool, model_path: str, mode: str, ip: str, carry_shape: tuple[int, int]) -> None:
+    def __init__(
+        self, enable_joystick: bool, model_path: str, mode: str, ip: str, carry_shape: tuple[int, int]
+    ) -> None:
         super().__init__(model_path, mode, ip)
         self.enable_joystick = enable_joystick
         self.gait = np.asarray([1.25])
@@ -83,8 +86,8 @@ class JoystickRNNDeploy(FixedArmDeploy):
 
         imu_gyro = np.array([imu.gyro_x, imu.gyro_y, imu.gyro_z])
         euler_angles = np.array(euler_angles)
-                
-        r = Rotation.from_euler('xyz', euler_angles)
+
+        r = Rotation.from_euler("xyz", euler_angles)
         proj_grav_world = r.apply(np.array([0.0, 0.0, -1.0]), inverse=True)
         projected_gravity = proj_grav_world
 
@@ -128,7 +131,6 @@ class JoystickRNNDeploy(FixedArmDeploy):
         Args:
             episode_length: Length of the episode in seconds
         """
-
         await self.preflight()
 
         observation = await self.get_observation()

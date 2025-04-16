@@ -232,7 +232,6 @@ class Deploy(ABC):
         if self.mode == "sim":
             await self.kos.sim.reset(pos={"x": 0.0, "y": 0.0, "z": 1.01}, quat={"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0})
 
-
     async def postflight(self) -> None:
         """Postflight actions for the robot."""
         await self.disable()
@@ -240,14 +239,12 @@ class Deploy(ABC):
         self.save_rollout()
         logger.info("Episode finished!")
 
-
     async def run(self, episode_length: int) -> None:
         """Run the policy on the robot.
 
         Args:
             episode_length: Length of the episode in seconds
         """
-
         await self.preflight()
 
         observation = await self.get_observation()
@@ -282,6 +279,7 @@ class Deploy(ABC):
             raise KeyboardInterrupt
 
         await self.postflight()
+
 
 class FixedArmDeploy(Deploy):
     """Deploy class for fixed-arm policies."""
