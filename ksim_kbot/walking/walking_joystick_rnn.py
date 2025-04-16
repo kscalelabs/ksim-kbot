@@ -120,7 +120,6 @@ class KbotRNNActor(eqx.Module):
             axis=-1,
         )
 
-        # breakpoint()
         return self.call_flat_obs(obs_n, carry)
 
     def call_flat_obs(self, obs_n: Array, carry: Array) -> tuple[distrax.Distribution, Array]:
