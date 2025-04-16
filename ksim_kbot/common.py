@@ -212,9 +212,9 @@ class GVecTermination(ksim.Termination):
         return jnp.where(state.sensordata[start:end][-1] < self.min_z, -1, 0)
 
     @classmethod
-    def create(cls, physics_model: ksim.PhysicsModel, sensor_name: str) -> Self:
+    def create(cls, physics_model: ksim.PhysicsModel, sensor_name: str, min_z: float = 0.0) -> Self:
         sensor_idx_range = get_sensor_data_idxs_by_name(physics_model)[sensor_name]
-        return cls(sensor_idx_range=sensor_idx_range)
+        return cls(sensor_idx_range=sensor_idx_range, min_z=min_z)
 
 
 @attrs.define(frozen=True, kw_only=True)

@@ -163,6 +163,7 @@ class KbotCritic(eqx.Module):
         base_angular_velocity_3: Array,
         actuator_force_n: Array,
         true_height_1: Array,
+        end_effector_pos_3: Array,
     ) -> Array:
         x_n = jnp.concatenate(
             [
@@ -184,6 +185,7 @@ class KbotCritic(eqx.Module):
                 base_angular_velocity_3,
                 actuator_force_n,
                 true_height_1,
+                end_effector_pos_3,
             ],
             axis=-1,
         )
@@ -574,6 +576,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         base_angular_velocity_3 = observations["base_angular_velocity_observation"]
         actuator_force_n = observations["actuator_force_observation"]
         true_height_1 = observations["true_height_observation"]
+        end_effector_pos_3 = observations["ik_target_body_position_observation"]
 
         return model.forward(
             timestep_phase_4=timestep_phase_4,
@@ -595,6 +598,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             base_angular_velocity_3=base_angular_velocity_3,
             actuator_force_n=actuator_force_n,
             true_height_1=true_height_1,
+            end_effector_pos_3=end_effector_pos_3,
         )
 
     def get_ppo_variables(
@@ -686,7 +690,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
 
         model_fn = self.make_export_model(model, stochastic=False, batched=True)
 
-        input_shapes = [(NUM_INPUTS,)]
+        input_shapes = [(self.get_model(jax.random.PRNGKey(0)).actor.mlp.in_size,)]
         tf_path = (
             ckpt_path.parent / "tf_model"
             if self.config.only_save_most_recent

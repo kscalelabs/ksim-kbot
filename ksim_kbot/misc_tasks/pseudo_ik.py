@@ -148,7 +148,7 @@ class BodyOrientationTrackingReward(ksim.Reward):
     norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
     eps: float = attrs.field(default=1e-6)
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+    def __call__(self, trajectory: ksim.Trajectory, _: None) -> Array:
         body_quat = trajectory.xquat[..., self.tracked_body_idx, :]
         target_quat = trajectory.command[self.command_name]
 
@@ -170,7 +170,7 @@ class BodyOrientationTrackingReward(ksim.Reward):
         # Negative delta error as reward: improving alignment yields positive reward.
         reward = -error_diff
 
-        return reward
+        return reward, None
 
     @classmethod
     def create(
@@ -202,7 +202,7 @@ class CartesianBodyTargetVectorReward(ksim.Reward):
     distance_threshold: float = attrs.field()
     epsilon: float = attrs.field(default=1e-6)
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+    def __call__(self, trajectory: ksim.Trajectory, _: None) -> Array:
         body_pos_tl = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
 
         body_pos_right_shifted_tl = jnp.roll(body_pos_tl, shift=1, axis=0)
@@ -231,7 +231,7 @@ class CartesianBodyTargetVectorReward(ksim.Reward):
             original_products = body_vel_tl * normalized_target_vector
 
         # This will give maximum reward if near the target (and velocity is normalized)
-        return jnp.where(far_from_target & high_velocity, jnp.sum(original_products, axis=-1), 1.1)
+        return jnp.where(far_from_target & high_velocity, jnp.sum(original_products, axis=-1), 1.1), None
 
     @classmethod
     def create(
