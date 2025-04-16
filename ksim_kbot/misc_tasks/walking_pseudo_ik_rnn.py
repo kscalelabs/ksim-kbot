@@ -317,16 +317,13 @@ class KbotWalkingPseudoIKTask(KbotWalkingTask[Config], Generic[Config]):
         return KbotModel(key)
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> Curriculum:
-        return ksim.ConstantCurriculum(
-            level=0.2,
+        return ksim.EpisodeLengthCurriculum(
+            num_levels=10,
+            increase_threshold=20.0,
+            decrease_threshold=10.0,
+            min_level_steps=5,
+            dt=self.config.ctrl_dt,  # not sure what this is for
         )
-        # return ksim.EpisodeLengthCurriculum(
-        #     num_levels=10,
-        #     increase_threshold=20.0,
-        #     decrease_threshold=10.0,
-        #     min_level_steps=5,
-        #     dt=self.config.ctrl_dt,  # not sure what this is for
-        # )
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         if self.config.domain_randomize:
@@ -444,7 +441,7 @@ class KbotWalkingPseudoIKTask(KbotWalkingTask[Config], Generic[Config]):
                     model=physics_model,
                     tracked_body_name="ik_target",
                     base_body_name="floating_base_link",
-                    scale=3.0,
+                    scale=10.0,
                     command_name="target_position_command",
                 ),
                 CartesianBodyTargetVectorReward.create(
@@ -452,7 +449,7 @@ class KbotWalkingPseudoIKTask(KbotWalkingTask[Config], Generic[Config]):
                     command_name="target_position_command",
                     tracked_body_name="ik_target",
                     base_body_name="floating_base_link",
-                    scale=1.0,
+                    scale=3.0,
                     normalize_velocity=True,
                     distance_threshold=0.1,
                     dt=self.config.dt,
@@ -463,10 +460,7 @@ class KbotWalkingPseudoIKTask(KbotWalkingTask[Config], Generic[Config]):
         return rewards
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
-        return [
-            common.GVecTermination.create(physics_model, sensor_name="upvector_origin", min_z=0.0),
-            ksim.MinimumHeightTermination(min_height=0.2),
-        ]
+        return [common.GVecTermination.create(physics_model, sensor_name="upvector_origin", min_z=0.0)]
 
     def get_initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
         return None, None
