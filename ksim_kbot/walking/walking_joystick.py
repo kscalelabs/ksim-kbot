@@ -19,11 +19,13 @@ from xax.nn.export import export
 from ksim_kbot import common, rewards as kbot_rewards
 from ksim_kbot.standing.standing import MAX_TORQUE, KbotStandingTask, KbotStandingTaskConfig
 
-OBS_SIZE = 20 * 2 + 4 + 3 + 3 + 40  # = position + velocity + phase + imu_acc + imu_gyro + last_action
+OBS_SIZE = 20 * 2 + 4 + 3 + 40  # = position + velocity + phase + projected_gravity + last_action
 CMD_SIZE = 2 + 1 + 1
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
-NUM_CRITIC_INPUTS = NUM_INPUTS + 2 + 6 + 3 + 3 + 4 + 3 + 3 + 20 + 1
+NUM_CRITIC_INPUTS = NUM_INPUTS + 2 + 6 + 3 + 3 + 3 + 4 + 3 + 3 + 20 + 1
 NUM_OUTPUTS = 20 * 2  # position + velocity
+# Make this a proper config
+VEL_SCALE = 0.05
 JOINT_TARGETS = (
     # right arm
     0.0,
@@ -88,8 +90,9 @@ class KbotActor(eqx.Module):
         timestep_phase_4: Array,
         joint_pos_n: Array,
         joint_vel_n: Array,
-        imu_acc_3: Array,
-        imu_gyro_3: Array,
+        # imu_acc_3: Array,
+        # imu_gyro_3: Array,
+        projected_gravity_3: Array,
         lin_vel_cmd_2: Array,
         ang_vel_cmd: Array,
         gait_freq_cmd: Array,
@@ -99,9 +102,10 @@ class KbotActor(eqx.Module):
             [
                 timestep_phase_4,
                 joint_pos_n,
-                joint_vel_n,
-                imu_acc_3,
-                imu_gyro_3,
+                joint_vel_n * VEL_SCALE,
+                # imu_acc_3,
+                # imu_gyro_3,
+                projected_gravity_3,
                 lin_vel_cmd_2,
                 ang_vel_cmd,
                 gait_freq_cmd,
@@ -168,7 +172,7 @@ class KbotCritic(eqx.Module):
             [
                 timestep_phase_4,
                 joint_pos_n,
-                joint_vel_n,
+                joint_vel_n * VEL_SCALE,
                 imu_acc_3,
                 imu_gyro_3,
                 projected_gravity_3,
@@ -534,8 +538,9 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         timestep_phase_4 = observations["timestep_phase_observation"]
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
-        imu_acc_3 = observations["sensor_observation_imu_acc"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        # imu_acc_3 = observations["sensor_observation_imu_acc"]
+        # imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        projected_gravity_3 = observations["projected_gravity_observation"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         ang_vel_cmd = commands["angular_velocity_command"]
         gait_freq_cmd = commands["gait_frequency_command"]
@@ -544,8 +549,9 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             timestep_phase_4=timestep_phase_4,
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
-            imu_acc_3=imu_acc_3,
-            imu_gyro_3=imu_gyro_3,
+            # imu_acc_3=imu_acc_3,
+            # imu_gyro_3=imu_gyro_3,
+            projected_gravity_3=projected_gravity_3,
             lin_vel_cmd_2=lin_vel_cmd_2,
             ang_vel_cmd=ang_vel_cmd,
             gait_freq_cmd=gait_freq_cmd,
@@ -579,8 +585,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             timestep_phase_4=timestep_phase_4,
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
-            imu_acc_3=imu_acc_3,
-            imu_gyro_3=imu_gyro_3,
+            projected_gravity_3=projected_gravity_3,
             lin_vel_cmd_2=lin_vel_cmd_2,
             ang_vel_cmd=ang_vel_cmd,
             gait_freq_cmd=gait_freq_cmd,
@@ -588,7 +593,8 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             # critic observations
             feet_contact_2=feet_contact_2,
             feet_position_6=feet_position_6,
-            projected_gravity_3=projected_gravity_3,
+            imu_acc_3=imu_acc_3,
+            imu_gyro_3=imu_gyro_3,
             base_position_3=base_position_3,
             base_orientation_4=base_orientation_4,
             base_linear_velocity_3=base_linear_velocity_3,
@@ -719,7 +725,7 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             max_action_latency=0.005,
             min_action_latency=0.0,
-            rollout_length_seconds=5.0,
+            rollout_length_seconds=1.25,
             render_length_seconds=5.0,
             # PPO parameters
             action_scale=1.0,
