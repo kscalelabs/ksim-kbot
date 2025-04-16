@@ -9,10 +9,10 @@ import numpy as np
 from loguru import logger  # to be removed
 from scipy.spatial.transform import Rotation as R
 
-from ksim_kbot.deploy.deploy import FixedArmDeploy
+from ksim_kbot.deploy.deploy import Deploy
 
 
-class JoystickDeploy(FixedArmDeploy):
+class JoystickDeploy(Deploy):
     """Deploy class for joystick-controlled policies."""
 
     def __init__(self, enable_joystick: bool, model_path: str, mode: str, ip: str, imu_type: str) -> None:
@@ -24,14 +24,14 @@ class JoystickDeploy(FixedArmDeploy):
         self.default_positions_rad: np.ndarray = np.array(
             [
                 0,
-                np.deg2rad(-12),
                 0,
-                np.deg2rad(30),
+                0,
+                0,
                 0,  # right arm
                 0,
-                np.deg2rad(12),
                 0,
-                np.deg2rad(-30),
+                0,
+                0,
                 0,  # left arm
                 -0.23,
                 0,
@@ -83,7 +83,6 @@ class JoystickDeploy(FixedArmDeploy):
             self.kos.imu.get_quaternion(),
         )
 
-
         imu_obs = []
         if self.imu_type == "raw":
             imu_accel = np.array([imu.accel_x, imu.accel_y, imu.accel_z])
@@ -92,7 +91,8 @@ class JoystickDeploy(FixedArmDeploy):
         else:
             r = R.from_quat([raw_quat.x, raw_quat.y, raw_quat.z, raw_quat.w])
             proj_grav_world = r.apply(np.array([0.0, 0.0, -1.0]), inverse=True)
-            proj_grav = proj_grav_world
+            proj_grav = np.array([proj_grav_world[1], -proj_grav_world[2], -proj_grav_world[0]])
+
             imu_obs = [proj_grav]
 
         # * Pos Diff. Difference of current position from default position
@@ -145,10 +145,16 @@ def main() -> None:
     parser.add_argument("--ip", type=str, default="localhost", help="IP address of KOS")
     parser.add_argument("--episode_length", type=int, default=5, help="Length of episode in seconds")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
-    parser.add_argument("--imu_type", type=str, choices=["raw", "grav"], default="grav", help="Type of IMU data to use in observation ('raw' or 'grav')")
+    parser.add_argument(
+        "--imu_type",
+        type=str,
+        choices=["raw", "grav"],
+        default="grav",
+        help="Type of IMU data to use in observation ('raw' or 'grav')",
+    )
 
     args = parser.parse_args()
-    
+
     if args.imu_type not in ["raw", "grav"]:
         raise ValueError(f"Unknown imu_type: {args.imu_type}")
 
