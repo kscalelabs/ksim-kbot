@@ -165,12 +165,8 @@ class Deploy(ABC):
         """Get observation from the robot."""
         pass
 
-    async def run(self, episode_length: int) -> None:
-        """Run the policy on the robot.
-
-        Args:
-            episode_length: Length of the episode in seconds
-        """
+    async def preflight(self) -> None:
+        """Preflight checks for the robot."""
         await self.enable()
         await asyncio.sleep(1)
         logger.info("Resetting...")
@@ -233,13 +229,30 @@ class Deploy(ABC):
                 logger.info(f"Starting in {i} seconds...")
                 await asyncio.sleep(1)
 
-        target_time = time.time() + self.DT
-        observation = await self.get_observation()
-
-        end_time = time.time() + episode_length
-
         if self.mode == "sim":
             await self.kos.sim.reset(pos={"x": 0.0, "y": 0.0, "z": 1.01}, quat={"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0})
+
+
+    async def postflight(self) -> None:
+        """Postflight actions for the robot."""
+        await self.disable()
+        logger.info("Actuators disabled")
+        self.save_rollout()
+        logger.info("Episode finished!")
+
+
+    async def run(self, episode_length: int) -> None:
+        """Run the policy on the robot.
+
+        Args:
+            episode_length: Length of the episode in seconds
+        """
+
+        await self.preflight()
+
+        observation = await self.get_observation()
+        target_time = time.time() + self.DT
+        end_time = time.time() + episode_length
 
         try:
             while time.time() < end_time:
@@ -265,15 +278,10 @@ class Deploy(ABC):
 
         except asyncio.CancelledError:
             logger.info("Exiting...")
-            await self.disable()
-            self.save_rollout()
-            logger.info("Actuators disabled")
+            await self.postflight()
             raise KeyboardInterrupt
 
-        logger.info("Episode finished!")
-        self.save_rollout()
-        await self.disable()
-
+        await self.postflight()
 
 class FixedArmDeploy(Deploy):
     """Deploy class for fixed-arm policies."""
