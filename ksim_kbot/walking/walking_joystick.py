@@ -334,7 +334,8 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             vel_obs_noise = 2.5
             imu_acc_noise = 0.5
             imu_gyro_noise = 0.5
-            gvec_noise = 0.08
+            local_gvec_noise = 0.08
+            gvec_noise = 0.0
             base_position_noise = 0.0
             base_orientation_noise = 0.0
             base_linear_velocity_noise = 0.0
@@ -345,6 +346,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             imu_acc_noise = 0.0
             imu_gyro_noise = 0.0
             gvec_noise = 0.0
+            local_gvec_noise = 0.0
             base_position_noise = 0.0
             base_orientation_noise = 0.0
             base_linear_velocity_noise = 0.0
@@ -369,6 +371,9 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 noise=imu_gyro_noise,
             ),
             common.ProjectedGravityObservation(noise=gvec_noise),
+            common.LocalProjectedGravityObservation.create(
+                physics_model=physics_model, sensor_name="base_link_quat", noise=local_gvec_noise
+            ),
             common.LastActionObservation(noise=0.0),
             # Additional critic observations
             ksim.BasePositionObservation(noise=base_position_noise),
