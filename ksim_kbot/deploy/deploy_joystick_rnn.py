@@ -23,7 +23,7 @@ class JoystickRNNDeploy(FixedArmDeploy):
         self.enable_joystick = enable_joystick
         self.gait = np.asarray([1.25])
 
-        self.carry = np.zeros(carry_shape)
+        self.carry = np.zeros(carry_shape)[None, :]
 
         self.default_positions_rad: np.ndarray = np.array(
             [
@@ -57,7 +57,7 @@ class JoystickRNNDeploy(FixedArmDeploy):
             "command": [],
             "pos_diff": [],
             "vel_obs": [],
-            "imu_accel": [],
+            "projected_gravity": [],
             "imu_gyro": [],
             "controller_cmd": [],
             "prev_action": [],
@@ -78,18 +78,21 @@ class JoystickRNNDeploy(FixedArmDeploy):
             Observation vector and updated phase
         """
         # * IMU Observation
-        (actuator_states, imu, euler_angles) = await asyncio.gather(
+        (actuator_states, imu, euler_angles, quat) = await asyncio.gather(
             self.kos.actuator.get_actuators_state([ac.actuator_id for ac in self.actuator_list]),
             self.kos.imu.get_imu_values(),
             self.kos.imu.get_euler_angles(),
+            self.kos.imu.get_quaternion(),
         )
 
         imu_gyro = np.array([imu.gyro_x, imu.gyro_y, imu.gyro_z])
-        euler_angles = np.array(euler_angles)
+        euler_angles = np.deg2rad(np.array([euler_angles.roll, euler_angles.pitch, euler_angles.yaw]))
 
-        r = Rotation.from_euler("xyz", euler_angles)
-        proj_grav_world = r.apply(np.array([0.0, 0.0, -1.0]), inverse=True)
+        # r = Rotation.from_euler("xyz", euler_angles)
+        r = Rotation.from_quat(np.array([quat.w, quat.x, quat.y, quat.z]), scalar_first=True)
+        proj_grav_world = r.apply(np.array([0.0, 0.0, 1.0]), inverse=True)
         projected_gravity = proj_grav_world
+        print(projected_gravity)
 
         # * Pos Diff. Difference of current position from default position
         state_dict_pos = {state.actuator_id: state.position for state in actuator_states.states}
@@ -125,6 +128,11 @@ class JoystickRNNDeploy(FixedArmDeploy):
 
         return observation
 
+    async def warmup(self) -> None:
+        """Warmup the robot."""
+        observation = await self.get_observation()
+        self.model.infer(observation, self.carry)
+
     async def run(self, episode_length: int) -> None:
         """Run the policy on the robot.
 
@@ -139,8 +147,9 @@ class JoystickRNNDeploy(FixedArmDeploy):
 
         try:
             while time.time() < end_time:
-                action, next_carry = np.array(self.model.infer(observation, self.carry))
-                self.carry = next_carry
+                action, next_carry = self.model.infer(observation, self.carry)
+                action = np.array(action).reshape(-1)
+                self.carry = np.array(next_carry)
 
                 #! Only scale action on observation but not onto default positions
                 position = action[: len(self.actuator_list)] * self.ACTION_SCALE + self.default_positions_rad
@@ -194,7 +203,7 @@ def main() -> None:
     logger.add(sys.stderr, level=log_level)  # This will keep the default colorized format
     logger.add(f"{file_dir}/deployment_checks/last_deployment.log", level=log_level)
 
-    deploy = JoystickRNNDeploy(args.enable_joystick, model_path, args.mode, args.ip, carry_shape=(3, 10))
+    deploy = JoystickRNNDeploy(args.enable_joystick, model_path, args.mode, args.ip, carry_shape=(5, 256))
     deploy.ACTION_SCALE = args.scale_action
 
     try:

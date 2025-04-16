@@ -165,6 +165,11 @@ class Deploy(ABC):
         """Get observation from the robot."""
         pass
 
+    async def warmup(self) -> None:
+        """Warmup the robot."""
+        observation = await self.get_observation()
+        self.model.infer(observation)
+
     async def preflight(self) -> None:
         """Preflight checks for the robot."""
         await self.enable()
@@ -221,8 +226,7 @@ class Deploy(ABC):
         if self.mode == "real-deploy":
             input("Press Enter to continue...")
 
-        observation = await self.get_observation()
-        self.model.infer(observation)
+        await self.warmup()
 
         if self.mode == "real-deploy":
             for i in range(5, -1, -1):
