@@ -485,12 +485,21 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 joint_targets=JOINT_TARGETS,
                 scale=-0.25,
             ),
-            kbot_rewards.TerminationPenalty(scale=-1.0),
+            kbot_rewards.TerminationPenalty(scale=-3.0),
             kbot_rewards.SensorOrientationPenalty(scale=-2.0),
             # kbot_rewards.OrientationPenalty(scale=-2.0),
-            kbot_rewards.LinearVelocityTrackingReward(scale=1.0),
-            kbot_rewards.AngularVelocityTrackingReward(scale=0.5),
-            kbot_rewards.AngularVelocityXYPenalty(scale=-0.15),
+            kbot_rewards.LinearVelocityTrackingReward(
+                scale=1.0,
+                stand_still_threshold=self.config.stand_still_threshold,
+            ),
+            kbot_rewards.AngularVelocityTrackingReward(
+                scale=0.5,
+                stand_still_threshold=self.config.stand_still_threshold,
+            ),
+            kbot_rewards.AngularVelocityXYPenalty(
+                scale=-0.15,
+                stand_still_threshold=self.config.stand_still_threshold,
+            ),
             # Stateful rewards
             kbot_rewards.FeetPhaseReward(
                 foot_default_height=0.04,
@@ -544,6 +553,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         ang_vel_cmd = commands["angular_velocity_command"]
         gait_freq_cmd = commands["gait_frequency_command"]
         last_action_n = observations["last_action_observation"]
+
         return model.forward(
             timestep_phase_4=timestep_phase_4,
             joint_pos_n=joint_pos_n,

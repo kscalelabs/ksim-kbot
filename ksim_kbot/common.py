@@ -164,7 +164,7 @@ class TimestepPhaseObservation(ksim.TimestepObservation):
         cmd_norm = jnp.linalg.norm(jnp.concatenate([vel_cmd, ang_vel_cmd], axis=-1), axis=-1)
         phase = jnp.where(
             cmd_norm < self.stand_still_threshold,
-            jnp.array([jnp.pi, jnp.pi]),  # stand still position
+            jnp.array([jnp.pi / 2, jnp.pi]),  # stand still position
             phase,
         )
 
