@@ -300,7 +300,6 @@ class KbotWalkingJoystickRNNTask(KbotWalkingTask[Config], Generic[Config]):
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
         projected_gravity_3 = observations["base_link_quat_local_projected_gravity_observation"]
-        # imu_acc_3 = observations["sensor_observation_imu_acc"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         ang_vel_cmd = commands["angular_velocity_command"]
@@ -311,7 +310,6 @@ class KbotWalkingJoystickRNNTask(KbotWalkingTask[Config], Generic[Config]):
             timestep_phase_4=timestep_phase_4,
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
-            # imu_acc_3=imu_acc_3,
             projected_gravity_3=projected_gravity_3,
             imu_gyro_3=imu_gyro_3,
             lin_vel_cmd_2=lin_vel_cmd_2,
@@ -331,7 +329,6 @@ class KbotWalkingJoystickRNNTask(KbotWalkingTask[Config], Generic[Config]):
         timestep_phase_4 = observations["timestep_phase_observation"]
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
-        # imu_acc_3 = observations["sensor_observation_imu_acc"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         projected_gravity_3 = observations["projected_gravity_observation"]
         local_projected_gravity_3 = observations["base_link_quat_local_projected_gravity_observation"]
@@ -353,7 +350,7 @@ class KbotWalkingJoystickRNNTask(KbotWalkingTask[Config], Generic[Config]):
             timestep_phase_4=timestep_phase_4,
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
-            # imu_acc_3=imu_acc_3,
+            local_projected_gravity_3=local_projected_gravity_3,
             imu_gyro_3=imu_gyro_3,
             lin_vel_cmd_2=lin_vel_cmd_2,
             ang_vel_cmd=ang_vel_cmd,
@@ -363,7 +360,6 @@ class KbotWalkingJoystickRNNTask(KbotWalkingTask[Config], Generic[Config]):
             feet_contact_2=feet_contact_2,
             feet_position_6=feet_position_6,
             projected_gravity_3=projected_gravity_3,
-            local_projected_gravity_3=local_projected_gravity_3,
             base_position_3=base_position_3,
             base_orientation_4=base_orientation_4,
             base_linear_velocity_3=base_linear_velocity_3,
