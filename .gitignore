@@ -27,7 +27,7 @@ run_*/
 experimental/
 
 # Deployment Assets
-*/deploy/assets/*/*
+# */deploy/assets/*/*
 
 *.pkl
 
