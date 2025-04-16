@@ -8,10 +8,10 @@ import sys
 import numpy as np
 from loguru import logger  # to be removed
 
-from ksim_kbot.deploy.deploy import FixedArmDeploy
+from ksim_kbot.deploy.deploy import Deploy
 
 
-class JoystickDeploy(FixedArmDeploy):
+class JoystickDeploy(Deploy):
     """Deploy class for joystick-controlled policies."""
 
     def __init__(self, enable_joystick: bool, model_path: str, mode: str, ip: str) -> None:
@@ -22,14 +22,14 @@ class JoystickDeploy(FixedArmDeploy):
         self.default_positions_rad: np.ndarray = np.array(
             [
                 0,
-                np.deg2rad(-12),
                 0,
-                np.deg2rad(30),
+                0,
+                1.4,
                 0,  # right arm
                 0,
-                np.deg2rad(12),
                 0,
-                np.deg2rad(-30),
+                0,
+                -1.4,
                 0,  # left arm
                 -0.23,
                 0,
@@ -153,7 +153,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     # python -m ksim_kbot.deploy.deploy_joystick \
-    # --model_path ksim_kbot/deploy/assets/noisy_joystick_example/tf_model_1576 \
+    # --model_path /Users/pfb30/ksim-kbot/ksim_kbot/deploy/assets/elbow/tf_model_4750 \
     # --mode sim \
     # --scale_action 1.0 \
     # --debug

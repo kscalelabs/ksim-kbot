@@ -187,23 +187,13 @@ class Deploy(ABC):
 
         actuator_commands: list[pykos.services.actuator.ActuatorCommand] = [
             {
-                "actuator_id": 12,
-                "position": -12.0 / 2.0,
+                "actuator_id": 13,
+                "position": 80.21,
                 "velocity": 0.0,
             },
             {
-                "actuator_id": 22,
-                "position": 12.0 / 2.0,
-                "velocity": 0.0,
-            },
-            {
-                "actuator_id": 14,
-                "position": -30.0 / 2.0,
-                "velocity": 0.0,
-            },
-            {
-                "actuator_id": 24,
-                "position": 30.0 / 2.0,
+                "actuator_id": 23,
+                "position": -80.21,
                 "velocity": 0.0,
             },
         ]
@@ -237,9 +227,6 @@ class Deploy(ABC):
         observation = await self.get_observation()
 
         end_time = time.time() + episode_length
-
-        if self.mode == "sim":
-            await self.kos.sim.reset(pos={"x": 0.0, "y": 0.0, "z": 1.01}, quat={"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0})
 
         try:
             while time.time() < end_time:
