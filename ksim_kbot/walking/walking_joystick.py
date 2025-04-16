@@ -485,7 +485,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 joint_targets=JOINT_TARGETS,
                 scale=-0.25,
             ),
-            kbot_rewards.TerminationPenalty(scale=-3.0),
+            kbot_rewards.TerminationPenalty(scale=-1.0),
             kbot_rewards.SensorOrientationPenalty(scale=-2.0),
             # kbot_rewards.OrientationPenalty(scale=-2.0),
             kbot_rewards.LinearVelocityTrackingReward(
