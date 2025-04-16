@@ -19,10 +19,10 @@ from xax.nn.export import export
 from ksim_kbot import common, rewards as kbot_rewards
 from ksim_kbot.standing.standing import MAX_TORQUE, KbotStandingTask, KbotStandingTaskConfig
 
-OBS_SIZE = 20 * 2 + 4 + 3 + 3 + 40  # = position + velocity + phase + imu_acc + imu_gyro + last_action
+OBS_SIZE = 20 * 2 + 4 + 3 + 40  # = position + velocity + phase + projected_gravity + last_action
 CMD_SIZE = 2 + 1 + 1
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
-NUM_CRITIC_INPUTS = NUM_INPUTS + 2 + 6 + 3 + 3 + 4 + 3 + 3 + 20 + 1
+NUM_CRITIC_INPUTS = NUM_INPUTS + 2 + 6 + 3 + 3 + 4 + 3 + 3 + 20 + 1 + 3 # cause projected gravity
 NUM_OUTPUTS = 20 * 2  # position + velocity
 JOINT_TARGETS = (
     # right arm
@@ -88,8 +88,7 @@ class KbotActor(eqx.Module):
         timestep_phase_4: Array,
         joint_pos_n: Array,
         joint_vel_n: Array,
-        imu_acc_3: Array,
-        imu_gyro_3: Array,
+        projected_gravity_3: Array,
         lin_vel_cmd_2: Array,
         ang_vel_cmd: Array,
         gait_freq_cmd: Array,
@@ -100,8 +99,7 @@ class KbotActor(eqx.Module):
                 timestep_phase_4,
                 joint_pos_n,
                 joint_vel_n,
-                imu_acc_3,
-                imu_gyro_3,
+                projected_gravity_3,
                 lin_vel_cmd_2,
                 ang_vel_cmd,
                 gait_freq_cmd,
@@ -534,8 +532,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         timestep_phase_4 = observations["timestep_phase_observation"]
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
-        imu_acc_3 = observations["sensor_observation_imu_acc"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        projected_gravity_3 = observations["projected_gravity_observation"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         ang_vel_cmd = commands["angular_velocity_command"]
         gait_freq_cmd = commands["gait_frequency_command"]
@@ -544,8 +541,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             timestep_phase_4=timestep_phase_4,
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
-            imu_acc_3=imu_acc_3,
-            imu_gyro_3=imu_gyro_3,
+            projected_gravity_3=projected_gravity_3,
             lin_vel_cmd_2=lin_vel_cmd_2,
             ang_vel_cmd=ang_vel_cmd,
             gait_freq_cmd=gait_freq_cmd,
