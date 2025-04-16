@@ -22,7 +22,7 @@ from ksim_kbot.standing.standing import MAX_TORQUE, KbotStandingTask, KbotStandi
 OBS_SIZE = 20 * 2 + 4 + 3 + 40  # = position + velocity + phase + projected_gravity + last_action
 CMD_SIZE = 2 + 1 + 1
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
-NUM_CRITIC_INPUTS = NUM_INPUTS + 2 + 6 + 3 + 3 + 4 + 3 + 3 + 20 + 1 + 3  # cause projected gravity
+NUM_CRITIC_INPUTS = NUM_INPUTS + 2 + 6 + 3 + 3 + 4 + 3 + 3 + 20 + 1 + 3  # for projected gravity
 NUM_OUTPUTS = 20 * 2  # position + velocity
 JOINT_TARGETS = (
     # right arm
