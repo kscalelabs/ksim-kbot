@@ -30,7 +30,8 @@ from ksim_kbot.standing.standing import MAX_TORQUE
 
 NUM_JOINTS = 5  # disabling all DoFs except for the right arm.
 NUM_OUTPUTS = NUM_JOINTS * 2
-NUM_INPUTS = NUM_JOINTS + NUM_JOINTS + 3 + 4 + NUM_OUTPUTS
+NUM_INPUTS = NUM_JOINTS + NUM_JOINTS + 3 + 3 + NUM_OUTPUTS
+NUM_CRITIC_INPUTS = NUM_INPUTS + NUM_JOINTS + 3 + 3
 
 
 @attrs.define(kw_only=True)
@@ -202,7 +203,7 @@ class CartesianBodyTargetVectorReward(ksim.Reward):
     distance_threshold: float = attrs.field()
     epsilon: float = attrs.field(default=1e-6)
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: None) -> tuple[Array, None]:
         body_pos_tl = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
 
         body_pos_right_shifted_tl = jnp.roll(body_pos_tl, shift=1, axis=0)
@@ -231,7 +232,7 @@ class CartesianBodyTargetVectorReward(ksim.Reward):
             original_products = body_vel_tl * normalized_target_vector
 
         # This will give maximum reward if near the target (and velocity is normalized)
-        return jnp.where(far_from_target & high_velocity, jnp.sum(original_products, axis=-1), 1.1)
+        return jnp.where(far_from_target & high_velocity, jnp.sum(original_products, axis=-1), 1.1), None
 
     @classmethod
     def create(
@@ -359,7 +360,8 @@ class KbotActor(eqx.Module):
         joint_pos_n: Array,
         joint_vel_n: Array,
         xyz_target_3: Array,
-        quat_target_4: Array,
+        # quat_target_4: Array,
+        elbow_target_3: Array,
         prev_action_n: Array,
     ) -> distrax.Normal:
         obs_n = jnp.concatenate(
@@ -367,7 +369,7 @@ class KbotActor(eqx.Module):
                 joint_pos_n,  # NUM_JOINTS
                 joint_vel_n,  # NUM_JOINTS
                 xyz_target_3,  # 3
-                quat_target_4,  # 4
+                elbow_target_3,  # 3
                 prev_action_n,  # NUM_OUTPUTS
             ],
             axis=-1,
@@ -394,7 +396,7 @@ class KbotCritic(eqx.Module):
     mlp: eqx.nn.MLP
 
     def __init__(self, key: PRNGKeyArray, *, hidden_size: int, depth: int) -> None:
-        num_inputs = NUM_INPUTS + NUM_JOINTS + 3 + 4
+        num_inputs = NUM_CRITIC_INPUTS
         num_outputs = 1
 
         self.mlp = eqx.nn.MLP(
@@ -412,9 +414,9 @@ class KbotCritic(eqx.Module):
         joint_vel_n: Array,
         actuator_force_n: Array,
         xyz_target_3: Array,
-        quat_target_4: Array,
+        elbow_target_3: Array,
         end_effector_pos_3: Array,
-        end_effector_quat_4: Array,
+        elbow_pos_3: Array,
         prev_action_n: Array,
     ) -> Array:
         x_n = jnp.concatenate(
@@ -423,9 +425,9 @@ class KbotCritic(eqx.Module):
                 joint_vel_n,  # NUM_JOINTS
                 actuator_force_n,  # NUM_JOINTS
                 xyz_target_3,  # 3
-                quat_target_4,  # 4
+                elbow_target_3,  # 3
                 end_effector_pos_3,  # 3
-                end_effector_quat_4,  # 4
+                elbow_pos_3,  # 3
                 prev_action_n,  # NUM_OUTPUTS
             ],
             axis=-1,
@@ -649,6 +651,10 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 physics_model=physics_model,
                 body_name="ik_target",
             ),
+            BodyPositionObservation.create(
+                physics_model=physics_model,
+                body_name="KC_C_401R_R_UpForearmDrive",
+            ),
             BodyOrientationObservation.create(
                 physics_model=physics_model,
                 body_name="ik_target",
@@ -660,8 +666,8 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         return [
             ksim.PositionCommand.create(
                 model=physics_model,
-                box_min=(0.0, -0.2, -0.2),
-                box_max=(0.3, 0.2, 0.2),
+                box_min=(0.0, -0.3, -0.2),
+                box_max=(0.3, 0.3, 0.2),
                 vis_target_name="floating_base_link",
                 vis_radius=0.05,
                 vis_color=(1.0, 0.0, 0.0, 0.8),
@@ -671,15 +677,29 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 switch_prob=self.config.ctrl_dt * 10,
                 jump_prob=self.config.ctrl_dt * 5,
             ),  # type: ignore[call-arg]
-            BodyOrientationCommand.create(
+            # BodyOrientationCommand.create(
+            #     model=physics_model,
+            #     base_body_name="ik_target",
+            #     switch_prob=self.config.ctrl_dt,
+            #     null_prob=self.config.ctrl_dt * 5,
+            #     vis_magnitude=0.5,
+            #     vis_size=0.05,
+            #     vis_color=(0.0, 1.0, 0.0, 0.8),
+            # ),
+            ksim.PositionCommand.create(
                 model=physics_model,
-                base_body_name="ik_target",
-                switch_prob=self.config.ctrl_dt,
-                null_prob=self.config.ctrl_dt * 5,
-                vis_magnitude=0.5,
-                vis_size=0.05,
-                vis_color=(0.0, 1.0, 0.0, 0.8),
-            ),
+                box_min=(-0.05, -0.25, -0.2),
+                box_max=(0.15, -0.05, 0.0),
+                vis_target_name="floating_base_link",
+                vis_radius=0.05,
+                vis_color=(1.0, 0.0, 1.0, 0.8),
+                unique_name="elbow_target",
+                min_speed=0.2,
+                max_speed=4.0,
+                switch_prob=self.config.ctrl_dt * 10,
+                jump_prob=self.config.ctrl_dt * 5,
+                curriculum_scale=0.0,
+            ),  # type: ignore[call-arg]
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
@@ -688,15 +708,22 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 model=physics_model,
                 tracked_body_name="ik_target",
                 base_body_name="floating_base_link",
-                scale=10.0,
+                scale=20.0,
                 command_name="target_position_command",
             ),
-            BodyOrientationTrackingReward.create(
+            ksim.PositionTrackingReward.create(
                 model=physics_model,
-                command_name="ik_target_body_orientation_command",
-                tracked_body_name="ik_target",
-                scale=0.1,
+                tracked_body_name="KC_C_401R_R_UpForearmDrive",
+                base_body_name="floating_base_link",
+                scale=3.0,
+                command_name="elbow_target_position_command",
             ),
+            # BodyOrientationTrackingReward.create(
+            #     model=physics_model,
+            #     command_name="ik_target_body_orientation_command",
+            #     tracked_body_name="ik_target",
+            #     scale=0.1,
+            # ),
             CartesianBodyTargetVectorReward.create(
                 model=physics_model,
                 command_name="target_position_command",
@@ -707,7 +734,7 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 distance_threshold=0.1,
                 dt=self.config.dt,
             ),
-            ksim.ObservationMeanPenalty(observation_name="contact_observation_arms", scale=-0.1),
+            ksim.ObservationMeanPenalty(observation_name="contact_observation_arms", scale=-0.5),
             ksim.ActuatorForcePenalty(scale=-0.000001, norm="l1"),
             ksim.ActionSmoothnessPenalty(scale=-0.02, norm="l2"),
             ksim.JointVelocityPenalty(scale=-0.001, freejoint_first=False, norm="l2"),
@@ -734,13 +761,13 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"] / 50.0
         xyz_target_3 = commands["target_position_command"][..., :3]
-        quat_target_4 = commands["ik_target_body_orientation_command"]
+        elbow_target_3 = commands["elbow_target_position_command"][..., :3]
         prev_action_n = observations["last_action_observation"]
         return model.actor(
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
             xyz_target_3=xyz_target_3,
-            quat_target_4=quat_target_4,
+            elbow_target_3=elbow_target_3,
             prev_action_n=prev_action_n,
         )
 
@@ -754,9 +781,9 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         joint_vel_n = observations["joint_velocity_observation"] / 50.0  # 27
         actuator_force_n = observations["actuator_force_observation"]  # 27
         xyz_target_3 = commands["target_position_command"][..., :3]  # 3
-        quat_target_4 = commands["ik_target_body_orientation_command"]  # 4
+        elbow_target_3 = commands["elbow_target_position_command"][..., :3]  # 3
         end_effector_pos_3 = observations["ik_target_body_position_observation"]  # 3
-        end_effector_quat_4 = observations["ik_target_body_orientation_observation"]  # 4
+        elbow_pos_3 = observations["KC_C_401R_R_UpForearmDrive_body_position_observation"]  # 3
         prev_action_n = observations["last_action_observation"]  # 5
 
         return model.critic(
@@ -764,9 +791,9 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             joint_vel_n=joint_vel_n,
             actuator_force_n=actuator_force_n,
             xyz_target_3=xyz_target_3,
-            quat_target_4=quat_target_4,
+            elbow_target_3=elbow_target_3,
             end_effector_pos_3=end_effector_pos_3,
-            end_effector_quat_4=end_effector_quat_4,
+            elbow_pos_3=elbow_pos_3,
             prev_action_n=prev_action_n,
         )
 
@@ -816,8 +843,8 @@ class KbotPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
         return ksim.RewardLevelCurriculum(
             reward_name="ik_target_position_tracking_reward",
-            increase_threshold=0.15,
-            decrease_threshold=0.12,
+            increase_threshold=0.03,
+            decrease_threshold=0.015,
             min_level_steps=10,
             num_levels=10,
         )
