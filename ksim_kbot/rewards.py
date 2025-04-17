@@ -106,7 +106,7 @@ class LinearVelocityTrackingReward(ksim.Reward):
     linvel_obs_name: str = attrs.field(default="sensor_observation_local_linvel_origin")
     command_name: str = attrs.field(default="linear_velocity_command")
     norm: xax.NormType = attrs.field(default="l2")
-    stand_still_threshold: float = attrs.field(default=0.05)
+    stand_still_threshold: float = attrs.field(default=0.0)
 
     def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
         if self.linvel_obs_name not in trajectory.obs:
@@ -130,7 +130,7 @@ class AngularVelocityTrackingReward(ksim.Reward):
     angvel_obs_name: str = attrs.field(default="sensor_observation_gyro_origin")
     command_name: str = attrs.field(default="angular_velocity_command")
     norm: xax.NormType = attrs.field(default="l2")
-    stand_still_threshold: float = attrs.field(default=0.05)
+    stand_still_threshold: float = attrs.field(default=0.0)
 
     def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
         if self.angvel_obs_name not in trajectory.obs:
@@ -153,7 +153,7 @@ class AngularVelocityXYPenalty(ksim.Reward):
     norm: xax.NormType = attrs.field(default="l2")
     angvel_obs_name: str = attrs.field(default="sensor_observation_global_angvel_origin")
     command_name: str = attrs.field(default="angular_velocity_command")
-    stand_still_threshold: float = attrs.field(default=0.05)
+    stand_still_threshold: float = attrs.field(default=0.0)
 
     def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
         if self.angvel_obs_name not in trajectory.obs:
@@ -444,7 +444,7 @@ class StandStillReward(ksim.Reward):
     linear_velocity_cmd_name: str = attrs.field(default="linear_velocity_command")
     angular_velocity_cmd_name: str = attrs.field(default="angular_velocity_command")
     joint_targets: tuple[float, ...] = attrs.field()
-    stand_still_threshold: float = 0.05
+    stand_still_threshold: float = attrs.field(default=0.0)
 
     def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
         vel_cmd = trajectory.command[self.linear_velocity_cmd_name]
@@ -469,11 +469,11 @@ class FeetPhaseReward(ksim.Reward):
     linear_velocity_cmd_name: str = attrs.field(default="linear_velocity_command")
     angular_velocity_cmd_name: str = attrs.field(default="angular_velocity_command")
     gait_freq_cmd_name: str = attrs.field(default="gait_frequency_command")
-    max_foot_height: float = 0.12
-    ctrl_dt: float = 0.02
-    sensitivity: float = 0.01
-    foot_default_height: float = 0.0
-    stand_still_threshold: float = 0.1
+    max_foot_height: float = attrs.field(default=0.12)
+    ctrl_dt: float = attrs.field(default=0.02)
+    sensitivity: float = attrs.field(default=0.01)
+    foot_default_height: float = attrs.field(default=0.0)
+    stand_still_threshold: float = attrs.field(default=0.0)
 
     def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
         if self.feet_pos_obs_name not in trajectory.obs:

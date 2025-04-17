@@ -168,7 +168,7 @@ class TimestepPhaseObservation(ksim.TimestepObservation):
     """Observation of the phase of the timestep."""
 
     ctrl_dt: float = attrs.field(default=0.02)
-    stand_still_threshold: float = attrs.field(default=0.05)
+    stand_still_threshold: float = attrs.field(default=0.0)
 
     def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
         gait_freq = state.commands["gait_frequency_command"]
