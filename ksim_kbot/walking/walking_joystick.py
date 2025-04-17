@@ -235,8 +235,8 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             physics_model,
             metadata,
             default_targets=JOINT_TARGETS,
-            pos_action_noise=0.1,
-            vel_action_noise=0.1,
+            pos_action_noise=0.05,
+            vel_action_noise=0.05,
             pos_action_noise_type="gaussian",
             vel_action_noise_type="gaussian",
             ctrl_clip=[
@@ -274,7 +274,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 ksim.FloorFrictionRandomizer.from_geom_name(physics_model, "floor", scale_lower=0.1, scale_upper=2.0),
                 ksim.StaticFrictionRandomizer(scale_lower=0.5, scale_upper=2.0),
                 ksim.ArmatureRandomizer(),
-                # ksim.AllBodiesMassMultiplicationRandomizer(),
+                ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.9, scale_upper=1.1),
                 ksim.MassAdditionRandomizer.from_body_name(
                     physics_model, "Torso_Side_Right", scale_lower=-1.0, scale_upper=1.0
                 ),
@@ -285,7 +285,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             return []
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
-        scale = 0.0 if self.config.domain_randomize else 0.01
+        scale = 0.0 if self.config.domain_randomize else 0.3
         return [
             ksim.RandomBaseVelocityXYReset(scale=scale),
             ksim.RandomJointPositionReset(scale=scale),
@@ -331,7 +331,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         if self.config.domain_randomize:
-            vel_obs_noise = 1.5
+            vel_obs_noise = 1.8
             imu_acc_noise = 0.2
             imu_gyro_noise = 0.2
             local_gvec_noise = 0.05
@@ -356,7 +356,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             common.TimestepPhaseObservation(),
             common.JointPositionObservation(
                 default_targets=JOINT_TARGETS,
-                noise=0.03,
+                noise=0.05,
             ),
             ksim.JointVelocityObservation(noise=vel_obs_noise),
             ksim.ActuatorForceObservation(),
