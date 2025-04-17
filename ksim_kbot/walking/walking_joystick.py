@@ -65,13 +65,14 @@ class KbotActor(eqx.Module):
         self,
         key: PRNGKeyArray,
         *,
+        num_inputs: int,
         min_std: float,
         max_std: float,
         var_scale: float,
         mean_scale: float,
     ) -> None:
         self.mlp = eqx.nn.MLP(
-            in_size=NUM_INPUTS,
+            in_size=num_inputs,
             out_size=NUM_OUTPUTS * 2,
             width_size=256,
             depth=5,
@@ -133,9 +134,9 @@ class KbotCritic(eqx.Module):
 
     mlp: eqx.nn.MLP
 
-    def __init__(self, key: PRNGKeyArray) -> None:
+    def __init__(self, key: PRNGKeyArray, *, num_inputs: int) -> None:
         self.mlp = eqx.nn.MLP(
-            in_size=NUM_CRITIC_INPUTS,
+            in_size=num_inputs,
             out_size=1,  # Always output a single critic value.
             width_size=256,
             depth=5,
@@ -193,16 +194,30 @@ class KbotCritic(eqx.Module):
 class KbotModel(eqx.Module):
     actor: KbotActor
     critic: KbotCritic
+    num_inputs: int = eqx.static_field()
+    num_critic_inputs: int = eqx.static_field()
 
-    def __init__(self, key: PRNGKeyArray) -> None:
+    def __init__(
+        self,
+        key: PRNGKeyArray,
+        *,
+        num_inputs: int,
+        num_critic_inputs: int,
+    ) -> None:
+        self.num_inputs = num_inputs
+        self.num_critic_inputs = num_critic_inputs
         self.actor = KbotActor(
             key,
+            num_inputs=num_inputs,
             min_std=0.01,
             max_std=1.0,
             var_scale=1.0,
             mean_scale=1.0,
         )
-        self.critic = KbotCritic(key)
+        self.critic = KbotCritic(
+            key,
+            num_inputs=num_critic_inputs,
+        )
 
 
 @dataclass
@@ -528,7 +543,11 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         return [common.GVecTermination.create(physics_model, sensor_name="upvector_origin")]
 
     def get_model(self, key: PRNGKeyArray) -> KbotModel:
-        return KbotModel(key)
+        return KbotModel(
+            key,
+            num_inputs=NUM_INPUTS,
+            num_critic_inputs=NUM_CRITIC_INPUTS,
+        )
 
     def get_initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
         return None, None

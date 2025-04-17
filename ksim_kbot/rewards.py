@@ -483,3 +483,21 @@ class FeetPhaseReward(ksim.Reward):
         stance = xax.cubic_bezier_interpolation(jnp.array(0), swing_height, 2 * x)
         swing = xax.cubic_bezier_interpolation(swing_height, jnp.array(0), 2 * x - 1)
         return jnp.where(x <= 0.5, stance, swing)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class TargetHeightReward(ksim.Reward):
+    """Reward for reaching a target height."""
+
+    target_height: float = attrs.field(default=1.0)
+    norm: xax.NormType = attrs.field(default="l1")
+    temp: float = attrs.field(default=1.0)
+    monotonic_fn: str = attrs.field(default="inv")
+
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: xax.FrozenDict[str, PyTree]) -> tuple[Array, None]:
+        qpos = trajectory.qpos
+        error = qpos[..., 2] - self.target_height
+        reward_value = ksim.norm_to_reward(
+            xax.get_norm(error, self.norm), temp=self.temp, monotonic_fn=self.monotonic_fn
+        )
+        return reward_value, None
