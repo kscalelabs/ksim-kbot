@@ -293,13 +293,13 @@ class FixedArmDeploy(Deploy):
         # Override the arm positions.
         self.arm_positions = {
             11: 0.0,
-            12: 12.0,
+            12: 0.0,
             13: 0.0,
-            14: -30.0,
+            14: -80.0,
             21: 0.0,
-            22: -12.0,
+            22: 0.0,
             23: 0.0,
-            24: 30.0,
+            24: 80.0,
             25: 0.0,
         }
 

@@ -52,12 +52,12 @@ class JoystickRNNDeploy(FixedArmDeploy):
                 0,
                 0,
                 0,
-                0,
+                1.4,
                 0,  # right arm
                 0,
                 0,
                 0,
-                0,
+                -1.4,
                 0,  # left arm
                 -0.23,
                 0,
