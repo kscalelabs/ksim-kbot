@@ -7,13 +7,29 @@ import sys
 import time
 
 import numpy as np
+from askin import KeyboardController
 from loguru import logger  # to be removed
 from scipy.spatial.transform import Rotation
 
-from ksim_kbot.deploy.deploy import Deploy
+from ksim_kbot.deploy.deploy import FixedArmDeploy
 
 
-class JoystickRNNDeploy(Deploy):
+class JoystickCommand:
+    def __init__(self) -> None:
+        self.command = np.array([0.0, 0.0, 0.0]) # x, y, yaw
+        self.step_size = 0.01
+
+    async def update(self, key: str) -> None:
+        if key == "a":
+            self.command[1] += self.step_size
+        elif key == "d":
+            self.command[1] += -1 * self.step_size
+        elif key == "w":
+            self.command[0] += self.step_size
+        elif key == "s":
+            self.command[0] += -1 * self.step_size
+
+class JoystickRNNDeploy(FixedArmDeploy):
     """Deploy class for joystick-controlled policies."""
 
     def __init__(
@@ -21,6 +37,11 @@ class JoystickRNNDeploy(Deploy):
     ) -> None:
         super().__init__(model_path, mode, ip)
         self.enable_joystick = enable_joystick
+
+        if self.enable_joystick:
+            self.joystick_command = JoystickCommand()
+            self.controller = KeyboardController(key_handler=self.joystick_command.update, timeout=0.001)
+
         self.gait = np.asarray([1.25])
 
         self.carry = np.zeros(carry_shape)[None, :]
@@ -67,7 +88,7 @@ class JoystickRNNDeploy(Deploy):
     def get_command(self) -> np.ndarray:
         """Get command from the joystick."""
         if self.enable_joystick:
-            return np.array([0.0, 0.0, 0.0])
+            return self.joystick_command.command
         else:
             return np.array([0.0, 0.0, 0.0])
 
@@ -132,6 +153,18 @@ class JoystickRNNDeploy(Deploy):
         """Warmup the robot."""
         observation = await self.get_observation()
         self.model.infer(observation, self.carry)
+
+    async def preflight(self) -> None:
+        """Preflight the robot."""
+        await super().preflight()
+        if self.enable_joystick:
+            await self.controller.start()
+
+    async def postflight(self) -> None:
+        """Postflight the robot."""
+        await super().postflight()
+        if self.enable_joystick:
+            await self.controller.stop()
 
     async def run(self, episode_length: int) -> None:
         """Run the policy on the robot.
