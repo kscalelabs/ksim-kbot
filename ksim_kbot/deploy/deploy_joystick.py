@@ -7,8 +7,11 @@ import sys
 
 import numpy as np
 from loguru import logger  # to be removed
+from scipy.spatial.transform import Rotation as R
 
 from ksim_kbot.deploy.deploy import Deploy
+
+VEL_SCALE = 0.05
 
 
 class JoystickDeploy(Deploy):
@@ -72,9 +75,10 @@ class JoystickDeploy(Deploy):
             Observation vector and updated phase
         """
         # * IMU Observation
-        (actuator_states, imu) = await asyncio.gather(
+        (actuator_states, imu, raw_quat) = await asyncio.gather(
             self.kos.actuator.get_actuators_state([ac.actuator_id for ac in self.actuator_list]),
             self.kos.imu.get_imu_values(),
+            self.kos.imu.get_quaternion(),
         )
         imu_accel = np.array([imu.accel_x, imu.accel_y, imu.accel_z])
         imu_gyro = np.array([imu.gyro_x, imu.gyro_y, imu.gyro_z])
@@ -87,9 +91,16 @@ class JoystickDeploy(Deploy):
 
         # * Vel Obs. Velocity at each joint
         state_dict_vel = {state.actuator_id: state.velocity for state in actuator_states.states}
-        vel_obs = np.deg2rad(
-            np.array([state_dict_vel[ac.actuator_id] for ac in sorted(self.actuator_list, key=lambda x: x.nn_id)])
+        vel_obs = (
+            np.deg2rad(
+                np.array([state_dict_vel[ac.actuator_id] for ac in sorted(self.actuator_list, key=lambda x: x.nn_id)])
+            )
+            * VEL_SCALE
         )
+
+        r = R.from_quat([raw_quat.x, raw_quat.y, raw_quat.z, raw_quat.w])
+        proj_grav_world = r.apply(np.array([0.0, 0.0, -1.0]), inverse=True)
+        proj_grav = np.array([proj_grav_world[1], -proj_grav_world[2], -proj_grav_world[0]])
 
         # * Phase, tracking a sinusoidal
         self.phase += 2 * np.pi * self.gait * self.DT
@@ -108,7 +119,7 @@ class JoystickDeploy(Deploy):
             self.rollout_dict["phase"].append(phase_vec)
 
         observation = np.concatenate(
-            [phase_vec, pos_diff, vel_obs, imu_accel, imu_gyro, cmd, self.gait, self.prev_action]
+            [phase_vec, pos_diff, vel_obs, proj_grav, cmd, self.gait, self.prev_action]
         ).reshape(1, -1)
 
         return observation
@@ -153,7 +164,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     # python -m ksim_kbot.deploy.deploy_joystick \
-    # --model_path /Users/pfb30/ksim-kbot/ksim_kbot/deploy/assets/elbow/tf_model_4750 \
+    # --model_path /Users/pfb30/ksim-kbot/ksim_kbot/deploy/assets/elbow/tf_model_1675 \
     # --mode sim \
     # --scale_action 1.0 \
     # --debug
