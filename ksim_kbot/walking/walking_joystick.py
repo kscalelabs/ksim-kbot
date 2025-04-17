@@ -217,6 +217,8 @@ class KbotWalkingTaskConfig(KbotStandingTaskConfig):
 
     stand_still_threshold: float = xax.field(value=0.05)
 
+    evaluate_gait: bool = xax.field(value=False)
+
 
 Config = TypeVar("Config", bound=KbotWalkingTaskConfig)
 
@@ -416,25 +418,45 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
-        # NOTE: increase to 360
-        return [
-            common.LinearVelocityCommand(
-                x_range=(-0.3, 0.7),
-                y_range=(-0.2, 0.2),
-                x_zero_prob=1.0,
-                y_zero_prob=1.0,
-                switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
-            ),
-            common.AngularVelocityCommand(
-                scale=0.1,
-                zero_prob=1.0,
-                switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
-            ),
-            common.GaitFrequencyCommand(
-                gait_freq_lower=self.config.gait_freq_lower,
-                gait_freq_upper=self.config.gait_freq_upper,
-            ),
-        ]
+        if self.config.evaluate_gait:
+            return [
+                common.LinearVelocityCommand(
+                    x_range=(0.0, 0.0),
+                    y_range=(0.0, 0.0),
+                    x_zero_prob=0.0,
+                    y_zero_prob=1.0,
+                    switch_prob=0.0
+                ),
+                common.AngularVelocityCommand(
+                    scale=0.1,
+                    zero_prob=1.0,
+                    switch_prob=0.0,
+                ),
+                common.GaitFrequencyCommand(
+                    gait_freq_lower=self.config.gait_freq_lower,
+                    gait_freq_upper=self.config.gait_freq_upper,
+                ),
+            ]
+        else:
+            # NOTE: increase to 360
+            return [
+                common.LinearVelocityCommand(
+                    x_range=(-0.3, 0.7),
+                    y_range=(-0.2, 0.2),
+                    x_zero_prob=1.0,
+                    y_zero_prob=1.0,
+                    switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
+                ),
+                common.AngularVelocityCommand(
+                    scale=0.1,
+                    zero_prob=1.0,
+                    switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
+                ),
+                common.GaitFrequencyCommand(
+                    gait_freq_lower=self.config.gait_freq_lower,
+                    gait_freq_upper=self.config.gait_freq_upper,
+                ),
+            ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards: list[ksim.Reward] = [
