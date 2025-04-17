@@ -14,9 +14,11 @@ import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from ksim.curriculum import Curriculum
+from ksim.observation import ContactObservation
 from xax.nn.export import export
 
 from ksim_kbot import common, rewards as kbot_rewards
+from ksim_kbot.rewards import ContactPenalty
 from ksim_kbot.standing.standing import MAX_TORQUE, KbotStandingTask, KbotStandingTaskConfig
 
 OBS_SIZE = 20 * 2 + 4 + 3 + 3 + 40  # = position + velocity + phase + imu_acc + imu_gyro + last_action
@@ -352,7 +354,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             base_linear_velocity_noise = 0.0
             base_angular_velocity_noise = 0.0
             base_angular_velocity_noise = 0.0
-        return [
+        obs = [
             common.TimestepPhaseObservation(),
             common.JointPositionObservation(
                 default_targets=JOINT_TARGETS,
@@ -420,6 +422,44 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             #     contact_group="left_hand_leg",
             # ),
         ]
+
+        if self.config.mjcf_type == "collisions_simplified":
+            obs.extend(
+                [
+                    ContactObservation.create(
+                        physics_model=physics_model,
+                        geom_names=("left_upper_arm_collision", "torso_collision"),
+                        contact_group="left_upper_arm_body",
+                    ),
+                    ContactObservation.create(
+                        physics_model=physics_model,
+                        geom_names=("left_forearm_collision", "torso_collision"),
+                        contact_group="left_forearm_body",
+                    ),
+                    ContactObservation.create(
+                        physics_model=physics_model,
+                        geom_names=("left_forearm_collision", "legs_collision"),
+                        contact_group="left_forearm_legs",
+                    ),
+                    ContactObservation.create(
+                        physics_model=physics_model,
+                        geom_names=("right_upper_arm_collision", "torso_collision"),
+                        contact_group="right_upper_arm_body",
+                    ),
+                    ContactObservation.create(
+                        physics_model=physics_model,
+                        geom_names=("right_forearm_collision", "torso_collision"),
+                        contact_group="right_forearm_body",
+                    ),
+                    ContactObservation.create(
+                        physics_model=physics_model,
+                        geom_names=("right_forearm_collision", "legs_collision"),
+                        contact_group="right_forearm_legs",
+                    ),
+                ]
+            )
+
+        return obs
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         # NOTE: increase to 360
@@ -520,6 +560,18 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             ksim.ActionSmoothnessPenalty(scale=-0.005),
             ksim.JointVelocityPenalty(scale=-0.005),
             # ksim.AvoidLimitsReward(-0.01)
+            ContactPenalty.create(
+                contact_obs_tuple=(
+                    "contact_observation_left_upper_arm_body",
+                    "contact_observation_left_forearm_body",
+                    "contact_observation_left_forearm_legs",
+                    "contact_observation_right_upper_arm_body",
+                    "contact_observation_right_forearm_body",
+                    "contact_observation_right_forearm_legs",
+                ),
+                scale=-0.1,
+                name_suffix="arm_body_contact_penalty",
+            ),
         ]
 
         return rewards
