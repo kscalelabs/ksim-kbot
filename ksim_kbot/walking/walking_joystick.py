@@ -210,12 +210,12 @@ class KbotWalkingTaskConfig(KbotStandingTaskConfig):
 
     gait_freq_lower: float = xax.field(value=1.25)
     gait_freq_upper: float = xax.field(value=1.5)
-    # to be removed
-    log_full_trajectory_every_n_steps: int = xax.field(value=5)
-    log_full_trajectory_on_first_step: bool = xax.field(value=False)
-    log_full_trajectory_every_n_seconds: float = xax.field(value=1.0)
+    # # to be removed
+    # log_full_trajectory_every_n_steps: int = xax.field(value=5)
+    # log_full_trajectory_on_first_step: bool = xax.field(value=False)
+    # log_full_trajectory_every_n_seconds: float = xax.field(value=1.0)
 
-    stand_still_threshold: float = xax.field(value=0.05)
+    stand_still_threshold: float = xax.field(value=0.0)  # no stand still reward
 
     evaluate_gait: bool = xax.field(value=False)
 
@@ -544,7 +544,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             ksim.ActionSmoothnessPenalty(scale=-0.005),
             ksim.JointVelocityPenalty(scale=-0.005),
             kbot_rewards.StandStillReward(
-                scale=1.0,
+                scale=50.0,
                 linear_velocity_cmd_name="linear_velocity_command",
                 angular_velocity_cmd_name="angular_velocity_command",
                 joint_targets=JOINT_TARGETS,
@@ -775,6 +775,6 @@ if __name__ == "__main__":
             gait_freq_upper=1.5,
             reward_clip_min=0.0,
             reward_clip_max=1000.0,
-            stand_still_threshold=0.05,
+            stand_still_threshold=0.0,  # no stand still reward
         ),
     )
