@@ -168,6 +168,7 @@ class TimestepPhaseObservation(ksim.TimestepObservation):
     """Observation of the phase of the timestep."""
 
     ctrl_dt: float = attrs.field(default=0.02)
+    stand_still_threshold: float = attrs.field(default=0.0)
 
     def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
         gait_freq = state.commands["gait_frequency_command"]
@@ -177,6 +178,16 @@ class TimestepPhaseObservation(ksim.TimestepObservation):
         start_phase = jnp.array([0, jnp.pi])  # trotting gait
         phase = start_phase + steps * phase_dt
         phase = jnp.fmod(phase + jnp.pi, 2 * jnp.pi) - jnp.pi
+
+        # Stand still case
+        vel_cmd = state.commands["linear_velocity_command"]
+        ang_vel_cmd = state.commands["angular_velocity_command"]
+        cmd_norm = jnp.linalg.norm(jnp.concatenate([vel_cmd, ang_vel_cmd], axis=-1), axis=-1)
+        phase = jnp.where(
+            cmd_norm < self.stand_still_threshold,
+            jnp.array([jnp.pi / 2, jnp.pi]),  # stand still position
+            phase,
+        )
 
         return jnp.array([jnp.cos(phase), jnp.sin(phase)]).flatten()
 
