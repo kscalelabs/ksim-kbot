@@ -16,7 +16,7 @@ from ksim_kbot.deploy.deploy import FixedArmDeploy
 
 class JoystickCommand:
     def __init__(self) -> None:
-        self.command = np.array([0.0, 0.0, 0.0]) # x, y, yaw
+        self.command = np.array([0.0, 0.0, 0.0])  # x, y, yaw
         self.step_size = 0.01
 
     async def update(self, key: str) -> None:
@@ -28,6 +28,7 @@ class JoystickCommand:
             self.command[0] += self.step_size
         elif key == "s":
             self.command[0] += -1 * self.step_size
+
 
 class JoystickRNNDeploy(FixedArmDeploy):
     """Deploy class for joystick-controlled policies."""
