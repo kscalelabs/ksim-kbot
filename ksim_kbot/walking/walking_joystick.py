@@ -29,13 +29,13 @@ JOINT_TARGETS = (
     0.0,
     0.0,
     0.0,
-    0.0,
+    1.4,
     0.0,
     # left arm
     0.0,
     0.0,
     0.0,
-    0.0,
+    -1.4,
     0.0,
     # right leg
     -0.23,
@@ -274,10 +274,10 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 ksim.FloorFrictionRandomizer.from_geom_name(physics_model, "floor", scale_lower=0.1, scale_upper=2.0),
                 ksim.StaticFrictionRandomizer(scale_lower=0.5, scale_upper=2.0),
                 ksim.ArmatureRandomizer(),
-                ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.9, scale_upper=1.1),
-                ksim.MassAdditionRandomizer.from_body_name(
-                    physics_model, "Torso_Side_Right", scale_lower=-1.0, scale_upper=1.0
-                ),
+                ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.85, scale_upper=1.15),
+                # ksim.MassAdditionRandomizer.from_body_name(
+                #     physics_model, "Torso_Side_Right", scale_lower=-1.0, scale_upper=1.0
+                # ),
                 ksim.JointDampingRandomizer(),
                 ksim.JointZeroPositionRandomizer(scale_lower=-0.05, scale_upper=0.05),
             ]

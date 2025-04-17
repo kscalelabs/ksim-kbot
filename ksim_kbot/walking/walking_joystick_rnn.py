@@ -13,6 +13,10 @@ import ksim
 import xax
 from jaxtyping import Array, PRNGKeyArray
 from xax.nn.export import export
+import mujoco
+import mujoco.mjx as mjx
+from mujoco_scenes.mjcf import load_mjmodel
+import logging
 
 from ksim_kbot.walking.walking_joystick import (
     NUM_CRITIC_INPUTS,
@@ -21,6 +25,8 @@ from ksim_kbot.walking.walking_joystick import (
     KbotWalkingTask,
     KbotWalkingTaskConfig,
 )
+
+logger = logging.getLogger(__name__)
 
 # Same obs space except without prev action.
 RNN_NUM_INPUTS = NUM_INPUTS - NUM_OUTPUTS
@@ -288,6 +294,20 @@ class KbotWalkingJoystickRNNTask(KbotWalkingTask[Config], Generic[Config]):
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
         )
+
+    def get_mujoco_model(self) -> mujoco.MjModel:
+        mjcf_path = (Path(self.config.robot_urdf_path) / "robot_arms.mjcf").resolve().as_posix()
+        logger.info("Loading MJCF model from %s", mjcf_path)
+
+        mj_model = load_mjmodel(mjcf_path, scene=self.config.terrain_type)
+
+        mj_model.opt.timestep = jnp.array(self.config.dt)
+        mj_model.opt.iterations = 6
+        mj_model.opt.ls_iterations = 6
+        mj_model.opt.disableflags = mjx.DisableBit.EULERDAMP
+        mj_model.opt.solver = mjx.SolverType.CG
+
+        return mj_model
 
     def run_actor(
         self,
