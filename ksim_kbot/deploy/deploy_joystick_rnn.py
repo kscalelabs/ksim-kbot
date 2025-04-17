@@ -10,10 +10,10 @@ import numpy as np
 from loguru import logger  # to be removed
 from scipy.spatial.transform import Rotation
 
-from ksim_kbot.deploy.deploy import FixedArmDeploy
+from ksim_kbot.deploy.deploy import Deploy
 
 
-class JoystickRNNDeploy(FixedArmDeploy):
+class JoystickRNNDeploy(Deploy):
     """Deploy class for joystick-controlled policies."""
 
     def __init__(
@@ -28,14 +28,14 @@ class JoystickRNNDeploy(FixedArmDeploy):
         self.default_positions_rad: np.ndarray = np.array(
             [
                 0,
-                np.deg2rad(-12),
                 0,
-                np.deg2rad(30),
+                0,
+                0,
                 0,  # right arm
                 0,
-                np.deg2rad(12),
                 0,
-                np.deg2rad(-30),
+                0,
+                0,
                 0,  # left arm
                 -0.23,
                 0,
