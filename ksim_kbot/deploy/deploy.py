@@ -111,10 +111,10 @@ class Deploy(ABC):
         reset_commands: list[pykos.services.actuator.ActuatorCommand] = [
             {
                 "actuator_id": ac.actuator_id,
-                "position": 0.0,
+                "position": pos,
                 "velocity": 0.0,
             }
-            for ac in self.actuator_list
+            for ac, pos in zip(self.actuator_list, self.default_positions_deg)
         ]
         if self.mode in {"real-check", "real-deploy"}:
             await self.kos.actuator.command_actuators(reset_commands)
@@ -177,51 +177,6 @@ class Deploy(ABC):
         logger.info("Resetting...")
         await self.reset()
 
-        zero_pos_target_list = []
-        for ac in self.actuator_list:
-            zero_pos_target_list.append(
-                {
-                    "actuator_id": ac.actuator_id,
-                    "position": 0.0,
-                }
-            )
-
-        actuator_commands: list[pykos.services.actuator.ActuatorCommand] = [
-            {
-                "actuator_id": 12,
-                "position": -12.0 / 2.0,
-                "velocity": 0.0,
-            },
-            {
-                "actuator_id": 22,
-                "position": 12.0 / 2.0,
-                "velocity": 0.0,
-            },
-            {
-                "actuator_id": 14,
-                "position": -30.0 / 2.0,
-                "velocity": 0.0,
-            },
-            {
-                "actuator_id": 24,
-                "position": 30.0 / 2.0,
-                "velocity": 0.0,
-            },
-        ]
-
-        await self.kos.actuator.command_actuators(actuator_commands)
-
-        reset_commands: list[pykos.services.actuator.ActuatorCommand] = [
-            {
-                "actuator_id": ac.actuator_id,
-                "position": pos,
-                "velocity": 0.0,
-            }
-            for ac, pos in zip(self.actuator_list, self.default_positions_deg)
-        ]
-
-        await self.kos.actuator.command_actuators(reset_commands)
-
         logger.warning(f"Deploying with Action Scale: {self.ACTION_SCALE}")
         if self.mode == "real-deploy":
             input("Press Enter to continue...")
@@ -242,6 +197,7 @@ class Deploy(ABC):
         logger.info("Actuators disabled")
         self.save_rollout()
         logger.info("Episode finished!")
+
 
     async def run(self, episode_length: int) -> None:
         """Run the policy on the robot.

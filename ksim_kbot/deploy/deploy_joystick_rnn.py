@@ -100,21 +100,17 @@ class JoystickRNNDeploy(FixedArmDeploy):
             Observation vector and updated phase
         """
         # * IMU Observation
-        (actuator_states, imu, euler_angles, quat) = await asyncio.gather(
+        (actuator_states, imu, quat) = await asyncio.gather(
             self.kos.actuator.get_actuators_state([ac.actuator_id for ac in self.actuator_list]),
             self.kos.imu.get_imu_values(),
-            self.kos.imu.get_euler_angles(),
             self.kos.imu.get_quaternion(),
         )
 
         imu_gyro = np.array([imu.gyro_x, imu.gyro_y, imu.gyro_z])
-        euler_angles = np.deg2rad(np.array([euler_angles.roll, euler_angles.pitch, euler_angles.yaw]))
 
-        # r = Rotation.from_euler("xyz", euler_angles)
         r = Rotation.from_quat(np.array([quat.w, quat.x, quat.y, quat.z]), scalar_first=True)
         proj_grav_world = r.apply(np.array([0.0, 0.0, 1.0]), inverse=True)
         projected_gravity = proj_grav_world
-        # print(projected_gravity)
 
         # * Pos Diff. Difference of current position from default position
         state_dict_pos = {state.actuator_id: state.position for state in actuator_states.states}
