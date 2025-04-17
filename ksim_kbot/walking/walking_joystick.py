@@ -773,6 +773,6 @@ if __name__ == "__main__":
             gait_freq_upper=1.5,
             reward_clip_min=0.0,
             reward_clip_max=1000.0,
-            stand_still_threshold=0.0,  # no stand still reward
+            stand_still_threshold=0.1,
         ),
     )

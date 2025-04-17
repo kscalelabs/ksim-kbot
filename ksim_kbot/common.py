@@ -321,12 +321,23 @@ class LinearVelocityCommand(ksim.Command):
     switch_prob: float = attrs.field(default=0.0)
     vis_height: float = attrs.field(default=1.0)
     vis_scale: float = attrs.field(default=0.05)
+    curriculum_scale: float = attrs.field(default=2.0)
 
     def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         rng_x, rng_y, rng_zero_x, rng_zero_y = jax.random.split(rng, 4)
         (xmin, xmax), (ymin, ymax) = self.x_range, self.y_range
-        x = jax.random.uniform(rng_x, (1,), minval=xmin, maxval=xmax)
-        y = jax.random.uniform(rng_y, (1,), minval=ymin, maxval=ymax)
+        x = jax.random.uniform(
+            rng_x,
+            (1,),
+            minval=xmin * curriculum_level * self.curriculum_scale,
+            maxval=xmax * curriculum_level * self.curriculum_scale,
+        )
+        y = jax.random.uniform(
+            rng_y,
+            (1,),
+            minval=ymin * curriculum_level * self.curriculum_scale,
+            maxval=ymax * curriculum_level * self.curriculum_scale,
+        )
         x_zero_mask = jax.random.bernoulli(rng_zero_x, self.x_zero_prob)
         y_zero_mask = jax.random.bernoulli(rng_zero_y, self.y_zero_prob)
         return jnp.concatenate(
@@ -342,6 +353,7 @@ class LinearVelocityCommand(ksim.Command):
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
         new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
+        jax.debug.breakpoint()
         return jnp.where(switch_mask, new_commands, prev_command)
 
     def get_markers(self) -> Collection[ksim.vis.Marker]:
@@ -355,12 +367,18 @@ class AngularVelocityCommand(ksim.Command):
     scale: float = attrs.field()
     zero_prob: float = attrs.field(default=0.0)
     switch_prob: float = attrs.field(default=0.0)
+    curriculum_scale: float = attrs.field(default=2.0)
 
     def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         """Returns (1,) array with angular velocity."""
         rng_a, rng_b = jax.random.split(rng)
         zero_mask = jax.random.bernoulli(rng_a, self.zero_prob)
-        cmd = jax.random.uniform(rng_b, (1,), minval=-self.scale, maxval=self.scale)
+        cmd = jax.random.uniform(
+            rng_b,
+            (1,),
+            minval=-self.scale * curriculum_level * self.curriculum_scale,
+            maxval=self.scale * curriculum_level * self.curriculum_scale,
+        )
         return jnp.where(zero_mask, jnp.zeros_like(cmd), cmd)
 
     def __call__(
@@ -369,6 +387,7 @@ class AngularVelocityCommand(ksim.Command):
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
         new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
+        jax.debug.breakpoint()
         return jnp.where(switch_mask, new_commands, prev_command)
 
 
