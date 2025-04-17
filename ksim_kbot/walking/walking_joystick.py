@@ -211,10 +211,6 @@ class KbotWalkingTaskConfig(KbotStandingTaskConfig):
 
     gait_freq_lower: float = xax.field(value=1.25)
     gait_freq_upper: float = xax.field(value=1.5)
-    # # to be removed
-    # log_full_trajectory_every_n_steps: int = xax.field(value=5)
-    # log_full_trajectory_on_first_step: bool = xax.field(value=False)
-    # log_full_trajectory_every_n_seconds: float = xax.field(value=1.0)
 
     stand_still_threshold: float = xax.field(value=0.0)  # no stand still reward
 
@@ -427,11 +423,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         if self.config.evaluate_gait:
             return [
                 common.LinearVelocityCommand(
-                    x_range=(0.0, 0.0),
-                    y_range=(0.0, 0.0),
-                    x_zero_prob=0.0,
-                    y_zero_prob=1.0,
-                    switch_prob=0.0
+                    x_range=(0.0, 0.0), y_range=(0.0, 0.0), x_zero_prob=0.0, y_zero_prob=1.0, switch_prob=0.0
                 ),
                 common.AngularVelocityCommand(
                     scale=0.1,
@@ -536,6 +528,13 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 stand_still_threshold=self.config.stand_still_threshold,
             ),
             kbot_rewards.FeetSlipPenalty(scale=-0.25),
+            kbot_rewards.StandStillReward(
+                scale=50.0,
+                linear_velocity_cmd_name="linear_velocity_command",
+                angular_velocity_cmd_name="angular_velocity_command",
+                joint_targets=JOINT_TARGETS,
+                stand_still_threshold=self.config.stand_still_threshold,
+            ),
             # force penalties
             kbot_rewards.JointPositionLimitPenalty.create(
                 physics_model=physics_model,
@@ -549,13 +548,6 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             ksim.ActuatorForcePenalty(scale=-0.005),
             ksim.ActionSmoothnessPenalty(scale=-0.005),
             ksim.JointVelocityPenalty(scale=-0.005),
-            kbot_rewards.StandStillReward(
-                scale=50.0,
-                linear_velocity_cmd_name="linear_velocity_command",
-                angular_velocity_cmd_name="angular_velocity_command",
-                joint_targets=JOINT_TARGETS,
-                stand_still_threshold=self.config.stand_still_threshold,
-            ),
         ]
 
         return rewards
