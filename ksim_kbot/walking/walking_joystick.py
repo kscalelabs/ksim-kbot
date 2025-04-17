@@ -441,13 +441,13 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 common.LinearVelocityCommand(
                     x_range=(-0.3, 0.7),
                     y_range=(-0.2, 0.2),
-                    x_zero_prob=1.0,
-                    y_zero_prob=1.0,
+                    x_zero_prob=0.1,
+                    y_zero_prob=0.2,
                     switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
                 ),
                 common.AngularVelocityCommand(
                     scale=0.1,
-                    zero_prob=1.0,
+                    zero_prob=0.9,
                     switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
                 ),
                 common.GaitFrequencyCommand(
