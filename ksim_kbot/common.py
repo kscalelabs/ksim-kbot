@@ -185,7 +185,7 @@ class TimestepPhaseObservation(ksim.TimestepObservation):
         cmd_norm = jnp.linalg.norm(jnp.concatenate([vel_cmd, ang_vel_cmd], axis=-1), axis=-1)
         phase = jnp.where(
             cmd_norm < self.stand_still_threshold,
-            jnp.array([jnp.pi / 2, jnp.pi]),  # stand still position
+            jnp.array([jnp.pi, jnp.pi]),  # stand still position
             phase,
         )
 
@@ -321,22 +321,27 @@ class LinearVelocityCommand(ksim.Command):
     switch_prob: float = attrs.field(default=0.0)
     vis_height: float = attrs.field(default=1.0)
     vis_scale: float = attrs.field(default=0.05)
-    curriculum_scale: float = attrs.field(default=2.0)
+    curriculum_scale: float = attrs.field(default=3.0)
 
     def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
+        # increase heavily the speed
+        curriculum_level = curriculum_level + jnp.array(0.1)
+        curriculum_level = curriculum_level * self.curriculum_scale
+        curriculum_level = jnp.clip(curriculum_level, 0.0, 1.0)
+
         rng_x, rng_y, rng_zero_x, rng_zero_y = jax.random.split(rng, 4)
         (xmin, xmax), (ymin, ymax) = self.x_range, self.y_range
         x = jax.random.uniform(
             rng_x,
             (1,),
-            minval=xmin * curriculum_level * self.curriculum_scale,
-            maxval=xmax * curriculum_level * self.curriculum_scale,
+            minval=xmin * curriculum_level,
+            maxval=xmax * curriculum_level,
         )
         y = jax.random.uniform(
             rng_y,
             (1,),
-            minval=ymin * curriculum_level * self.curriculum_scale,
-            maxval=ymax * curriculum_level * self.curriculum_scale,
+            minval=ymin * curriculum_level,
+            maxval=ymax * curriculum_level,
         )
         x_zero_mask = jax.random.bernoulli(rng_zero_x, self.x_zero_prob)
         y_zero_mask = jax.random.bernoulli(rng_zero_y, self.y_zero_prob)
@@ -371,13 +376,18 @@ class AngularVelocityCommand(ksim.Command):
 
     def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         """Returns (1,) array with angular velocity."""
+        # increase heavily the speed
+        curriculum_level = curriculum_level + jnp.array(0.1)
+        curriculum_level = curriculum_level * self.curriculum_scale
+        curriculum_level = jnp.clip(curriculum_level, 0.0, 1.0)
+
         rng_a, rng_b = jax.random.split(rng)
         zero_mask = jax.random.bernoulli(rng_a, self.zero_prob)
         cmd = jax.random.uniform(
             rng_b,
             (1,),
-            minval=-self.scale * curriculum_level * self.curriculum_scale,
-            maxval=self.scale * curriculum_level * self.curriculum_scale,
+            minval=-self.scale * curriculum_level,
+            maxval=self.scale * curriculum_level,
         )
         return jnp.where(zero_mask, jnp.zeros_like(cmd), cmd)
 

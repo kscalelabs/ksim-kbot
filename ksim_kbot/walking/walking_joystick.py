@@ -307,11 +307,11 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         if self.config.domain_randomize:
             return [
                 common.XYPushEvent(
-                    interval_range=(2.0, 4.0),
+                    interval_range=(5.0, 10.0),
                     force_range=(0.0, 1.8),
                 ),
                 common.TorquePushEvent(
-                    interval_range=(2.0, 4.0),
+                    interval_range=(5.0, 10.0),
                     ang_vel_range=(0.0, 1.8),
                 ),
             ]
@@ -529,7 +529,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             ),
             kbot_rewards.FeetSlipPenalty(scale=-0.25),
             kbot_rewards.StandStillReward(
-                scale=50.0,
+                scale=5.0,
                 linear_velocity_cmd_name="linear_velocity_command",
                 angular_velocity_cmd_name="angular_velocity_command",
                 joint_targets=JOINT_TARGETS,
@@ -773,6 +773,6 @@ if __name__ == "__main__":
             gait_freq_upper=1.5,
             reward_clip_min=0.0,
             reward_clip_max=1000.0,
-            stand_still_threshold=0.1,
+            stand_still_threshold=0.05,
         ),
     )
