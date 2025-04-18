@@ -285,7 +285,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             return []
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
-        scale = 0.0 if self.config.domain_randomize else 0.3
+        scale = 0.3 if self.config.domain_randomize else 0.0
         return [
             ksim.RandomBaseVelocityXYReset(scale=scale),
             ksim.RandomJointPositionReset(scale=scale),
