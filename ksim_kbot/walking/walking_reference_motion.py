@@ -1,8 +1,7 @@
 # mypy: disable-error-code="override"
 """Walking default humanoid task with reference gait tracking.
 
-TODO:
-
+Todo:
 0. reward - qpos only chosen one? tracked_body_ids
 1. qvel - properly compute done
 2. height of the root relative to the ground - todo
@@ -13,7 +12,7 @@ TODO:
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Generic, TypeVar, Self
+from typing import Callable, Generic, Self, TypeVar
 
 import attrs
 import bvhio
@@ -30,7 +29,10 @@ from bvhio.lib.hierarchy import Joint as BvhioJoint
 from jaxtyping import Array, PRNGKeyArray
 from ksim import ObservationState
 from ksim.types import PhysicsModel
-from ksim.utils.reference_motion import (
+from scipy.spatial.transform import Rotation as R
+
+import ksim_kbot.rewards as kbot_rewards
+from ksim_kbot.reference_motion import (
     ReferenceMapping,
     ReferenceMotionData,
     generate_reference_motion,
@@ -39,9 +41,6 @@ from ksim.utils.reference_motion import (
     local_to_absolute,
     visualize_reference_motion,
 )
-from scipy.spatial.transform import Rotation as R
-
-import ksim_kbot.rewards as kbot_rewards
 from ksim_kbot.walking.walking_joystick import (
     NUM_CRITIC_INPUTS,
     NUM_INPUTS,
@@ -231,17 +230,17 @@ class CartesianReferenceMotionReward(ksim.Reward):
 @attrs.define(frozen=True, kw_only=True)
 class QposReferenceMotionReward(ksim.Reward):
     reference_motion_data: ReferenceMotionData
-    norm: xax.NormType = attrs.field(default="l1")
-    sensitivity: float = attrs.field(default=5.0)
     joint_weights: tuple[float, ...] = attrs.field(default=tuple([1.0] * NUM_JOINTS))
+    joint_indices: tuple[int, ...] = attrs.field(default=None)
     speed: float = attrs.field(default=1.0)
-    joint_indices: tuple[int, ...] = attrs.field()
+    sensitivity: float = attrs.field(default=5.0)
+    norm: xax.NormType = attrs.field(default="l1")
 
     def __call__(self, trajectory: ksim.Trajectory, _: None) -> tuple[Array, None]:
         qpos = trajectory.qpos
         effective_time = trajectory.timestep * self.speed
         reference_qpos = self.reference_motion_data.get_qpos_at_time(effective_time)
-        if self.joint_indices is None:
+        if self.joint_indices is not None:
             error = xax.get_norm(
                 reference_qpos[..., jnp.array(self.joint_indices)] - qpos[..., jnp.array(self.joint_indices)],
                 self.norm,
@@ -251,7 +250,7 @@ class QposReferenceMotionReward(ksim.Reward):
                 reference_qpos[..., 7:] - qpos[..., 7:],
                 self.norm,
             )
-            error = error * jnp.array(self.joint_weights)
+        error = error * jnp.array(self.joint_weights)
         mean_error = error.mean(axis=-1)
 
         reward = jnp.exp(-mean_error * self.sensitivity)
@@ -265,22 +264,27 @@ class QposReferenceMotionReward(ksim.Reward):
         scale: float,
         joint_names: tuple[str, ...] = None,
         joint_weights: tuple[float, ...] = None,
-        speed: float = 1.0
+        speed: float = 1.0,
     ) -> Self:
         """Create a sensor observation from a physics model."""
         if joint_names is not None:
             joint_names = tuple(physics_model.joints.keys())
-            mappings = get_qpos_data_idxs_by_name(physics_model)
+            mappings = ksim.get_qpos_data_idxs_by_name(physics_model)
             joint_indices = tuple([int(mappings[name][0]) for name in joint_names])
+            return cls(
+                reference_motion_data=reference_motion_data,
+                joint_indices=joint_indices,
+                joint_weights=joint_weights,
+                speed=speed,
+                scale=scale,
+            )
         else:
-            joint_indices = tuple(range(NUM_JOINTS + 7))
-        return cls(
-            reference_motion_data=reference_motion_data,
-            joint_indices=joint_indices,
-            joint_weights=joint_weights,
-            speed=speed,
-            scale=scale,
-        )
+            return cls(
+                reference_motion_data=reference_motion_data,
+                speed=speed,
+                scale=scale,
+            )
+
 
 @attrs.define(frozen=True, kw_only=True)
 class ReferenceQposObservation(ksim.Observation):
@@ -557,7 +561,7 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
         rewards: list[ksim.Reward] = [
             ksim.StayAliveReward(
                 success_reward=1.0,
-                scale=8.0,
+                scale=30.0,
             ),
             # kbot_rewards.SensorOrientationPenalty(scale=self.config.orientation_penalty),
             CartesianReferenceMotionReward(
@@ -569,40 +573,37 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
                 physics_model=physics_model,
                 # joint_names=("right_arm", "left_arm", "right_leg", "left_leg"),
                 reference_motion_data=self.reference_motion_data,
-                scale=15.0,
+                scale=10.0,
                 speed=self.config.qpos_reference_speed,
                 joint_weights=(
                     # right arm
                     1.0,
                     1.0,
                     1.0,
-                    1.0,
-                    1.0,
+                    2.0,
+                    2.0,
                     # left arm
                     1.0,
                     1.0,
                     1.0,
-                    1.0,
-                    1.0,
+                    2.0,
+                    2.0,
                     # right leg
-                    2.0,  # hip pitch
+                    1.0,  # hip pitch
                     1.0,  # hip roll
                     1.0,  # hip yaw
-                    2.0,  # knee
+                    1.0,  # knee
                     1.0,  # ankle
                     # left leg
-                    2.0,  # hip pitch
+                    1.0,  # hip pitch
                     1.0,  # hip roll
                     1.0,  # hip yaw
-                    2.0,  # knee
+                    1.0,  # knee
                     1.0,  # ankle
                 ),
             ),
-            kbot_rewards.FeetSlipPenalty(scale=-2.0),
-            # kbot_rewards.FeetAirTimeReward(
-            #     scale=8.0,
-            # ),
-            # kbot_rewards.TargetHeightReward(target_height=1.0, scale=1.0),
+            ksim.LinearVelocityPenalty(index="z", scale=-2.0),
+            kbot_rewards.FeetSlipPenalty(scale=-1.0),
         ]
 
         return rewards
@@ -786,7 +787,7 @@ if __name__ == "__main__":
     # To run training, use the following command:
     #   python -m ksim_kbot.walking.walking_reference_motion num_envs=2 batch_size=2
     # To visualize the environment, use the following command:
-    #   python -m ksim_kbot.walking.walking_reference_motion disable_multiprocessing=True
+    #   python -m ksim_kbot.walking.walking_reference_motion run_environment=True load_from_ckpt_path=/Users/pfb30/ksim-kbot/ksim_kbot/walking/ckpt.bin
     # To visualize the reference gait, use the following command:
     #   python -m ksim_kbot.walking.walking_reference_motion visualize_reference_motion=True
     # On MacOS or other devices with less memory, you can change the number
@@ -818,12 +819,11 @@ if __name__ == "__main__":
             export_for_inference=True,
             only_save_most_recent=False,
             action_scale=1.0,
-
             # Gait matching parameters.
             bvh_path=str(Path(__file__).parent.parent / "reference_motions" / "boxing_shoot.bvh"),
             rotate_bvh_euler=(0, 0, 0),
             bvh_offset=(0.02, 0.09, -0.29),
-            bvh_scaling_factor=1 / 135.,
+            bvh_scaling_factor=1 / 135.0,
             mj_base_name="Torso_Side_Right",
             reference_base_name="CC_Base_Pelvis",
             visualize_reference_motion=False,

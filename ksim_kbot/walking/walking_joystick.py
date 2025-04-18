@@ -762,6 +762,6 @@ if __name__ == "__main__":
             gait_freq_lower=1.25,
             gait_freq_upper=1.5,
             reward_clip_min=0.0,
-            reward_clip_max=1000.0
+            reward_clip_max=1000.0,
         ),
     )
