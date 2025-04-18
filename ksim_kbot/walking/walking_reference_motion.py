@@ -1,9 +1,19 @@
 # mypy: disable-error-code="override"
-"""Walking default humanoid task with reference gait tracking."""
+"""Walking default humanoid task with reference gait tracking.
+
+TODO:
+
+0. reward - qpos only chosen one? tracked_body_ids
+1. qvel - properly compute done
+2. height of the root relative to the ground - todo
+3. \theta - orientation of the root
+4. v - linear and angular velocity of the root
+5. feet and hands positions relative to the root
+"""
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Generic, TypeVar
+from typing import Callable, Generic, TypeVar, Self
 
 import attrs
 import bvhio
@@ -57,11 +67,28 @@ HUMANOID_REFERENCE_MAPPINGS = (
     ReferenceMapping("CC_Base_R_Hand", "KB_C_501X_Right_Bayonet_Adapter_Hard_Stop"),  # hand
 )
 
+# # # NEW ONE
+# HUMANOID_REFERENCE_MAPPINGS = (
+#     ReferenceMapping("CC_Base_L_ThighTwist01", "RS03_5"),  # hip
+#     ReferenceMapping("CC_Base_L_CalfTwist01", "KC_D_401L_L_Shin_Drive"),  # knee
+#     # ReferenceMapping("CC_Base_L_Foot", "KB_D_501L_L_LEG_FOOT"),  # foot
+#     ReferenceMapping("CC_Base_L_UpperarmTwist01", "KC_C_104L_PitchHardstopDriven"),  # shoulder
+#     ReferenceMapping("CC_Base_L_ForearmTwist01", "KC_C_202L"),  # elbow
+#     ReferenceMapping("CC_Base_L_Hand", "KB_C_501X_Left_Bayonet_Adapter_Hard_Stop"),  # hand
+
+#     ReferenceMapping("CC_Base_R_ThighTwist01", "RS03_4"),  # hip
+#     ReferenceMapping("CC_Base_R_CalfTwist01", "KC_D_401R_R_Shin_Drive"),  # knee
+#     # ReferenceMapping("CC_Base_R_Foot", "KB_D_501R_R_LEG_FOOT"),  # foot
+#     ReferenceMapping("CC_Base_R_UpperarmTwist01", "KC_C_104R_PitchHardstopDriven"),  # shoulder
+#     ReferenceMapping("CC_Base_R_ForearmTwist01", "KC_C_202R"),  # elbow
+#     ReferenceMapping("CC_Base_R_Hand", "KB_C_501X_Right_Bayonet_Adapter_Hard_Stop"),  # hand
+# )
+
 
 @dataclass
 class WalkingRefMotionTaskConfig(KbotWalkingTaskConfig):
     bvh_path: str = xax.field(
-        value=str(Path(__file__).parent.parent / "reference_motions" / "walk_normal_kbot.bvh"),
+        value=str(Path(__file__).parent.parent / "reference_motions" / "cheer_hands_waving_dance_kbot.bvh"),
         help="The path to the BVH file.",
     )
     rotate_bvh_euler: tuple[float, float, float] = xax.field(
@@ -96,6 +123,10 @@ class WalkingRefMotionTaskConfig(KbotWalkingTaskConfig):
         value=1.0,
         help="The scale to apply to the naive reward.",
     )
+    qpos_reference_speed: float = xax.field(
+        value=1.0,
+        help="The speed to apply to the reference motion.",
+    )
 
 
 Config = TypeVar("Config", bound=WalkingRefMotionTaskConfig)
@@ -111,25 +142,6 @@ class NaiveForwardReward(ksim.Reward):
         vel = trajectory.qvel[..., 0]
         clipped_vel = jnp.clip(vel, a_max=self.vel_clip_max)
         return clipped_vel, None
-
-
-@attrs.define(frozen=True, kw_only=True)
-class QposReferenceMotionReward(ksim.Reward):
-    reference_motion_data: ReferenceMotionData
-    norm: xax.NormType = attrs.field(default="l1")
-    sensitivity: float = attrs.field(default=5.0)
-    joint_weights: tuple[float, ...] = attrs.field(default=tuple([1.0] * NUM_JOINTS))
-    speed: float = attrs.field(default=1.0)
-
-    def __call__(self, trajectory: ksim.Trajectory, _: None) -> tuple[Array, None]:
-        qpos = trajectory.qpos
-        effective_time = trajectory.timestep * self.speed
-        reference_qpos = self.reference_motion_data.get_qpos_at_time(effective_time)
-        error = xax.get_norm(reference_qpos[..., 7:] - qpos[..., 7:], self.norm)
-        error = error * jnp.array(self.joint_weights)
-        mean_error = error.mean(axis=-1)
-        reward = jnp.exp(-mean_error * self.sensitivity)
-        return reward, None
 
 
 @jax.tree_util.register_dataclass
@@ -215,6 +227,60 @@ class CartesianReferenceMotionReward(ksim.Reward):
 
         return markers
 
+
+@attrs.define(frozen=True, kw_only=True)
+class QposReferenceMotionReward(ksim.Reward):
+    reference_motion_data: ReferenceMotionData
+    norm: xax.NormType = attrs.field(default="l1")
+    sensitivity: float = attrs.field(default=5.0)
+    joint_weights: tuple[float, ...] = attrs.field(default=tuple([1.0] * NUM_JOINTS))
+    speed: float = attrs.field(default=1.0)
+    joint_indices: tuple[int, ...] = attrs.field()
+
+    def __call__(self, trajectory: ksim.Trajectory, _: None) -> tuple[Array, None]:
+        qpos = trajectory.qpos
+        effective_time = trajectory.timestep * self.speed
+        reference_qpos = self.reference_motion_data.get_qpos_at_time(effective_time)
+        if self.joint_indices is None:
+            error = xax.get_norm(
+                reference_qpos[..., jnp.array(self.joint_indices)] - qpos[..., jnp.array(self.joint_indices)],
+                self.norm,
+            )
+        else:
+            error = xax.get_norm(
+                reference_qpos[..., 7:] - qpos[..., 7:],
+                self.norm,
+            )
+            error = error * jnp.array(self.joint_weights)
+        mean_error = error.mean(axis=-1)
+
+        reward = jnp.exp(-mean_error * self.sensitivity)
+        return reward, None
+
+    @classmethod
+    def create(
+        cls,
+        physics_model: ksim.PhysicsModel,
+        reference_motion_data: ReferenceMotionData,
+        scale: float,
+        joint_names: tuple[str, ...] = None,
+        joint_weights: tuple[float, ...] = None,
+        speed: float = 1.0
+    ) -> Self:
+        """Create a sensor observation from a physics model."""
+        if joint_names is not None:
+            joint_names = tuple(physics_model.joints.keys())
+            mappings = get_qpos_data_idxs_by_name(physics_model)
+            joint_indices = tuple([int(mappings[name][0]) for name in joint_names])
+        else:
+            joint_indices = tuple(range(NUM_JOINTS + 7))
+        return cls(
+            reference_motion_data=reference_motion_data,
+            joint_indices=joint_indices,
+            joint_weights=joint_weights,
+            speed=speed,
+            scale=scale,
+        )
 
 @attrs.define(frozen=True, kw_only=True)
 class ReferenceQposObservation(ksim.Observation):
@@ -468,6 +534,25 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
             ksim.JointZeroPositionRandomizer(),
         ]
 
+    def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
+        super_observations = super().get_observations(physics_model)
+        observations: list[ksim.Observation] = [
+            ReferenceQposObservation(
+                reference_motion_data=self.reference_motion_data,
+                speed=self.config.qpos_reference_speed,
+            ),
+            ReferenceLocalXposObservation(
+                reference_motion_data=self.reference_motion_data,
+                tracked_body_ids=self.tracked_body_ids,
+            ),
+            TrackedLocalXposObservation(
+                tracked_body_ids=self.tracked_body_ids,
+                mj_base_id=self.mj_base_id,
+            ),
+        ]
+
+        return super_observations + observations
+
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards: list[ksim.Reward] = [
             ksim.StayAliveReward(
@@ -480,10 +565,12 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
                 mj_base_id=self.mj_base_id,
                 scale=1.0,
             ),
-            QposReferenceMotionReward(
+            QposReferenceMotionReward.create(
+                physics_model=physics_model,
+                # joint_names=("right_arm", "left_arm", "right_leg", "left_leg"),
                 reference_motion_data=self.reference_motion_data,
                 scale=15.0,
-                speed=self.qpos_reference_speed,
+                speed=self.config.qpos_reference_speed,
                 joint_weights=(
                     # right arm
                     1.0,
@@ -515,29 +602,10 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
             # kbot_rewards.FeetAirTimeReward(
             #     scale=8.0,
             # ),
-            kbot_rewards.TargetHeightReward(target_height=1.0, scale=1.0),
+            # kbot_rewards.TargetHeightReward(target_height=1.0, scale=1.0),
         ]
 
         return rewards
-
-    def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
-        super_observations = super().get_observations(physics_model)
-        observations: list[ksim.Observation] = [
-            ReferenceQposObservation(
-                reference_motion_data=self.reference_motion_data,
-                speed=self.qpos_reference_speed,
-            ),
-            ReferenceLocalXposObservation(
-                reference_motion_data=self.reference_motion_data,
-                tracked_body_ids=self.tracked_body_ids,
-            ),
-            TrackedLocalXposObservation(
-                tracked_body_ids=self.tracked_body_ids,
-                mj_base_id=self.mj_base_id,
-            ),
-        ]
-
-        return super_observations + observations
 
     def sample_action(
         self,
@@ -576,7 +644,7 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
         root: BvhioJoint = bvhio.readAsHierarchy(self.config.bvh_path)
         reference_base_id = get_reference_joint_id(root, self.config.reference_base_name)
         self.mj_base_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, self.config.mj_base_name)
-        self.qpos_reference_speed = 1.8
+        self.qpos_reference_speed = self.config.qpos_reference_speed
 
         def rotation_callback(root: BvhioJoint) -> None:
             euler_rotation = np.array(self.config.rotate_bvh_euler)
@@ -606,9 +674,11 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
         self.tracked_body_ids = tuple(self.reference_motion_data.cartesian_poses.keys())
 
         if self.config.visualize_reference_motion:
-            np_reference_qpos = np.asarray(self.reference_motion_data.qpos)
-            np_cartesian_motion = jax.tree.map(np.asarray, self.reference_motion_data.cartesian_poses)
-
+            np_reference_qpos = np.asarray(self.reference_motion_data.qpos.array)
+            np_cartesian_motion = jax.tree_map(
+                lambda x: np.asarray(x.array),
+                self.reference_motion_data.cartesian_poses,
+            )
             visualize_reference_motion(
                 mj_model,
                 reference_qpos=np_reference_qpos,
@@ -716,9 +786,9 @@ if __name__ == "__main__":
     # To run training, use the following command:
     #   python -m ksim_kbot.walking.walking_reference_motion num_envs=2 batch_size=2
     # To visualize the environment, use the following command:
-    #   python -m ksim_kbot.walking.walking_reference_motion run_environment=True
+    #   python -m ksim_kbot.walking.walking_reference_motion disable_multiprocessing=True
     # To visualize the reference gait, use the following command:
-    #   mjpython -m ksim_kbot.walking.walking_reference_motion visualize_reference_motion=True
+    #   python -m ksim_kbot.walking.walking_reference_motion visualize_reference_motion=True
     # On MacOS or other devices with less memory, you can change the number
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
@@ -733,10 +803,11 @@ if __name__ == "__main__":
             rollout_length_seconds=1.25,
             render_length_seconds=5.0,
             # Simulation parameters.
-            dt=0.005,
+            dt=0.002,
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
+            valid_every_n_steps=25,
             # PPO parameters.
             gamma=0.97,
             lam=0.95,
@@ -747,6 +818,14 @@ if __name__ == "__main__":
             export_for_inference=True,
             only_save_most_recent=False,
             action_scale=1.0,
+
+            # Gait matching parameters.
+            bvh_path=str(Path(__file__).parent.parent / "reference_motions" / "boxing_shoot.bvh"),
+            rotate_bvh_euler=(0, 0, 0),
+            bvh_offset=(0.02, 0.09, -0.29),
+            bvh_scaling_factor=1 / 135.,
+            mj_base_name="Torso_Side_Right",
+            reference_base_name="CC_Base_Pelvis",
             visualize_reference_motion=False,
         ),
     )
