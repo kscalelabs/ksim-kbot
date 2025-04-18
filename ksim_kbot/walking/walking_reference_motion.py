@@ -826,6 +826,6 @@ if __name__ == "__main__":
             bvh_scaling_factor=1 / 135.0,
             mj_base_name="Torso_Side_Right",
             reference_base_name="CC_Base_Pelvis",
-            visualize_reference_motion=False,
+            visualize_reference_motion=True,
         ),
     )

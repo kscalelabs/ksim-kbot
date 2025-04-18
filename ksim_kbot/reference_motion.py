@@ -11,9 +11,8 @@ import numpy as np
 import xax
 from bvhio.lib.hierarchy import Joint as BvhioJoint
 from jaxtyping import Array
-from scipy.optimize import least_squares
-
 from ksim.viewer import GlfwMujocoViewer
+from scipy.optimize import least_squares
 
 
 @dataclass
@@ -29,6 +28,7 @@ class ReferenceMotionData:
     qpos: xax.HashableArray  # Shape: [T, nq]
     qvel: xax.HashableArray  # Shape: [T, nq]
     cartesian_poses: xax.FrozenDict[int, xax.HashableArray]  # Dict: body_id -> [T, 3]
+    root_orientation: xax.HashableArray  # Shape: [T, 3]
     ctrl_dt: float
 
     @property
@@ -478,7 +478,7 @@ def generate_reference_motion(
         scaling_factor=bvh_scaling_factor,
         offset=bvh_offset,
     )
-    breakpoint()
+
     total_frames = list(np_cartesian_motion.values())[0].shape[0]
     body_ids = list(np_cartesian_motion.keys())
 
@@ -522,40 +522,22 @@ def generate_reference_motion(
     # Compute qvel
     qvel_reference_motion = []
     for frame in range(total_frames - 1):
-        # TODO - fix this
-        qvel = ((qpos_reference_motion[frame + 1] + qpos_reference_motion[frame]) * ctrl_dt ) / 2.
-        # qvel = (qpos_reference_motion[frame + 1] - qpos_reference_motion[frame]) / ctrl_dt
+        # TODO - obtain velocities from optimization
+        qvel = (qpos_reference_motion[frame + 1] - qpos_reference_motion[frame]) / ctrl_dt
         qvel_reference_motion.append(qvel)
-        
 
-    def _normalize(vector):
-        norm = np.linalg.norm(vector)
-        if norm == 0:
-            return vector
-        return vector / norm
-
-    def _get_root_orientation(keypoints):
-        l_hip = np.array(keypoints["LHip"])
-        r_hip = np.array(keypoints["RHip"])
-        spine_mid = np.array(keypoints["SpineMid"])
-
-        root_position = (l_hip + r_hip) / 2
-
-        up_vector_approx = spine_mid - root_position
-        up_vector = normalize(up_vector_approx)
-
-        right_vector_approx = r_hip - l_hip
-        right_vector_unnormalized = np.cross(right_vector_approx, up_vector)
-        right_vector = normalize(right_vector_unnormalized)
-
-        forward_vector = np.cross(up_vector, right_vector)
-
-        # Create rotation matrix (assuming column vectors)
-        rotation_matrix = np.column_stack((forward_vector, right_vector, up_vector))
-
-        return root_position, rotation_matrix
-
-    # root_position, root_rotation = _get_root_orientation(bvh_root.keypoints)
+    root_orientation = get_root_orientation(
+        np_cartesian_motion,
+        total_frames,
+        bvh_root,
+        bvh_to_mujoco_names,
+        model,
+        # TODO: to be fixed by the mid point from two shoulders
+        left_hip_id="RS03_5",
+        right_hip_id="RS03_4",
+        spine_mid_id="RS03_6",
+    )
+    # TODO
     # Compute linear and angular velocities of the root
     # Compute height of the root relative to the ground
 
@@ -569,4 +551,59 @@ def generate_reference_motion(
         qvel=xax.HashableArray(jnp_qvel),
         cartesian_poses=jnp_cartesian_motion,
         ctrl_dt=ctrl_dt,
+        root_orientation=xax.HashableArray(root_orientation),
     )
+
+
+def normalize(vector: jnp.ndarray, eps: float = 1e-8) -> jnp.ndarray:
+    """Normalizes a JAX array, handling potential zero vectors."""
+    norm = jnp.linalg.norm(vector)
+    # Avoid division by zero by adding a small epsilon or returning the zero vector
+    safe_norm = jnp.maximum(norm, eps)
+    return vector / safe_norm
+    # Alternative: return zero vector if norm is close to zero
+    # return jnp.where(norm > eps, vector / norm, jnp.zeros_like(vector))
+
+
+def get_root_orientation(
+    cartesian_poses: xax.FrozenDict[int, jnp.ndarray],
+    total_frames: int,
+    root: BvhioJoint,
+    mappings: tuple[ReferenceMapping, ...],
+    model: mujoco.MjModel,
+    left_hip_id: str,
+    right_hip_id: str,
+    spine_mid_id: str,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Calculates orientation matrix from keypoints using JAX."""
+    root_orientation = []
+    reference_joint_ids = get_reference_joint_ids(root, mappings)
+    body_ids = get_body_ids(model, mappings)
+    body_name_to_id = {mapping.mj_body_name: body_id for mapping, body_id in zip(mappings, body_ids)}
+
+    for frame in range(total_frames):
+        left_hip = cartesian_poses[body_name_to_id[left_hip_id]][frame]
+        right_hip = cartesian_poses[body_name_to_id[right_hip_id]][frame]
+        # TODO: to be fixed by the mid point from two shoulders
+        spine_mid = cartesian_poses[body_name_to_id[spine_mid_id]][frame]
+
+        root_position = (left_hip + right_hip) / 2.0
+
+        # Calculate basis vectors
+        up_vector_approx = spine_mid - root_position
+        up_vector = normalize(up_vector_approx)
+
+        right_vector_approx = right_hip - left_hip
+        # Project right_vector_approx onto the plane normal to up_vector
+        # This ensures the resulting right_vector is orthogonal to up_vector
+        right_vector_proj = right_vector_approx - jnp.dot(right_vector_approx, up_vector) * up_vector
+        right_vector = normalize(right_vector_proj)
+
+        # Calculate forward vector using cross product (ensures orthogonality)
+        forward_vector = jnp.cross(right_vector, up_vector)  # Note the order for right-handed system
+
+        # Create rotation matrix (assuming column vectors: forward, right, up)
+        rotation_matrix = jnp.column_stack((forward_vector, right_vector, up_vector))
+        root_orientation.append(rotation_matrix)
+
+    return jnp.array(root_orientation)
