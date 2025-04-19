@@ -288,6 +288,8 @@ Config = TypeVar("Config", bound=KbotWalkingJoystickRNNTaskConfig)
 
 
 class KbotWalkingJoystickRNNTask(KbotWalkingTask[Config], Generic[Config]):
+    config: Config
+
     def get_model(self, key: PRNGKeyArray) -> KbotRNNModel:
         return KbotRNNModel(
             key,
@@ -578,6 +580,5 @@ if __name__ == "__main__":
             gait_freq_upper=1.5,
             reward_clip_min=0.0,
             reward_clip_max=1000.0,
-            stand_still=False,
         ),
     )
