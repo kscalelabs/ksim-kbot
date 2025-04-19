@@ -22,14 +22,14 @@ class JoystickDeploy(FixedArmDeploy):
         self.default_positions_rad: np.ndarray = np.array(
             [
                 0,
-                np.deg2rad(-12),
                 0,
-                np.deg2rad(30),
+                0,
+                0,
                 0,  # right arm
                 0,
-                np.deg2rad(12),
                 0,
-                np.deg2rad(-30),
+                0,
+                0,
                 0,  # left arm
                 -0.23,
                 0,
@@ -152,9 +152,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # python -m ksim_kbot.deploy.deploy_joystick \
-    # --model_path ksim_kbot/deploy/assets/noisy_joystick_example/tf_model_1576 \
-    # --mode sim \
-    # --scale_action 1.0 \
-    # --debug
+# python -m ksim_kbot.deploy.deploy_joystick \
+# --model_path /Users/pfb30/ksim-kbot/ksim_kbot/deploy/assets/noisy_joystick_example/tf_model_806 \
+# --mode sim \
+# --scale_action 1.0 \
+# --debug
     main()
