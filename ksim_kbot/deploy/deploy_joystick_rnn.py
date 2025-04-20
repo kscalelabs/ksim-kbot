@@ -249,9 +249,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # python -m ksim_kbot.deploy.deploy_joystick \
-    # --model_path ksim_kbot/deploy/assets/noisy_joystick_example/tf_model_1576 \
-    # --mode sim \
-    # --scale_action 1.0 \
-    # --debug
     main()

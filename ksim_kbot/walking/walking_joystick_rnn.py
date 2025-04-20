@@ -1,6 +1,7 @@
 # mypy: disable-error-code="override"
 """Defines simple task for training a walking policy for the default humanoid using an RNN actor."""
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Generic, TypeVar
@@ -10,13 +11,12 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import ksim
+import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray
-from xax.nn.export import export
-import mujoco
-import mujoco.mjx as mjx
+from mujoco import mjx
 from mujoco_scenes.mjcf import load_mjmodel
-import logging
+from xax.nn.export import export
 
 from ksim_kbot.walking.walking_joystick import (
     NUM_CRITIC_INPUTS,
