@@ -6,7 +6,7 @@ If some logic will become more general, we can move it to ksim or xax.
 from typing import Self
 
 import attrs
-import jax.numpy asjnp
+import jax.numpy as jnp
 import ksim
 import xax
 from jax.scipy.spatial.transform import Rotation
@@ -26,7 +26,7 @@ class JointDeviationPenalty(ksim.Reward):
         diff = trajectory.qpos[..., 7:] - jnp.array(self.joint_targets)
         cost = jnp.square(diff) * jnp.array(self.joint_weights)
         reward_value = jnp.sum(cost, axis=-1)
-        return reward_value, None
+        return reward_value
 
     @classmethod
     def create(
@@ -64,7 +64,7 @@ class FeetSlipPenalty(ksim.Reward):
         body_vel = trajectory.obs[self.com_vel_obs_name][..., :2]
         normed_body_vel = jnp.linalg.norm(body_vel, axis=-1, keepdims=True)
         reward_value = jnp.sum(normed_body_vel * contact, axis=-1)
-        return reward_value, None
+        return reward_value
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -76,7 +76,7 @@ class SensorOrientationPenalty(ksim.Reward):
 
     def get_reward(self, trajectory: ksim.Trajectory) -> tuple[Array, None]:
         reward_value = xax.get_norm(trajectory.obs[self.obs_name][..., :2], self.norm).sum(axis=-1)
-        return reward_value, None
+        return reward_value
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -89,12 +89,12 @@ class OrientationPenalty(ksim.Reward):
 
     scale: float = attrs.field()
 
-    def get_reward(self, trajectory: ksim.Trajectory) -> tuple[Array, None]:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         quat = trajectory.qpos[..., 3:7]
         up = jnp.array([0.0, 0.0, 1.0])
         rot_up = Rotation(quat).apply(up)
         orientation_penalty = jnp.sum(jnp.square(rot_up[..., :2]), axis=-1)
-        return orientation_penalty, None
+        return orientation_penalty
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -107,7 +107,7 @@ class LinearVelocityTrackingReward(ksim.Reward):
     norm: xax.NormType = attrs.field(default="l2")
     stand_still_threshold: float = attrs.field(default=0.0)
 
-    def get_reward(self, trajectory: ksim.Trajectory) -> tuple[Array, None]:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         if self.linvel_obs_name not in trajectory.obs:
             raise ValueError(f"Observation {self.linvel_obs_name} not found; add it as an observation in your task.")
 
@@ -118,7 +118,7 @@ class LinearVelocityTrackingReward(ksim.Reward):
         command_norm = jnp.linalg.norm(command, axis=-1)
         reward_value *= command_norm > self.stand_still_threshold
 
-        return reward_value, None
+        return reward_value
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -131,7 +131,7 @@ class AngularVelocityTrackingReward(ksim.Reward):
     norm: xax.NormType = attrs.field(default="l2")
     stand_still_threshold: float = attrs.field(default=0.0)
 
-    def get_reward(self, trajectory: ksim.Trajectory) -> tuple[Array, None]:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         if self.angvel_obs_name not in trajectory.obs:
             raise ValueError(f"Observation {self.angvel_obs_name} not found; add it as an observation in your task.")
 
@@ -142,7 +142,7 @@ class AngularVelocityTrackingReward(ksim.Reward):
         command_norm = jnp.linalg.norm(command, axis=-1)
         reward_value *= command_norm > self.stand_still_threshold
 
-        return reward_value, None
+        return reward_value
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -154,7 +154,7 @@ class AngularVelocityXYPenalty(ksim.Reward):
     command_name: str = attrs.field(default="angular_velocity_command")
     stand_still_threshold: float = attrs.field(default=0.0)
 
-    def get_reward(self, trajectory: ksim.Trajectory) -> tuple[Array, None]:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         if self.angvel_obs_name not in trajectory.obs:
             raise ValueError(f"Observation {self.angvel_obs_name} not found; add it as an observation in your task.")
         ang_vel = trajectory.obs[self.angvel_obs_name][..., :2]
@@ -162,7 +162,7 @@ class AngularVelocityXYPenalty(ksim.Reward):
         command_norm = jnp.linalg.norm(command, axis=-1)
         reward_value = xax.get_norm(ang_vel, self.norm).sum(axis=-1)
         reward_value *= command_norm > self.stand_still_threshold
-        return reward_value, None
+        return reward_value
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -173,13 +173,13 @@ class HipDeviationPenalty(ksim.Reward):
     hip_indices: tuple[int, ...] = attrs.field()
     joint_targets: tuple[float, ...] = attrs.field()
 
-    def get_reward(self, trajectory: ksim.Trajectory) -> tuple[Array, None]:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         diff = (
             trajectory.qpos[..., jnp.array(self.hip_indices) + 7]
             - jnp.array(self.joint_targets)[jnp.array(self.hip_indices)]
         )
         reward_value = xax.get_norm(diff, self.norm).sum(axis=-1)
-        return reward_value, None
+        return reward_value
 
     @classmethod
     def create(
@@ -207,13 +207,13 @@ class KneeDeviationPenalty(ksim.Reward):
     knee_indices: tuple[int, ...] = attrs.field()
     joint_targets: tuple[float, ...] = attrs.field()
 
-    def get_reward(self, trajectory: ksim.Trajectory) -> tuple[Array, None]:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         diff = (
             trajectory.qpos[..., jnp.array(self.knee_indices) + 7]
             - jnp.array(self.joint_targets)[jnp.array(self.knee_indices)]
         )
         reward_value = xax.get_norm(diff, self.norm).sum(axis=-1)
-        return reward_value, None
+        return reward_value
 
     @classmethod
     def create(
@@ -239,9 +239,9 @@ class TerminationPenalty(ksim.Reward):
 
     scale: float = attrs.field(default=-1.0)
 
-    def get_reward(self, trajectory: ksim.Trajectory) -> tuple[Array, None]:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         reward_value = trajectory.done
-        return reward_value, None
+        return reward_value
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -252,12 +252,12 @@ class XYPositionPenalty(ksim.Reward):
     target_y: float = attrs.field()
     norm: xax.NormType = attrs.field(default="l2")
 
-    def get_reward(self, trajectory: ksim.Trajectory) -> tuple[Array, None]:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         current_pos = trajectory.qpos[..., :2]
         target_pos = jnp.array([self.target_x, self.target_y])
         diff = current_pos - target_pos
         reward_value = xax.get_norm(diff, self.norm).sum(axis=-1)
-        return reward_value, None
+        return reward_value
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -266,9 +266,9 @@ class FarFromOriginTerminationReward(ksim.Reward):
 
     max_dist: float = attrs.field()
 
-    def get_reward(self, trajectory: ksim.Trajectory) -> tuple[Array, None]:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         reward_value = jnp.linalg.norm(trajectory.qpos[..., :2], axis=-1) > self.max_dist
-        return reward_value, None
+        return reward_value
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -280,13 +280,13 @@ class KsimLinearVelocityTrackingReward(ksim.Reward):
     norm: xax.NormType = attrs.field(default="l1")
     temp: float = attrs.field(default=1.0)
 
-    def get_reward(self, trajectory: ksim.Trajectory) -> tuple[Array, None]:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         dim = self.index
         lin_vel_cmd = trajectory.command[self.command_name].squeeze(-1)
         lin_vel = trajectory.qvel[..., dim]
         norm = xax.get_norm(lin_vel - lin_vel_cmd, self.norm)
         reward_value = 1.0 / (norm / self.temp + 1.0)
-        return reward_value, None
+        return reward_value
 
     def get_name(self) -> str:
         return f"{self.index}_{super().get_name()}"
@@ -320,10 +320,10 @@ class JointPositionLimitPenalty(ksim.Reward):
             upper_limits=xax.hashable_array(soft_uppers),
         )
 
-    def get_reward(self, trajectory: ksim.Trajectory) -> tuple[Array, None]:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         penalty = -jnp.clip(trajectory.qpos[..., 7:] - self.lower_limits.array, None, 0.0)
         penalty += jnp.clip(trajectory.qpos[..., 7:] - self.upper_limits.array, 0.0, None)
-        return jnp.sum(penalty, axis=-1), None
+        return jnp.sum(penalty, axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -333,7 +333,7 @@ class ContactForcePenalty(ksim.Reward):
     max_contact_force: float = attrs.field(default=350.0)
     sensor_names: tuple[str, ...] = attrs.field()
 
-    def get_reward(self, trajectory: ksim.Trajectory) -> tuple[Array, None]:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         for sensor_name in self.sensor_names:
             if sensor_name not in trajectory.obs:
                 raise ValueError(f"{sensor_name} not found in trajectory.obs")
@@ -341,7 +341,7 @@ class ContactForcePenalty(ksim.Reward):
         forces_t3b = jnp.stack([trajectory.obs[name] for name in self.sensor_names], axis=-1)
         cost = jnp.clip(jnp.abs(forces_t3b[..., 2, :]) - self.max_contact_force, min=0.0)
         cost = jnp.sum(cost, axis=-1)
-        return cost, None
+        return cost
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -356,7 +356,7 @@ class StandStillReward(ksim.Reward):
     joint_targets: tuple[float, ...] = attrs.field()
     stand_still_threshold: float = attrs.field(default=0.0)
 
-    def get_reward(self, trajectory: ksim.Trajectory) -> tuple[Array, None]:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         vel_cmd = trajectory.command[self.linear_velocity_cmd_name]
         ang_vel_cmd = trajectory.command[self.angular_velocity_cmd_name]
         cmd_norm = jnp.linalg.norm(jnp.concatenate([vel_cmd, ang_vel_cmd], axis=-1), axis=-1)
@@ -367,7 +367,7 @@ class StandStillReward(ksim.Reward):
         )
         reward = jnp.exp(-error / self.sensitivity)
         reward *= cmd_norm < self.stand_still_threshold
-        return reward, None
+        return reward
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -385,7 +385,7 @@ class FeetPhaseReward(ksim.Reward):
     foot_default_height: float = attrs.field(default=0.0)
     stand_still_threshold: float = attrs.field(default=0.0)
 
-    def get_reward(self, trajectory: ksim.Trajectory) -> tuple[Array, None]:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         if self.feet_pos_obs_name not in trajectory.obs:
             raise ValueError(f"Observation {self.feet_pos_obs_name} not found; add it as an observation in your task.")
         if self.gait_freq_cmd_name not in trajectory.command:
@@ -416,7 +416,7 @@ class FeetPhaseReward(ksim.Reward):
         command_norm = jnp.linalg.norm(jnp.concatenate([vel_cmd, ang_vel_cmd], axis=-1), axis=-1)
         reward *= command_norm > self.stand_still_threshold
 
-        return reward, None
+        return reward
 
     def gait_phase(
         self,

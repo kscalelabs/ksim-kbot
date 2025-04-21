@@ -333,7 +333,6 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             imu_acc_noise = 0.4
             imu_gyro_noise = 0.4
             local_gvec_noise = 0.05
-            gvec_noise = 0.0
             base_position_noise = 0.0
             base_orientation_noise = 0.0
             base_linear_velocity_noise = 0.0
@@ -343,7 +342,6 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             vel_obs_noise = 0.0
             imu_acc_noise = 0.0
             imu_gyro_noise = 0.0
-            gvec_noise = 0.0
             local_gvec_noise = 0.0
             base_position_noise = 0.0
             base_orientation_noise = 0.0
