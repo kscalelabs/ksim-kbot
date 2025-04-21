@@ -19,10 +19,10 @@ from xax.nn.export import export
 from ksim_kbot import common, rewards as kbot_rewards
 from ksim_kbot.standing.standing import MAX_TORQUE, KbotStandingTask, KbotStandingTaskConfig
 
-OBS_SIZE = 20 * 2 + 4 + 3 + 3 + 40  # = position + velocity + phase + imu_acc + imu_gyro + last_action
+OBS_SIZE = 20 * 2 + 4 + 3 + 40  # = position + velocity + phase + projected_gravity + last_action
 CMD_SIZE = 2 + 1 + 1
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
-NUM_CRITIC_INPUTS = NUM_INPUTS + 2 + 6 + 3 + 3 + 4 + 3 + 3 + 20 + 1
+NUM_CRITIC_INPUTS = NUM_INPUTS + 2 + 6 + 3 + 3 + 4 + 3 + 3 + 3 + 20 + 1
 NUM_OUTPUTS = 20 * 2  # position + velocity
 JOINT_TARGETS = (
     # right arm
@@ -368,7 +368,11 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 sensor_name="imu_gyro",
                 noise=imu_gyro_noise,
             ),
-            common.ProjectedGravityObservation(noise=gvec_noise),
+            ksim.ProjectedGravityObservation.create(
+                physics_model=physics_model,
+                framequat_name="base_link_quat",
+                lag_range=(0.0, 0.1),
+            ),
             common.LocalProjectedGravityObservation.create(
                 physics_model=physics_model, sensor_name="base_link_quat", noise=local_gvec_noise
             ),
@@ -712,11 +716,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         if not self.config.export_for_inference:
             return state
 
-        model: KbotModel = self.load_ckpt_with_template(
-            ckpt_path,
-            part="model",
-            model_template=self.get_model(key=jax.random.PRNGKey(0)),
-        )
+        model: KbotModel = self.load_ckpt(ckpt_path, part="model")
 
         model_fn = self.make_export_model(model, stochastic=False, batched=True)
 
@@ -749,10 +749,11 @@ if __name__ == "__main__":
             num_passes=10,
             epochs_per_log_step=1,
             # Simulation parameters.
+            iterations=4,
+            ls_iterations=6,
             dt=0.002,
             ctrl_dt=0.02,
             max_action_latency=0.005,
-            min_action_latency=0.0,
             rollout_length_seconds=1.25,
             render_length_seconds=5.0,
             # PPO parameters

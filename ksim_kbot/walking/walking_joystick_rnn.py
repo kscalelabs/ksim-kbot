@@ -14,7 +14,6 @@ import ksim
 import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray
-from mujoco import mjx
 from mujoco_scenes.mjcf import load_mjmodel
 from xax.nn.export import export
 
@@ -101,9 +100,9 @@ class KbotRNNActor(eqx.Module):
         timestep_phase_4: Array,
         joint_pos_n: Array,
         joint_vel_n: Array,
-        # projected_gravity_3: Array,
-        imu_acc_3: Array,
-        imu_gyro_3: Array,
+        projected_gravity_3: Array,
+        # imu_acc_3: Array,
+        # imu_gyro_3: Array,
         lin_vel_cmd_2: Array,
         ang_vel_cmd: Array,
         gait_freq_cmd: Array,
@@ -115,9 +114,9 @@ class KbotRNNActor(eqx.Module):
                 timestep_phase_4,  # 1
                 joint_pos_n,  # NUM_JOINTS
                 joint_vel_n,  # NUM_JOINTS
-                # projected_gravity_3,  # 3
-                imu_acc_3,  # 3
-                imu_gyro_3,  # 3
+                projected_gravity_3,  # 3
+                # imu_acc_3,  # 3
+                # imu_gyro_3,  # 3
                 lin_vel_cmd_2,  # 2
                 ang_vel_cmd,  # 1
                 gait_freq_cmd,  # 1
@@ -195,9 +194,7 @@ class KbotRNNCritic(eqx.Module):
         timestep_phase_4: Array,
         joint_pos_n: Array,
         joint_vel_n: Array,
-        imu_acc_3: Array,
-        # local_projected_gravity_3: Array,
-        imu_gyro_3: Array,
+        projected_gravity_3: Array,
         lin_vel_cmd_2: Array,
         ang_vel_cmd: Array,
         gait_freq_cmd: Array,
@@ -205,7 +202,8 @@ class KbotRNNCritic(eqx.Module):
         # critic observations
         feet_contact_2: Array,
         feet_position_6: Array,
-        projected_gravity_3: Array,
+        imu_acc_3: Array,
+        imu_gyro_3: Array,
         base_position_3: Array,
         base_orientation_4: Array,
         base_linear_velocity_3: Array,
@@ -219,16 +217,15 @@ class KbotRNNCritic(eqx.Module):
                 timestep_phase_4,  # 1
                 joint_pos_n,  # NUM_JOINTS
                 joint_vel_n,  # NUM_JOINTS
-                imu_acc_3,  # 3
-                # local_projected_gravity_3,  # 3
-                imu_gyro_3,  # 3
+                projected_gravity_3,  # 3
                 lin_vel_cmd_2,  # 2
                 ang_vel_cmd,  # 1
                 gait_freq_cmd,  # 1
                 # last_action_n,  # NUM_JOINTS
                 feet_contact_2,  # 2
                 feet_position_6,  # 6
-                projected_gravity_3,  # 3
+                imu_acc_3,  # 3
+                imu_gyro_3,  # 3
                 base_position_3,  # 3
                 base_orientation_4,  # 4
                 base_linear_velocity_3,  # 3
@@ -303,11 +300,12 @@ class KbotWalkingJoystickRNNTask(KbotWalkingTask[Config], Generic[Config]):
 
         mj_model = load_mjmodel(mjcf_path, scene=self.config.terrain_type)
 
-        mj_model.opt.timestep = jnp.array(self.config.dt)
-        mj_model.opt.iterations = 6
-        mj_model.opt.ls_iterations = 6
-        mj_model.opt.disableflags = mjx.DisableBit.EULERDAMP
-        mj_model.opt.solver = mjx.SolverType.CG
+        # NOTE: test the difference
+        # mj_model.opt.timestep = jnp.array(self.config.dt)
+        # mj_model.opt.iterations = 6
+        # mj_model.opt.ls_iterations = 6
+        # mj_model.opt.disableflags = mjx.DisableBit.EULERDAMP
+        # mj_model.opt.solver = mjx.SolverType.CG
 
         return mj_model
 
@@ -321,9 +319,9 @@ class KbotWalkingJoystickRNNTask(KbotWalkingTask[Config], Generic[Config]):
         timestep_phase_4 = observations["timestep_phase_observation"]
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
-        # projected_gravity_3 = observations["base_link_quat_local_projected_gravity_observation"]
-        imu_acc_3 = observations["sensor_observation_imu_acc"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        # imu_acc_3 = observations["sensor_observation_imu_acc"]
+        # imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        projected_gravity_3 = observations["projected_gravity_observation"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         ang_vel_cmd = commands["angular_velocity_command"]
         gait_freq_cmd = commands["gait_frequency_command"]
@@ -333,9 +331,9 @@ class KbotWalkingJoystickRNNTask(KbotWalkingTask[Config], Generic[Config]):
             timestep_phase_4=timestep_phase_4,
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
-            # projected_gravity_3=projected_gravity_3,
-            imu_acc_3=imu_acc_3,
-            imu_gyro_3=imu_gyro_3,
+            # imu_acc_3=imu_acc_3,
+            # imu_gyro_3=imu_gyro_3,
+            projected_gravity_3=projected_gravity_3,
             lin_vel_cmd_2=lin_vel_cmd_2,
             ang_vel_cmd=ang_vel_cmd,
             gait_freq_cmd=gait_freq_cmd,
@@ -355,7 +353,6 @@ class KbotWalkingJoystickRNNTask(KbotWalkingTask[Config], Generic[Config]):
         joint_vel_n = observations["joint_velocity_observation"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         projected_gravity_3 = observations["projected_gravity_observation"]
-        # local_projected_gravity_3 = observations["base_link_quat_local_projected_gravity_observation"]
         imu_acc_3 = observations["sensor_observation_imu_acc"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         ang_vel_cmd = commands["angular_velocity_command"]
@@ -375,9 +372,9 @@ class KbotWalkingJoystickRNNTask(KbotWalkingTask[Config], Generic[Config]):
             timestep_phase_4=timestep_phase_4,
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
-            # local_projected_gravity_3=local_projected_gravity_3,
-            imu_acc_3=imu_acc_3,
-            imu_gyro_3=imu_gyro_3,
+            # imu_acc_3=imu_acc_3,
+            # imu_gyro_3=imu_gyro_3,
+            projected_gravity_3=projected_gravity_3,
             lin_vel_cmd_2=lin_vel_cmd_2,
             ang_vel_cmd=ang_vel_cmd,
             gait_freq_cmd=gait_freq_cmd,
@@ -385,7 +382,8 @@ class KbotWalkingJoystickRNNTask(KbotWalkingTask[Config], Generic[Config]):
             # critic observations
             feet_contact_2=feet_contact_2,
             feet_position_6=feet_position_6,
-            projected_gravity_3=projected_gravity_3,
+            imu_acc_3=imu_acc_3,
+            imu_gyro_3=imu_gyro_3,
             base_position_3=base_position_3,
             base_orientation_4=base_orientation_4,
             base_linear_velocity_3=base_linear_velocity_3,
@@ -514,11 +512,7 @@ class KbotWalkingJoystickRNNTask(KbotWalkingTask[Config], Generic[Config]):
         if not self.config.export_for_inference:
             return state
 
-        model: KbotRNNModel = self.load_ckpt_with_template(
-            ckpt_path,
-            part="model",
-            model_template=self.get_model(key=jax.random.PRNGKey(0)),
-        )
+        model: KbotRNNModel = self.load_ckpt(ckpt_path, part="model")
 
         model_fn = self.make_export_model(model, stochastic=False, batched=True)
         input_shapes = [
@@ -556,10 +550,11 @@ if __name__ == "__main__":
             num_passes=10,
             epochs_per_log_step=1,
             # Simulation parameters.
+            iterations=4,
+            ls_iterations=6,
             dt=0.002,
             ctrl_dt=0.02,
             max_action_latency=0.005,
-            min_action_latency=0.0,
             rollout_length_seconds=10.0,
             render_length_seconds=10.0,
             # PPO parameters
