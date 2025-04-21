@@ -102,7 +102,7 @@ class KbotRNNActor(eqx.Module):
         joint_vel_n: Array,
         projected_gravity_3: Array,
         # imu_acc_3: Array,
-        # imu_gyro_3: Array,
+        imu_gyro_3: Array,
         lin_vel_cmd_2: Array,
         ang_vel_cmd: Array,
         gait_freq_cmd: Array,
@@ -116,7 +116,7 @@ class KbotRNNActor(eqx.Module):
                 joint_vel_n,  # NUM_JOINTS
                 projected_gravity_3,  # 3
                 # imu_acc_3,  # 3
-                # imu_gyro_3,  # 3
+                imu_gyro_3,  # 3
                 lin_vel_cmd_2,  # 2
                 ang_vel_cmd,  # 1
                 gait_freq_cmd,  # 1
@@ -235,7 +235,6 @@ class KbotRNNCritic(eqx.Module):
             ],
             axis=-1,
         )
-
         x_n = self.input_proj(obs_n)
         out_carries = []
         for i, rnn in enumerate(self.rnns):
@@ -320,7 +319,7 @@ class KbotWalkingJoystickRNNTask(KbotWalkingTask[Config], Generic[Config]):
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
         # imu_acc_3 = observations["sensor_observation_imu_acc"]
-        # imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         projected_gravity_3 = observations["projected_gravity_observation"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         ang_vel_cmd = commands["angular_velocity_command"]
@@ -332,7 +331,7 @@ class KbotWalkingJoystickRNNTask(KbotWalkingTask[Config], Generic[Config]):
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
             # imu_acc_3=imu_acc_3,
-            # imu_gyro_3=imu_gyro_3,
+            imu_gyro_3=imu_gyro_3,
             projected_gravity_3=projected_gravity_3,
             lin_vel_cmd_2=lin_vel_cmd_2,
             ang_vel_cmd=ang_vel_cmd,
@@ -367,7 +366,6 @@ class KbotWalkingJoystickRNNTask(KbotWalkingTask[Config], Generic[Config]):
         base_angular_velocity_3 = observations["base_angular_velocity_observation"]
         actuator_force_n = observations["actuator_force_observation"]
         true_height_1 = observations["true_height_observation"]
-
         return model.forward(
             timestep_phase_4=timestep_phase_4,
             joint_pos_n=joint_pos_n,
