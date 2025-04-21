@@ -394,13 +394,7 @@ class KbotWalkingJoystickRNNTask(KbotWalkingTask[Config], Generic[Config]):
         )
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
-        return ksim.EpisodeLengthCurriculum(
-            num_levels=10,
-            increase_threshold=60.0,
-            decrease_threshold=10.0,
-            min_level_steps=5,
-            dt=self.config.ctrl_dt,  # not sure what this is for
-        )
+        return ksim.ConstantCurriculum(level=0.1)
 
     def get_ppo_variables(
         self,
@@ -550,8 +544,8 @@ if __name__ == "__main__":
             num_passes=10,
             epochs_per_log_step=1,
             # Simulation parameters.
-            iterations=4,
-            ls_iterations=6,
+            iterations=8,
+            ls_iterations=8,
             dt=0.002,
             ctrl_dt=0.02,
             max_action_latency=0.005,

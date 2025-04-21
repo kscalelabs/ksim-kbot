@@ -747,8 +747,8 @@ if __name__ == "__main__":
             num_passes=10,
             epochs_per_log_step=1,
             # Simulation parameters.
-            iterations=4,
-            ls_iterations=6,
+            iterations=8,
+            ls_iterations=8,
             dt=0.002,
             ctrl_dt=0.02,
             max_action_latency=0.005,
