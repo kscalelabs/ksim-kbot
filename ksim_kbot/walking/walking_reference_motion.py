@@ -18,6 +18,7 @@ import numpy as np
 import xax
 from bvhio.lib.hierarchy import Joint as BvhioJoint
 from jaxtyping import Array, PRNGKeyArray
+from kscale.web.gen.api import JointMetadataOutput
 from ksim.types import PhysicsModel
 from ksim.utils.priors import (
     MotionReferenceMapping,
@@ -31,7 +32,9 @@ from ksim.utils.priors import (
 from scipy.spatial.transform import Rotation as R
 
 import ksim_kbot.rewards as kbot_rewards
+from ksim_kbot import common
 from ksim_kbot.walking.walking_joystick import (
+    MAX_TORQUE,
     NUM_CRITIC_INPUTS,
     NUM_INPUTS,
     NUM_OUTPUTS,
@@ -39,7 +42,33 @@ from ksim_kbot.walking.walking_joystick import (
     KbotWalkingTaskConfig,
 )
 
-NUM_JOINTS = 20
+JOINT_TARGETS = (
+    # right arm
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    # left arm
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    # right leg
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    # left leg
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+)
+
 
 HUMANOID_REFERENCE_MAPPINGS = (
     MotionReferenceMapping("CC_Base_L_ThighTwist01", "RS03_5"),  # hip
@@ -54,6 +83,22 @@ HUMANOID_REFERENCE_MAPPINGS = (
     MotionReferenceMapping("CC_Base_R_ForearmTwist01", "KC_C_401R_R_UpForearmDrive"),  # elbow
     MotionReferenceMapping("CC_Base_L_Hand", "KB_C_501X_Left_Bayonet_Adapter_Hard_Stop"),  # hand
     MotionReferenceMapping("CC_Base_R_Hand", "KB_C_501X_Right_Bayonet_Adapter_Hard_Stop"),  # hand
+)
+
+NUM_JOINTS = 20
+
+
+# Actor inputs are the same as the base class for now
+NUM_ACTOR_INPUTS_REF = (
+    NUM_INPUTS + NUM_JOINTS + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # reference_qpos  # reference_local_xpos
+)
+
+# Critic inputs are the base class inputs plus the new reference observations
+NUM_CRITIC_INPUTS_REF = (
+    NUM_CRITIC_INPUTS
+    + NUM_JOINTS  # reference_qpos
+    + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # reference_local_xpos
+    + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # tracked_local_xpos
 )
 
 
@@ -290,18 +335,6 @@ class TrackedLocalXposObservation(ksim.Observation):
         return jnp.concatenate(tracked_positions_list, axis=-1)
 
 
-# Actor inputs are the same as the base class for now
-NUM_ACTOR_INPUTS_REF = NUM_INPUTS + NUM_JOINTS + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)
-
-# Critic inputs are the base class inputs plus the new reference observations
-NUM_CRITIC_INPUTS_REF = (
-    NUM_CRITIC_INPUTS
-    + NUM_JOINTS  # reference_qpos
-    + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # reference_local_xpos
-    + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # tracked_local_xpos
-)
-
-
 class KbotActor(eqx.Module):
     """Actor for the standing task."""
 
@@ -517,8 +550,54 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
 
         return super_observations + observations
 
+    def get_actuators(
+        self,
+        physics_model: ksim.PhysicsModel,
+        metadata: dict[str, JointMetadataOutput] | None = None,
+    ) -> ksim.Actuators:
+        assert metadata is not None, "Metadata is required"
+        return common.TargetPositionMITActuators(
+            physics_model,
+            metadata,
+            default_targets=JOINT_TARGETS,
+            pos_action_noise=0.05,
+            vel_action_noise=0.05,
+            pos_action_noise_type="gaussian",
+            vel_action_noise_type="gaussian",
+            ctrl_clip=[
+                # right arm
+                MAX_TORQUE["03"],
+                MAX_TORQUE["03"],
+                MAX_TORQUE["02"],
+                MAX_TORQUE["02"],
+                MAX_TORQUE["00"],
+                # left arm
+                MAX_TORQUE["03"],
+                MAX_TORQUE["03"],
+                MAX_TORQUE["02"],
+                MAX_TORQUE["02"],
+                MAX_TORQUE["00"],
+                # right leg
+                MAX_TORQUE["04"],
+                MAX_TORQUE["03"],
+                MAX_TORQUE["03"],
+                MAX_TORQUE["04"],
+                MAX_TORQUE["02"],
+                # left leg
+                MAX_TORQUE["04"],
+                MAX_TORQUE["03"],
+                MAX_TORQUE["03"],
+                MAX_TORQUE["04"],
+                MAX_TORQUE["02"],
+            ],
+            action_scale=self.config.action_scale,
+        )
+
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
-        return []
+        return [
+            ksim.RandomJointPositionReset(),
+            ksim.RandomJointVelocityReset(),
+        ]
         # return [ksim.InitialMotionStateReset(
         #         reference_motion=self.reference_motion_data,
         #         freejoint=True,
@@ -604,7 +683,6 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
             commands,
         )
         action_j = action_dist_j.mode() if argmax else action_dist_j.sample(seed=rng)
-
         # Getting the local cartesian positions for all tracked bodies.
         tracked_positions: dict[int, Array] = {}
         for body_id in self.tracked_body_ids:
