@@ -370,6 +370,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 physics_model=physics_model,
                 framequat_name="base_link_quat",
                 lag_range=(0.0, 0.1),
+                noise=local_gvec_noise,
             ),
             common.LocalProjectedGravityObservation.create(
                 physics_model=physics_model, sensor_name="base_link_quat", noise=local_gvec_noise
