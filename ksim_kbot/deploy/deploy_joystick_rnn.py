@@ -76,10 +76,14 @@ class JoystickRNNDeploy(FixedArmDeploy):
         self.phase = np.array([0, np.pi])
 
         self.rollout_dict = {
+            "model_name": "/".join(model_path.split("/")[-2:]),
+            "timestamp": [],
+            "loop_overrun_time": [],
             "command": [],
             "pos_diff": [],
             "vel_obs": [],
             "projected_gravity": [],
+            "quat": [],
             "imu_gyro": [],
             "controller_cmd": [],
             "prev_action": [],
@@ -135,14 +139,15 @@ class JoystickRNNDeploy(FixedArmDeploy):
 
         cmd = self.get_command()
 
-        if self.mode in ["sim", "real-check", "real-deploy"]:
-            self.rollout_dict["pos_diff"].append(pos_diff)
-            self.rollout_dict["vel_obs"].append(vel_obs)
-            self.rollout_dict["projected_gravity"].append(projected_gravity)
-            self.rollout_dict["imu_gyro"].append(imu_gyro)
-            self.rollout_dict["controller_cmd"].append(cmd)
-            self.rollout_dict["prev_action"].append(self.prev_action)
-            self.rollout_dict["phase"].append(phase_vec)
+        self.rollout_dict["timestamp"].append(time.time())
+        self.rollout_dict["pos_diff"].append(pos_diff)
+        self.rollout_dict["vel_obs"].append(vel_obs)
+        self.rollout_dict["projected_gravity"].append(projected_gravity)
+        self.rollout_dict["quat"].append(np.array([quat.w, quat.x, quat.y, quat.z]))
+        self.rollout_dict["imu_gyro"].append(imu_gyro)
+        self.rollout_dict["controller_cmd"].append(cmd)
+        self.rollout_dict["prev_action"].append(self.prev_action)
+        self.rollout_dict["phase"].append(phase_vec)
 
         observation = np.concatenate(
             [phase_vec, pos_diff, vel_obs, projected_gravity, imu_gyro, cmd, self.gait]
@@ -198,8 +203,10 @@ class JoystickRNNDeploy(FixedArmDeploy):
                 if time.time() < target_time:
                     logger.debug(f"Sleeping for {max(0, target_time - time.time())} seconds")
                     await asyncio.sleep(max(0, target_time - time.time()))
+                    self.rollout_dict["loop_overrun_time"].append(0.0)
                 else:
                     logger.info(f"Loop overran by {time.time() - target_time} seconds")
+                    self.rollout_dict["loop_overrun_time"].append(time.time() - target_time)
 
                 target_time += self.DT
 
@@ -220,8 +227,8 @@ def main() -> None:
     )
     parser.add_argument("--enable_joystick", action="store_true", help="Enable joystick")
     parser.add_argument("--scale_action", type=float, default=0.1, help="Action Scale, default 0.1")
-    parser.add_argument("--ip", type=str, default="localhost", help="IP address of KOS")
-    parser.add_argument("--episode_length", type=int, default=5, help="Length of episode in seconds")
+    parser.add_argument("--ip", type=str, default="100.101.101.48", help="IP address of KOS")
+    parser.add_argument("--episode_length", type=int, default=30, help="Length of episode in seconds")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
     args = parser.parse_args()
@@ -235,7 +242,6 @@ def main() -> None:
     # Set global log level
     logger.remove()
     logger.add(sys.stderr, level=log_level)  # This will keep the default colorized format
-    logger.add(f"{file_dir}/deployment_checks/last_deployment.log", level=log_level)
 
     deploy = JoystickRNNDeploy(args.enable_joystick, model_path, args.mode, args.ip, carry_shape=(5, 256))
     deploy.ACTION_SCALE = args.scale_action
@@ -248,10 +254,13 @@ def main() -> None:
         raise e
 
 
+'''
+python -m ksim_kbot.deploy.deploy_joystick_rnn \
+--model_path joystick_rnn_proj_example/tf_model_2144 \
+--mode sim \
+--scale_action 1.0 \
+--debug
+'''
+
 if __name__ == "__main__":
-    # python -m ksim_kbot.deploy.deploy_joystick \
-    # --model_path ksim_kbot/deploy/assets/noisy_joystick_example/tf_model_1576 \
-    # --mode sim \
-    # --scale_action 1.0 \
-    # --debug
     main()

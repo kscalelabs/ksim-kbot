@@ -4,11 +4,26 @@ import glob
 import os
 import os.path as osp
 import pickle
+import argparse
 from dataclasses import dataclass
 from datetime import datetime
 
 import matplotlib.pyplot as plt
 import numpy as np
+
+import colorlogging
+import logging
+
+logger = logging.getLogger(__name__)
+colorlogging.configure()
+
+
+STATS = {
+    "deployment_length": -1.0,
+    "avg_loop_overrun_time": -1.0,
+    "max_loop_overrun_time": -1.0,
+    "max_commanded_velocity": -1.0,
+}
 
 
 @dataclass
@@ -49,16 +64,23 @@ actuator_list: list[Actuator] = [
 ]
 
 
-def load_latest_deployment() -> tuple[dict, str] | None:
-    """Load the latest deployment pickle file."""
+def load_latest_deployment(log_type: str = "real-check") -> tuple[dict, str] | None:
+    """Load the latest deployment pickle file of the specified type.
+    
+    Args:
+        log_type: Type of log to load ('sim', 'real-check', or 'real-deploy').
+        
+    Returns:
+        Tuple of (data, filename) or None if no files found.
+    """
     # Get the directory of this script
     current_dir = os.path.dirname(os.path.abspath(__file__))
 
     # Find all pickle files matching the pattern
-    pkl_files = glob.glob(os.path.join(current_dir, "real-check_*.pkl"))
+    pkl_files = glob.glob(os.path.join(current_dir, f"{log_type}_*.pkl"))
 
     if not pkl_files:
-        print("No deployment pickle files found.")
+        print(f"No {log_type} pickle files found.")
         return None
 
     # Extract timestamps and sort files
@@ -69,8 +91,19 @@ def load_latest_deployment() -> tuple[dict, str] | None:
         timestamp_str = filename.split("_")[1].split(".")[0]  # Extract YYYYMMDD-HHMMSS
 
         # Convert to datetime object for comparison
-        timestamp = datetime.strptime(timestamp_str, "%Y%m%d-%H%M%S")
-        file_timestamps.append((file, timestamp))
+        try:
+            if "-" in timestamp_str:
+                timestamp = datetime.strptime(timestamp_str, "%Y%m%d-%H%M%S")
+            else:
+                timestamp = datetime.strptime(timestamp_str, "%Y%m%d")
+            file_timestamps.append((file, timestamp))
+        except ValueError as e:
+            print(f"Warning: Could not parse timestamp from {filename}: {e}")
+            continue
+
+    if not file_timestamps:
+        print(f"No valid {log_type} files found.")
+        return None
 
     # Sort by timestamp (newest first)
     def sort_by_timestamp(item: tuple[str, datetime]) -> datetime:
@@ -81,7 +114,7 @@ def load_latest_deployment() -> tuple[dict, str] | None:
     # Get the latest file
     latest_file = file_timestamps[0][0]
     latest_filename = os.path.basename(latest_file)
-    print(f"Loading latest deployment file: {latest_filename}")
+    print(f"Loading latest {log_type} file: {latest_filename}")
 
     # Load the pickle file
     with open(latest_file, "rb") as f:
@@ -90,7 +123,83 @@ def load_latest_deployment() -> tuple[dict, str] | None:
     return data, latest_filename
 
 
-def plot_command_data(data: dict, output_dir: str = "plots") -> None:
+def find_deployment_file(date_str: str, log_type: str) -> tuple[dict, str, str] | None:
+    """Find the latest deployment file of a given type and date.
+    
+    Checks for a folder with the date name and looks for files inside.
+    Only searches within date-named folders, not directly in the deployment_logs directory.
+    """
+    # Get the directory of this script
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Check if there's a folder with the date name
+    date_folder = os.path.join(current_dir, date_str)
+    if not os.path.isdir(date_folder):
+        print(f"Date folder not found: {date_str}")
+        return None
+        
+    print(f"Found date folder: {date_str}")
+    
+    # Construct pattern based on log type
+    if log_type == "sim":
+        pattern = f"sim_{date_str}*.pkl"
+    elif log_type == "real-check":
+        pattern = f"real-check_{date_str}*.pkl"
+    elif log_type == "real-deploy":
+        pattern = f"real-deploy_{date_str}*.pkl"
+    else:
+        print(f"Invalid log type: {log_type}")
+        return None
+    
+    # Look for files in the date folder
+    pkl_files = glob.glob(os.path.join(date_folder, pattern))
+
+    if not pkl_files:
+        print(f"No {log_type} files found in folder {date_str}.")
+        return None
+
+    # Extract timestamps and sort files
+    file_timestamps = []
+    for file in pkl_files:
+        # Extract the timestamp part from the filename
+        filename = os.path.basename(file)
+        try:
+            timestamp_str = filename.split("_")[1].split(".")[0]  # Extract YYYYMMDD-HHMMSS or just YYYYMMDD
+            
+            # Check if the timestamp contains time
+            if "-" in timestamp_str:
+                timestamp = datetime.strptime(timestamp_str, "%Y%m%d-%H%M%S")
+            else:
+                timestamp = datetime.strptime(timestamp_str, "%Y%m%d")
+                
+            file_timestamps.append((file, timestamp))
+        except (IndexError, ValueError) as e:
+            print(f"Warning: Could not parse timestamp from {filename}: {e}")
+            continue
+
+    if not file_timestamps:
+        print(f"No valid {log_type} files found in folder {date_str}.")
+        return None
+
+    # Sort by timestamp (newest first)
+    file_timestamps.sort(key=lambda item: item[1], reverse=True)
+
+    # Get the latest file
+    latest_file = file_timestamps[0][0]
+    latest_filename = os.path.basename(latest_file)
+    print(f"Loading deployment file: {latest_filename}")
+
+    # Load the pickle file
+    try:
+        with open(latest_file, "rb") as f:
+            data = pickle.load(f)
+        return data, latest_filename, date_folder
+    except Exception as e:
+        print(f"Error loading {latest_filename}: {e}")
+        return None
+
+
+def plot_command_data(data: dict, output_dir: str) -> None:
     """Plot command data with subplots for each actuator."""
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -116,6 +225,9 @@ def plot_command_data(data: dict, output_dir: str = "plots") -> None:
     steps = np.arange(len(data["command"]))
     actuator_positions: dict[int, list[float]] = {i: [] for i in range(20)}
     actuator_velocities: dict[int, list[float]] = {i: [] for i in range(20)}
+    
+    # Track maximum velocity for stats
+    max_velocity = 0.0
 
     for step_data in data["command"]:
         # Each step_data is a list of actuator commands
@@ -125,7 +237,13 @@ def plot_command_data(data: dict, output_dir: str = "plots") -> None:
             nn_id = next((a.nn_id for a in actuator_list if a.actuator_id == actuator_id), None)
             if nn_id is not None:
                 actuator_positions[nn_id].append(actuator_data["position"])
-                actuator_velocities[nn_id].append(float(actuator_data["velocity"]))
+                velocity = float(actuator_data["velocity"])
+                actuator_velocities[nn_id].append(velocity)
+                # Update max velocity stat
+                max_velocity = max(max_velocity, abs(velocity))
+
+    # Update max commanded velocity stat
+    STATS["max_commanded_velocity"] = max_velocity
 
     # Plot each actuator's data
     for nn_id in range(20):
@@ -160,15 +278,16 @@ def plot_command_data(data: dict, output_dir: str = "plots") -> None:
         plt.close(fig)
 
 
-def plot_vector_data(data: dict, key: str, output_dir: str = "plots") -> None:
+def plot_vector_data(data: dict, key: str, output_dir: str) -> None:
     """Plot data that is a list of vectors over time."""
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
     steps = np.arange(len(data[key]))
-    vector_len = len(data[key][0]) if data[key] else 0
+
 
     if key in ["pos_diff", "vel_obs", "prev_action"]:
+        vector_len = len(data[key][0]) if data[key] else 0
         # These have nn_id as the position in each vector
         nn_id_to_joint = {a.nn_id: a.joint_name for a in actuator_list}
 
@@ -289,8 +408,8 @@ def plot_vector_data(data: dict, key: str, output_dir: str = "plots") -> None:
         fig.savefig(osp.join(output_dir, "imu_obs.pdf"))
         plt.close(fig)
 
-    elif key in ["controller_cmd", "cmd"]:
-        # Handle both new controller_cmd and old cmd for backward compatibility
+    elif key in ["controller_cmd"]:
+        # Handle controller_cmd data
         fig, ax = plt.subplots(figsize=(10, 6))
 
         # Extract x and y data
@@ -335,8 +454,89 @@ def plot_vector_data(data: dict, key: str, output_dir: str = "plots") -> None:
         fig.savefig(osp.join(output_dir, "phase.pdf"))
         plt.close(fig)
 
+    elif key in ["imu_gravity", "projected_gravity"]:
+        # projected_gravity has shape (3,) with x, y, z components
+        fig, ax = plt.subplots(figsize=(10, 6))
 
-def plot_deployment_data(data: dict, output_dir: str = "plots") -> None:
+        # Extract x, y, and z components
+        x_data = [float(step_data[0]) for step_data in data[key]]
+        y_data = [float(step_data[1]) for step_data in data[key]]
+        z_data = [float(step_data[2]) for step_data in data[key]]
+
+        # Plot the data
+        ax.plot(steps[: len(x_data)], x_data[: len(steps)], label="X")
+        ax.plot(steps[: len(y_data)], y_data[: len(steps)], label="Y")
+        ax.plot(steps[: len(z_data)], z_data[: len(steps)], label="Z")
+
+        ax.set_ylabel("Projected Gravity")
+        ax.set_xlabel("Steps")
+        ax.legend()
+        ax.grid(True)
+
+        fig.suptitle("Projected Gravity over time")
+        fig.tight_layout()
+        fig.savefig(osp.join(output_dir, f"projected_gravity.pdf"))
+        plt.close(fig)
+
+    elif key == "loop_overrun_time":
+        non_zero_overruns = [t for t in data[key] if t > 0]
+        if non_zero_overruns:
+            STATS["avg_loop_overrun_time"] = np.mean(non_zero_overruns)
+            STATS["max_loop_overrun_time"] = np.max(non_zero_overruns)
+        else:
+            STATS["avg_loop_overrun_time"] = 0.0
+            STATS["max_loop_overrun_time"] = 0.0
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+        # Extract x and y data
+        x_data = data[key]
+
+        # Plot x and y data
+        ax.plot(steps[: len(x_data)], x_data[: len(steps)], label="X")
+        ax.set_ylabel("Loop Overrun Time (s)")
+        ax.set_xlabel("Steps")
+        ax.legend()
+        ax.grid(True)
+
+        fig.suptitle("Per Loop Overrun over time")
+        fig.tight_layout()
+        fig.savefig(osp.join(output_dir, f"{key}.pdf"))
+        plt.close(fig)
+    elif key == "quat":
+        # quat has shape (4,) with w, x, y, z components
+        fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(10, 15), sharex=True)
+
+        # Extract w, x, y, z components
+        w_data = [float(step_data[0]) for step_data in data[key]]
+        x_data = [float(step_data[1]) for step_data in data[key]]
+        y_data = [float(step_data[2]) for step_data in data[key]]
+        z_data = [float(step_data[3]) for step_data in data[key]]
+
+        # Plot w, x, y, z components
+        ax1.plot(steps[: len(w_data)], w_data[: len(steps)], label="w")
+        ax2.plot(steps[: len(x_data)], x_data[: len(steps)], label="x")
+        ax3.plot(steps[: len(y_data)], y_data[: len(steps)], label="y")
+        ax4.plot(steps[: len(z_data)], z_data[: len(steps)], label="z")
+
+        ax1.set_ylabel("w")
+        ax2.set_ylabel("x")
+        ax3.set_ylabel("y")
+        ax4.set_ylabel("z")
+        ax4.set_xlabel("Steps")
+        ax1.grid(True)
+        ax2.grid(True)
+        ax3.grid(True)
+        ax4.grid(True)
+        
+        fig.suptitle("Quaternion over time")
+        fig.tight_layout()
+        fig.savefig(osp.join(output_dir, f"{key}.pdf"))
+        plt.close(fig)
+    else:
+        raise ValueError(f"Unknown key, add this plot {key}")
+
+
+def plot_deployment_data(data: dict, output_dir: str) -> None:
     """Plot all deployment data."""
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -344,30 +544,60 @@ def plot_deployment_data(data: dict, output_dir: str = "plots") -> None:
     # Plot command data
     plot_command_data(data, output_dir)
 
-    # Plot other vector data
-    keys_to_plot = [
-        "pos_diff",
-        "vel_obs",
-        "imu_accel",
-        "imu_gyro",
-        "imu_obs",  # For backward compatibility
-        "controller_cmd",
-        "cmd",  # For backward compatibility
-        "prev_action",
-        "phase",
-    ]
+    logger.warning(f"Plotting {data.keys()}")
 
-    for key in keys_to_plot:
-        if key in data:
+    STATS["deployment_length"] = max(data["timestamp"]) - min(data["timestamp"])
+
+    for key in data.keys():
+        if key in ["command", "timestamp", "model_name"]:
+            continue
+        else:
             plot_vector_data(data, key, output_dir)
 
-    print(f"All plots saved to {output_dir}/")
+    # Log STATS values after all plots completed (and stats calculated)
+    logger.info("-" * 50)
+    logger.info("DEPLOYMENT STATISTICS:")
+    logger.info(f"Model name: {data['model_name']}")
+    logger.info(f"Deployment length: {STATS['deployment_length']:.2f} seconds")
+    logger.info(f"Average per loop overrun time: {STATS['avg_loop_overrun_time']:.2f} s")
+    logger.info(f"Maximum per loop overrun time: {STATS['max_loop_overrun_time']:.2f} s")
+    logger.info(f"Maximum commanded velocity: {STATS['max_commanded_velocity']:.2f} deg/s")
+    logger.info("-" * 50)
+
+    logger.info(f"All plots saved to {output_dir}/")
 
 
 if __name__ == "__main__":
-    deployment_data = load_latest_deployment()
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description="Plot K-Bot deployment logs.")
+    parser.add_argument(
+        "--date", 
+        type=str, 
+        help="Date in format YYYYMMDD (e.g., 20250422)"
+    )
+    parser.add_argument(
+        "--type", 
+        type=str, 
+        choices=["sim", "real-check", "real-deploy"],
+        help="Log type (sim, real-check, or real-deploy)"
+    )
+    
+    args = parser.parse_args()
+    
+    if args.date and args.type:
+        # User provided date and type via command line
+        deployment_data = find_deployment_file(args.date, args.type)
+    else:
+        raise ValueError("Invalid date or type provided")
+    
     if deployment_data:
-        data, filename = deployment_data
-        output_dir = os.path.join("plots", os.path.splitext(filename)[0])
-
+        data, filename, data_dir = deployment_data
+        # Create output directory in the same location as the data directory
+        # Use the file prefix (without extension) as the folder name
+        file_prefix = os.path.splitext(filename)[0]
+        output_dir = os.path.join(data_dir, file_prefix)
+        
+        logger.info(f"Generating plots for {filename}...")
         plot_deployment_data(data, output_dir)
+    else:
+        logger.error("No data to plot. Exiting.")

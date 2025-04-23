@@ -14,7 +14,6 @@ __pycache__/
 
 # Databases
 *.db
-*.pdf
 
 # Build artifacts
 build/
@@ -28,8 +27,9 @@ experimental/
 
 # Deployment Assets
 # */deploy/assets/*/*
-
 *.pkl
+*.pdf
+*.mp4
 
 # Development
 scratch/

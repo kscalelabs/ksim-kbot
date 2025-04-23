@@ -157,7 +157,14 @@ class Deploy(ABC):
         if self.rollout_dict is not None:
             file_dir = os.path.dirname(os.path.abspath(__file__))
             timestamp = time.strftime("%Y%m%d-%H%M%S")
-            with open(f"{file_dir}/deployment_checks/{self.mode}_{timestamp}.pkl", "wb") as f:
+            date = time.strftime("%Y%m%d")
+            date_dir = f"{file_dir}/deployment_logs/{date}"
+            
+            # Check if date directory exists, create if it doesn't
+            if not os.path.exists(date_dir):
+                os.makedirs(date_dir)
+                
+            with open(f"{date_dir}/{self.mode}_{timestamp}.pkl", "wb") as f:
                 pickle.dump(self.rollout_dict, f)
 
     @abstractmethod
@@ -272,8 +279,10 @@ class Deploy(ABC):
                 if time.time() < target_time:
                     logger.debug(f"Sleeping for {max(0, target_time - time.time())} seconds")
                     await asyncio.sleep(max(0, target_time - time.time()))
+                    self.rollout_dict["loop_overrun_time"].append(0.0)
                 else:
                     logger.info(f"Loop overran by {time.time() - target_time} seconds")
+                    self.rollout_dict["loop_overrun_time"].append(time.time() - target_time)
 
                 target_time += self.DT
 
