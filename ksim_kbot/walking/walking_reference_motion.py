@@ -104,18 +104,6 @@ class WalkingRefMotionTaskConfig(KbotWalkingTaskConfig):
 Config = TypeVar("Config", bound=WalkingRefMotionTaskConfig)
 
 
-@attrs.define(frozen=True)
-class NaiveForwardReward(ksim.Reward):
-    """Reward for forward motion."""
-
-    vel_clip_max: float = attrs.field(default=1.0)
-
-    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        vel = trajectory.qvel[..., 0]
-        clipped_vel = jnp.clip(vel, a_max=self.vel_clip_max)
-        return clipped_vel
-
-
 def create_tracked_marker_update_fn(
     body_id: int, mj_base_id: int, tracked_pos_fn: Callable[[ksim.Trajectory], xax.FrozenDict[int, Array]]
 ) -> Callable[[ksim.Marker, ksim.Trajectory], None]:
@@ -303,14 +291,14 @@ class TrackedLocalXposObservation(ksim.Observation):
 
 
 # Actor inputs are the same as the base class for now
-NUM_ACTOR_INPUTS_REF = NUM_INPUTS + NUM_JOINTS  # + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)
+NUM_ACTOR_INPUTS_REF = NUM_INPUTS + NUM_JOINTS + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)
 
 # Critic inputs are the base class inputs plus the new reference observations
 NUM_CRITIC_INPUTS_REF = (
     NUM_CRITIC_INPUTS
     + NUM_JOINTS  # reference_qpos
-    # + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # reference_local_xpos
-    # + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # tracked_local_xpos
+    + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # reference_local_xpos
+    + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # tracked_local_xpos
 )
 
 
@@ -358,7 +346,7 @@ class KbotActor(eqx.Module):
         gait_freq_cmd: Array,
         last_action_n: Array,
         ref_qpos_j: Array,
-        # ref_local_xpos_n: Array,
+        ref_local_xpos_n: Array,
     ) -> distrax.Normal:
         x_n = jnp.concatenate(
             [
@@ -372,7 +360,7 @@ class KbotActor(eqx.Module):
                 gait_freq_cmd,
                 last_action_n,
                 ref_qpos_j,
-                # ref_local_xpos_n,
+                ref_local_xpos_n,
             ],
             axis=-1,
         )
@@ -432,8 +420,8 @@ class KbotCritic(eqx.Module):
         true_height_1: Array,
         # motion reference observations
         ref_qpos_j: Array,
-        # ref_local_xpos_n: Array,
-        # tracked_local_xpos_n: Array,
+        ref_local_xpos_n: Array,
+        tracked_local_xpos_n: Array,
     ) -> Array:
         x_n = jnp.concatenate(
             [
@@ -457,8 +445,8 @@ class KbotCritic(eqx.Module):
                 true_height_1,
                 # motion reference observations
                 ref_qpos_j,
-                # ref_local_xpos_n,
-                # tracked_local_xpos_n,
+                ref_local_xpos_n,
+                tracked_local_xpos_n,
             ],
             axis=-1,
         )
@@ -541,7 +529,7 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
         rewards: list[ksim.Reward] = [
             ksim.StayAliveReward(
                 success_reward=1.0,
-                scale=30.0,
+                scale=8.0,
             ),
             # kbot_rewards.SensorOrientationPenalty(scale=self.config.orientation_penalty),
             CartesianReferenceMotionReward(
@@ -553,37 +541,48 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
                 physics_model=physics_model,
                 # joint_names=("right_arm", "left_arm", "right_leg", "left_leg"),
                 reference_motion_data=self.reference_motion_data,
-                scale=10.0,
+                scale=15.0,
                 speed=self.config.qpos_reference_speed,
                 joint_weights=(
                     # right arm
                     1.0,
                     1.0,
                     1.0,
-                    2.0,
-                    2.0,
+                    1.0,
+                    1.0,
                     # left arm
                     1.0,
                     1.0,
                     1.0,
-                    2.0,
-                    2.0,
+                    1.0,
+                    1.0,
                     # right leg
-                    1.0,  # hip pitch
+                    2.0,  # hip pitch
                     1.0,  # hip roll
                     1.0,  # hip yaw
-                    1.0,  # knee
+                    2.0,  # knee
                     1.0,  # ankle
                     # left leg
-                    1.0,  # hip pitch
+                    2.0,  # hip pitch
                     1.0,  # hip roll
                     1.0,  # hip yaw
-                    1.0,  # knee
+                    2.0,  # knee
                     1.0,  # ankle
                 ),
             ),
+            kbot_rewards.FeetSlipPenalty(scale=-2.0),
+            kbot_rewards.TargetLinearVelocityReward(
+                index="x",
+                target_vel=0.5,
+                scale=3.0,
+            ),
+            kbot_rewards.TargetLinearVelocityReward(
+                index="y",
+                target_vel=0.0,
+                scale=1.5,
+            ),
             ksim.LinearVelocityPenalty(index="z", scale=-2.0),
-            kbot_rewards.FeetSlipPenalty(scale=-1.0),
+            # kbot_rewards.TargetHeightReward(target_height=1.0, scale=1.0),
         ]
 
         return rewards
@@ -689,7 +688,7 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
 
         # motion reference observations
         ref_qpos_j = observations["reference_qpos_observation"]
-        # ref_local_xpos_n = observations["reference_local_xpos_observation"]
+        ref_local_xpos_n = observations["reference_local_xpos_observation"]
 
         return model.forward(
             timestep_phase_4=timestep_phase_4,
@@ -703,7 +702,7 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
             last_action_n=last_action_n,
             # motion reference observations
             ref_qpos_j=ref_qpos_j,
-            # ref_local_xpos_n=ref_local_xpos_n,
+            ref_local_xpos_n=ref_local_xpos_n,
         )
 
     def run_critic(
@@ -731,8 +730,8 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
 
         # motion reference observations
         ref_qpos_j = observations["reference_qpos_observation"]
-        # ref_local_xpos_n = observations["reference_local_xpos_observation"]
-        # tracked_local_xpos_n = observations["tracked_local_xpos_observation"]
+        ref_local_xpos_n = observations["reference_local_xpos_observation"]
+        tracked_local_xpos_n = observations["tracked_local_xpos_observation"]
 
         return model.forward(
             timestep_phase_4=timestep_phase_4,
@@ -756,8 +755,8 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
             true_height_1=true_height_1,
             # motion reference observations
             ref_qpos_j=ref_qpos_j,
-            # ref_local_xpos_n=ref_local_xpos_n,
-            # tracked_local_xpos_n=tracked_local_xpos_n,
+            ref_local_xpos_n=ref_local_xpos_n,
+            tracked_local_xpos_n=tracked_local_xpos_n,
         )
 
 

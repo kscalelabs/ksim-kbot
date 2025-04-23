@@ -434,3 +434,22 @@ class FeetPhaseReward(ksim.Reward):
         stance = xax.cubic_bezier_interpolation(jnp.array(0), swing_height, 2 * x)
         swing = xax.cubic_bezier_interpolation(swing_height, jnp.array(0), 2 * x - 1)
         return jnp.where(x <= 0.5, stance, swing)
+
+
+@attrs.define(frozen=True)
+class TargetLinearVelocityReward(ksim.Reward):
+    """Reward for forward motion."""
+
+    index: str = attrs.field(default="x")
+    target_vel: float = attrs.field(default=0.0)
+    norm: xax.NormType = attrs.field(default="l1")
+    monotonic_fn: str = attrs.field(default="inv")
+    temp: float = attrs.field(default=1.0)
+
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        vel = trajectory.qvel[..., ksim.cartesian_index_to_dim(self.index)]
+        error = xax.get_norm(vel - self.target_vel, self.norm)
+        return ksim.norm_to_reward(error, temp=self.temp, monotonic_fn=self.monotonic_fn)
+
+    def get_name(self) -> str:
+        return f"{self.index}_{super().get_name()}"
