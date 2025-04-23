@@ -732,8 +732,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         if not self.config.export_for_inference:
             return state
 
-        model: KbotModel = self.load_ckpt(ckpt_path, part="model")
-
+        model: KbotModel = self.load_ckpt(ckpt_path, part="model")[0]
         model_fn = self.make_export_model(model, stochastic=False, batched=True)
 
         input_shapes = [(NUM_INPUTS,)]
@@ -742,11 +741,13 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             if self.config.only_save_most_recent
             else ckpt_path.parent / f"tf_model_{state.num_steps}"
         )
+
         export(
             model_fn,
             input_shapes,  # type: ignore [arg-type]
             tf_path,
         )
+
         return state
 
 

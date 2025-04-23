@@ -1,14 +1,5 @@
 # mypy: disable-error-code="override"
-"""Walking default humanoid task with reference gait tracking.
-
-Todo:
-0. reward - qpos only chosen one? tracked_body_ids
-1. qvel - properly compute done
-2. height of the root relative to the ground - todo
-3. \theta - orientation of the root
-4. v - linear and angular velocity of the root
-5. feet and hands positions relative to the root
-"""
+"""Walking default humanoid task with reference gait tracking."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -57,23 +48,6 @@ HUMANOID_REFERENCE_MAPPINGS = (
     ReferenceMapping("CC_Base_L_Hand", "KB_C_501X_Left_Bayonet_Adapter_Hard_Stop"),  # hand
     ReferenceMapping("CC_Base_R_Hand", "KB_C_501X_Right_Bayonet_Adapter_Hard_Stop"),  # hand
 )
-
-# # # NEW ONE
-# HUMANOID_REFERENCE_MAPPINGS = (
-#     ReferenceMapping("CC_Base_L_ThighTwist01", "RS03_5"),  # hip
-#     ReferenceMapping("CC_Base_L_CalfTwist01", "KC_D_401L_L_Shin_Drive"),  # knee
-#     # ReferenceMapping("CC_Base_L_Foot", "KB_D_501L_L_LEG_FOOT"),  # foot
-#     ReferenceMapping("CC_Base_L_UpperarmTwist01", "KC_C_104L_PitchHardstopDriven"),  # shoulder
-#     ReferenceMapping("CC_Base_L_ForearmTwist01", "KC_C_202L"),  # elbow
-#     ReferenceMapping("CC_Base_L_Hand", "KB_C_501X_Left_Bayonet_Adapter_Hard_Stop"),  # hand
-
-#     ReferenceMapping("CC_Base_R_ThighTwist01", "RS03_4"),  # hip
-#     ReferenceMapping("CC_Base_R_CalfTwist01", "KC_D_401R_R_Shin_Drive"),  # knee
-#     # ReferenceMapping("CC_Base_R_Foot", "KB_D_501R_R_LEG_FOOT"),  # foot
-#     ReferenceMapping("CC_Base_R_UpperarmTwist01", "KC_C_104R_PitchHardstopDriven"),  # shoulder
-#     ReferenceMapping("CC_Base_R_ForearmTwist01", "KC_C_202R"),  # elbow
-#     ReferenceMapping("CC_Base_R_Hand", "KB_C_501X_Right_Bayonet_Adapter_Hard_Stop"),  # hand
-# )
 
 
 @dataclass
