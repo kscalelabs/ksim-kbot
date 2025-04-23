@@ -654,7 +654,7 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
 
         if self.config.visualize_reference_motion:
             np_reference_qpos = np.asarray(self.reference_motion_data.qpos.array)
-            np_cartesian_motion = jax.tree_map(
+            np_cartesian_motion = jax.tree.map(
                 lambda x: np.asarray(x.array),
                 self.reference_motion_data.cartesian_poses,
             )
