@@ -111,7 +111,7 @@ class JointPositionObservation(ksim.Observation):
     default_targets: tuple[float, ...] = attrs.field()
     noise: float = attrs.field(default=0.0)
 
-    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         qpos = state.physics_state.data.qpos[7:]  # (N,)
         diff = qpos - jnp.array(self.default_targets)
         return diff
@@ -121,7 +121,7 @@ class JointPositionObservation(ksim.Observation):
 class ProjectedGravityObservation(ksim.Observation):
     noise: float = attrs.field(default=0.0)
 
-    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         gvec = xax.get_projected_gravity_vector_from_quat(state.physics_state.data.qpos[3:7])
         return gvec
 
@@ -132,7 +132,7 @@ class LocalProjectedGravityObservation(ksim.Observation):
     noise: float = attrs.field(default=0.0)
     sensor_name: str = attrs.field(default="base_link_quat")
 
-    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         quat = state.physics_state.data.sensordata[self.sensor_idx_range[0] : self.sensor_idx_range[1]].ravel()
         return xax.get_projected_gravity_vector_from_quat(quat)
 
@@ -151,7 +151,7 @@ class LocalProjectedGravityObservation(ksim.Observation):
 class LastActionObservation(ksim.Observation):
     noise: float = attrs.field(default=0.0)
 
-    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         return state.physics_state.most_recent_action
 
 
@@ -159,7 +159,7 @@ class LastActionObservation(ksim.Observation):
 class TrueHeightObservation(ksim.Observation):
     """Observation of the true height of the body."""
 
-    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         return jnp.atleast_1d(state.physics_state.data.qpos[2])
 
 
@@ -170,9 +170,9 @@ class TimestepPhaseObservation(ksim.TimestepObservation):
     ctrl_dt: float = attrs.field(default=0.02)
     stand_still_threshold: float = attrs.field(default=0.0)
 
-    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         gait_freq = state.commands["gait_frequency_command"]
-        timestep = super().observe(state, rng)
+        timestep = super().observe(state, curriculum_level, rng)
         steps = timestep / self.ctrl_dt
         phase_dt = 2 * jnp.pi * gait_freq * self.ctrl_dt
         start_phase = jnp.array([0, jnp.pi])  # trotting gait
@@ -215,7 +215,7 @@ class FeetPositionObservation(ksim.Observation):
             floor_threshold=floor_threshold,
         )
 
-    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         foot_left_pos = state.physics_state.data.site_xpos[self.foot_left] + jnp.array([0.0, 0.0, self.floor_threshold])
         foot_right_pos = state.physics_state.data.site_xpos[self.foot_right] + jnp.array(
             [0.0, 0.0, self.floor_threshold]
@@ -227,8 +227,8 @@ class FeetPositionObservation(ksim.Observation):
 class FeetContactObservation(ksim.FeetContactObservation):
     """Observation of the feet contact."""
 
-    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
-        feet_contact_12 = super().observe(state, rng)
+    def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
+        feet_contact_12 = super().observe(state, curriculum_level, rng)
         return feet_contact_12.flatten()
 
 

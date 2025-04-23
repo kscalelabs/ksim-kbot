@@ -17,8 +17,8 @@ import xax
 from bvhio.lib.hierarchy import Joint as BvhioJoint
 from jaxtyping import Array, PRNGKeyArray
 from ksim.types import PhysicsModel
-from ksim.utils.reference_motion import (
-    ReferenceMapping,
+from ksim.utils.priors import (
+    MotionReferenceMapping,
     get_local_xpos,
     get_reference_cartesian_poses,
     get_reference_joint_id,
@@ -33,25 +33,19 @@ HISTORY_LENGTH = 0
 SINGLE_STEP_HISTORY_SIZE = 0
 
 
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class MotionAuxOutputs:
-    tracked_pos: xax.FrozenDict[int, Array]
-
-
 HUMANOID_REFERENCE_MAPPINGS = (
-    ReferenceMapping("CC_Base_L_ThighTwist01", "RS03_5"),  # hip
-    ReferenceMapping("CC_Base_R_ThighTwist01", "RS03_4"),  # hip
-    ReferenceMapping("CC_Base_L_CalfTwist01", "KC_D_401L_L_Shin_Drive"),  # knee
-    ReferenceMapping("CC_Base_R_CalfTwist01", "KC_D_401R_R_Shin_Drive"),  # knee
-    ReferenceMapping("CC_Base_L_Foot", "KB_D_501L_L_LEG_FOOT"),  # foot
-    ReferenceMapping("CC_Base_R_Foot", "KB_D_501R_R_LEG_FOOT"),  # foot
-    ReferenceMapping("CC_Base_L_UpperarmTwist01", "RS03_6"),  # shoulder
-    ReferenceMapping("CC_Base_R_UpperarmTwist01", "RS03_3"),  # shoulder
-    ReferenceMapping("CC_Base_L_ForearmTwist01", "KC_C_401L_L_UpForearmDrive"),  # elbow
-    ReferenceMapping("CC_Base_R_ForearmTwist01", "KC_C_401R_R_UpForearmDrive"),  # elbow
-    ReferenceMapping("CC_Base_L_Hand", "KB_C_501X_Left_Bayonet_Adapter_Hard_Stop"),  # hand
-    ReferenceMapping("CC_Base_R_Hand", "KB_C_501X_Right_Bayonet_Adapter_Hard_Stop"),  # hand
+    MotionReferenceMapping("CC_Base_L_ThighTwist01", "RS03_5"),  # hip
+    MotionReferenceMapping("CC_Base_R_ThighTwist01", "RS03_4"),  # hip
+    MotionReferenceMapping("CC_Base_L_CalfTwist01", "KC_D_401L_L_Shin_Drive"),  # knee
+    MotionReferenceMapping("CC_Base_R_CalfTwist01", "KC_D_401R_R_Shin_Drive"),  # knee
+    MotionReferenceMapping("CC_Base_L_Foot", "KB_D_501L_L_LEG_FOOT"),  # foot
+    MotionReferenceMapping("CC_Base_R_Foot", "KB_D_501R_R_LEG_FOOT"),  # foot
+    MotionReferenceMapping("CC_Base_L_UpperarmTwist01", "RS03_6"),  # shoulder
+    MotionReferenceMapping("CC_Base_R_UpperarmTwist01", "RS03_3"),  # shoulder
+    MotionReferenceMapping("CC_Base_L_ForearmTwist01", "KC_C_401L_L_UpForearmDrive"),  # elbow
+    MotionReferenceMapping("CC_Base_R_ForearmTwist01", "KC_C_401R_R_UpForearmDrive"),  # elbow
+    MotionReferenceMapping("CC_Base_L_Hand", "KB_C_501X_Left_Bayonet_Adapter_Hard_Stop"),  # hand
+    MotionReferenceMapping("CC_Base_R_Hand", "KB_C_501X_Right_Bayonet_Adapter_Hard_Stop"),  # hand
 )
 
 
@@ -117,12 +111,12 @@ class MatchReferenceMotionReward(ksim.Reward):
     def num_frames(self) -> int:
         return list(self.reference_motion.values())[0].array.shape[0]
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        assert isinstance(trajectory.aux_outputs, MotionAuxOutputs)
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        assert trajectory.aux_outputs is not None
         reference_motion: xax.FrozenDict[int, Array] = jax.tree.map(lambda x: x.array, self.reference_motion)
         step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
         target_pos_dict = jax.tree.map(lambda x: jnp.take(x, step_number, axis=0), reference_motion)
-        tracked_pos = trajectory.aux_outputs.tracked_pos[self.body_idx]
+        tracked_pos = trajectory.aux_outputs["tracked_pos"][self.body_idx]
         target_pos_array = target_pos_dict[self.body_idx]
         mean_error = xax.get_norm(target_pos_array - tracked_pos, self.norm).mean(axis=-1)
 
@@ -238,6 +232,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
+        argmax: bool = False,
     ) -> ksim.Action:
         actor_carry_in, critic_carry_in = model_carry
 
@@ -260,9 +255,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
         return ksim.Action(
             action=action_j,
             carry=(actor_carry, critic_carry_in),
-            aux_outputs=MotionAuxOutputs(
-                tracked_pos=xax.FrozenDict(tracked_positions),
-            ),
+            aux_outputs=xax.FrozenDict({"tracked_pos": xax.FrozenDict(tracked_positions)}),
         )
 
     def run(self) -> None:
@@ -323,8 +316,9 @@ if __name__ == "__main__":
             dt=0.005,
             ctrl_dt=0.02,
             max_action_latency=0.0,
-            min_action_latency=0.0,
             # PPO parameters.
+            iterations=8,
+            ls_iterations=8,
             gamma=0.97,
             lam=0.95,
             entropy_coef=0.005,

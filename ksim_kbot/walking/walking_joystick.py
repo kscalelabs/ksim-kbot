@@ -19,7 +19,7 @@ from xax.nn.export import export
 from ksim_kbot import common, rewards as kbot_rewards
 from ksim_kbot.standing.standing import MAX_TORQUE, KbotStandingTask, KbotStandingTaskConfig
 
-OBS_SIZE = 20 * 2 + 4 + 3 + 3 + 40  # = position + velocity + phase + imu_acc + imu_gyro + last_action
+OBS_SIZE = 20 * 2 + 4 + 3 + 40 + 3  # = position + velocity + phase + projected_gravity + last_action + imu_gyro
 CMD_SIZE = 2 + 1 + 1
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_CRITIC_INPUTS = NUM_INPUTS + 2 + 6 + 3 + 3 + 4 + 3 + 3 + 20 + 1
@@ -29,13 +29,13 @@ JOINT_TARGETS = (
     0.0,
     0.0,
     0.0,
-    0.0,
+    1.4,
     0.0,
     # left arm
     0.0,
     0.0,
     0.0,
-    0.0,
+    -1.4,
     0.0,
     # right leg
     -0.23,
@@ -233,8 +233,8 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             physics_model,
             metadata,
             default_targets=JOINT_TARGETS,
-            pos_action_noise=0.1,
-            vel_action_noise=0.1,
+            pos_action_noise=0.05,
+            vel_action_noise=0.05,
             pos_action_noise_type="gaussian",
             vel_action_noise_type="gaussian",
             ctrl_clip=[
@@ -270,20 +270,20 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         if self.config.domain_randomize:
             return [
                 ksim.FloorFrictionRandomizer.from_geom_name(physics_model, "floor", scale_lower=0.1, scale_upper=2.0),
-                ksim.StaticFrictionRandomizer(scale_lower=0.5, scale_upper=1.5),
+                ksim.StaticFrictionRandomizer(scale_lower=0.5, scale_upper=2.0),
                 ksim.ArmatureRandomizer(),
-                # ksim.AllBodiesMassMultiplicationRandomizer(),
-                ksim.MassAdditionRandomizer.from_body_name(
-                    physics_model, "Torso_Side_Right", scale_lower=-1.0, scale_upper=1.0
-                ),
+                ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.85, scale_upper=1.15),
+                # ksim.MassAdditionRandomizer.from_body_name(
+                #     physics_model, "Torso_Side_Right", scale_lower=-1.0, scale_upper=1.0
+                # ),
                 ksim.JointDampingRandomizer(),
-                ksim.JointZeroPositionRandomizer(scale_lower=-0.03, scale_upper=0.03),
+                ksim.JointZeroPositionRandomizer(scale_lower=-0.05, scale_upper=0.05),
             ]
         else:
             return []
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
-        scale = 0.01 if self.config.domain_randomize else 0.00
+        scale = 0.3 if self.config.domain_randomize else 0.0
         return [
             ksim.RandomBaseVelocityXYReset(scale=scale),
             ksim.RandomJointPositionReset(scale=scale),
@@ -329,11 +329,10 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         if self.config.domain_randomize:
-            vel_obs_noise = 2.5
-            imu_acc_noise = 0.5
-            imu_gyro_noise = 0.5
-            local_gvec_noise = 0.08
-            gvec_noise = 0.8
+            vel_obs_noise = 1.8
+            imu_acc_noise = 0.4
+            imu_gyro_noise = 0.4
+            local_gvec_noise = 0.05
             base_position_noise = 0.0
             base_orientation_noise = 0.0
             base_linear_velocity_noise = 0.0
@@ -343,7 +342,6 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             vel_obs_noise = 0.0
             imu_acc_noise = 0.0
             imu_gyro_noise = 0.0
-            gvec_noise = 0.0
             local_gvec_noise = 0.0
             base_position_noise = 0.0
             base_orientation_noise = 0.0
@@ -354,7 +352,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             common.TimestepPhaseObservation(),
             common.JointPositionObservation(
                 default_targets=JOINT_TARGETS,
-                noise=0.01,
+                noise=0.05,
             ),
             ksim.JointVelocityObservation(noise=vel_obs_noise),
             ksim.ActuatorForceObservation(),
@@ -368,7 +366,11 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 sensor_name="imu_gyro",
                 noise=imu_gyro_noise,
             ),
-            common.ProjectedGravityObservation(noise=gvec_noise),
+            ksim.ProjectedGravityObservation.create(
+                physics_model=physics_model,
+                framequat_name="base_link_quat",
+                lag_range=(0.0, 0.1),
+            ),
             common.LocalProjectedGravityObservation.create(
                 physics_model=physics_model, sensor_name="base_link_quat", noise=local_gvec_noise
             ),
@@ -608,7 +610,6 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         base_angular_velocity_3 = observations["base_angular_velocity_observation"]
         actuator_force_n = observations["actuator_force_observation"]
         true_height_1 = observations["true_height_observation"]
-
         return model.forward(
             timestep_phase_4=timestep_phase_4,
             joint_pos_n=joint_pos_n,
@@ -667,7 +668,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
-        argmax: bool = False,
+        argmax: bool,
     ) -> ksim.Action:
         action_dist_j = self.run_actor(
             model.actor,
@@ -712,11 +713,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         if not self.config.export_for_inference:
             return state
 
-        model: KbotModel = self.load_ckpt_with_template(
-            ckpt_path,
-            part="model",
-            model_template=self.get_model(key=jax.random.PRNGKey(0)),
-        )
+        model: KbotModel = self.load_ckpt(ckpt_path, part="model")[0]
 
         model_fn = self.make_export_model(model, stochastic=False, batched=True)
 
@@ -749,10 +746,11 @@ if __name__ == "__main__":
             num_passes=10,
             epochs_per_log_step=1,
             # Simulation parameters.
+            iterations=8,
+            ls_iterations=8,
             dt=0.002,
             ctrl_dt=0.02,
             max_action_latency=0.005,
-            min_action_latency=0.0,
             rollout_length_seconds=1.25,
             render_length_seconds=5.0,
             # PPO parameters
@@ -763,7 +761,7 @@ if __name__ == "__main__":
             learning_rate=1e-4,
             clip_param=0.3,
             max_grad_norm=0.5,
-            valid_every_n_steps=25,
+            valid_every_n_seconds=600,
             save_every_n_steps=25,
             export_for_inference=True,
             only_save_most_recent=False,
