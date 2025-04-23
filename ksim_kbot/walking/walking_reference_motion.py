@@ -15,32 +15,24 @@ from pathlib import Path
 from typing import Callable, Generic, Self, TypeVar
 
 import attrs
-import bvhio
 import distrax
 import equinox as eqx
-import glm
 import jax
 import jax.numpy as jnp
 import ksim
-import mujoco
 import numpy as np
 import xax
-from bvhio.lib.hierarchy import Joint as BvhioJoint
 from jaxtyping import Array, PRNGKeyArray
-from ksim import ObservationState
-from ksim.types import PhysicsModel
-from scipy.spatial.transform import Rotation as R
-
-import ksim_kbot.rewards as kbot_rewards
-from ksim_kbot.reference_motion import (
+from ksim import Observation
+from ksim.reference_motion import (
     ReferenceMapping,
     ReferenceMotionData,
-    generate_reference_motion,
-    get_local_xpos,
-    get_reference_joint_id,
-    local_to_absolute,
-    visualize_reference_motion,
 )
+from ksim.utils.motion_prior_utils import (
+    local_to_absolute,
+)
+
+import ksim_kbot.rewards as kbot_rewards
 from ksim_kbot.walking.walking_joystick import (
     NUM_CRITIC_INPUTS,
     NUM_INPUTS,
@@ -137,10 +129,10 @@ class NaiveForwardReward(ksim.Reward):
 
     vel_clip_max: float = attrs.field(default=1.0)
 
-    def __call__(self, trajectory: ksim.Trajectory, _: None) -> tuple[Array, None]:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         vel = trajectory.qvel[..., 0]
         clipped_vel = jnp.clip(vel, a_max=self.vel_clip_max)
-        return clipped_vel, None
+        return clipped_vel
 
 
 @jax.tree_util.register_dataclass
@@ -189,7 +181,7 @@ class CartesianReferenceMotionReward(ksim.Reward):
     def get_target_pos(self, trajectory: ksim.Trajectory) -> xax.FrozenDict[int, Array]:
         return self.reference_motion_data.get_cartesian_pose_at_time(trajectory.timestep)
 
-    def __call__(self, trajectory: ksim.Trajectory, _: None) -> tuple[Array, None]:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         target_pos = self.get_target_pos(trajectory)
         tracked_pos = self.get_tracked_pos(trajectory)
         target_pos_filtered = xax.FrozenDict({k: v for k, v in target_pos.items() if k in tracked_pos})
@@ -199,7 +191,7 @@ class CartesianReferenceMotionReward(ksim.Reward):
         mean_error_over_bodies = jax.tree.reduce(jnp.add, error) / len(error)
         mean_error = mean_error_over_bodies.mean(axis=-1)
         reward = jnp.exp(-mean_error * self.sensitivity)
-        return reward, None
+        return reward
 
     def get_markers(self) -> list[ksim.Marker]:
         markers = []
@@ -236,7 +228,7 @@ class QposReferenceMotionReward(ksim.Reward):
     sensitivity: float = attrs.field(default=5.0)
     norm: xax.NormType = attrs.field(default="l1")
 
-    def __call__(self, trajectory: ksim.Trajectory, _: None) -> tuple[Array, None]:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         qpos = trajectory.qpos
         effective_time = trajectory.timestep * self.speed
         reference_qpos = self.reference_motion_data.get_qpos_at_time(effective_time)
@@ -254,7 +246,7 @@ class QposReferenceMotionReward(ksim.Reward):
         mean_error = error.mean(axis=-1)
 
         reward = jnp.exp(-mean_error * self.sensitivity)
-        return reward, None
+        return reward
 
     @classmethod
     def create(
@@ -293,7 +285,7 @@ class ReferenceQposObservation(ksim.Observation):
     reference_motion_data: ReferenceMotionData
     speed: float = attrs.field(default=1.0)
 
-    def observe(self, state: ObservationState, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: Observation, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         physics_state = state.physics_state
         effective_time = physics_state.data.time * self.speed
         reference_qpos_at_time = self.reference_motion_data.get_qpos_at_time(effective_time)
@@ -307,7 +299,7 @@ class ReferenceLocalXposObservation(ksim.Observation):
     reference_motion_data: ReferenceMotionData
     tracked_body_ids: tuple[int, ...]
 
-    def observe(self, state: ObservationState, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: Observation, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         physics_state = state.physics_state
         target_pos_dict = self.reference_motion_data.get_cartesian_pose_at_time(physics_state.data.time)
         target_pos_list = [target_pos_dict[body_id] for body_id in self.tracked_body_ids]
@@ -321,7 +313,7 @@ class TrackedLocalXposObservation(ksim.Observation):
     tracked_body_ids: tuple[int, ...]
     mj_base_id: int
 
-    def observe(self, state: ObservationState, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: Observation, rng: PRNGKeyArray) -> Array:
         physics_state = state.physics_state
         tracked_positions_list: list[Array] = []
         for body_id in self.tracked_body_ids:
@@ -331,14 +323,13 @@ class TrackedLocalXposObservation(ksim.Observation):
 
 
 # Actor inputs are the same as the base class for now
-NUM_ACTOR_INPUTS_REF = NUM_INPUTS + NUM_JOINTS + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)
+NUM_ACTOR_INPUTS_REF = NUM_INPUTS + NUM_JOINTS  # + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)
 
 # Critic inputs are the base class inputs plus the new reference observations
 NUM_CRITIC_INPUTS_REF = (
-    NUM_CRITIC_INPUTS
-    + NUM_JOINTS  # reference_qpos
-    + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # reference_local_xpos
-    + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # tracked_local_xpos
+    NUM_CRITIC_INPUTS + NUM_JOINTS  # reference_qpos
+    # + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # reference_local_xpos
+    # + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # tracked_local_xpos
 )
 
 
@@ -386,7 +377,7 @@ class KbotActor(eqx.Module):
         gait_freq_cmd: Array,
         last_action_n: Array,
         ref_qpos_j: Array,
-        ref_local_xpos_n: Array,
+        # ref_local_xpos_n: Array,
     ) -> distrax.Normal:
         x_n = jnp.concatenate(
             [
@@ -400,7 +391,7 @@ class KbotActor(eqx.Module):
                 gait_freq_cmd,
                 last_action_n,
                 ref_qpos_j,
-                ref_local_xpos_n,
+                # ref_local_xpos_n,
             ],
             axis=-1,
         )
@@ -460,8 +451,8 @@ class KbotCritic(eqx.Module):
         true_height_1: Array,
         # motion reference observations
         ref_qpos_j: Array,
-        ref_local_xpos_n: Array,
-        tracked_local_xpos_n: Array,
+        # ref_local_xpos_n: Array,
+        # tracked_local_xpos_n: Array,
     ) -> Array:
         x_n = jnp.concatenate(
             [
@@ -485,8 +476,8 @@ class KbotCritic(eqx.Module):
                 true_height_1,
                 # motion reference observations
                 ref_qpos_j,
-                ref_local_xpos_n,
-                tracked_local_xpos_n,
+                # ref_local_xpos_n,
+                # tracked_local_xpos_n,
             ],
             axis=-1,
         )
@@ -545,17 +536,21 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
                 reference_motion_data=self.reference_motion_data,
                 speed=self.config.qpos_reference_speed,
             ),
-            ReferenceLocalXposObservation(
-                reference_motion_data=self.reference_motion_data,
-                tracked_body_ids=self.tracked_body_ids,
-            ),
-            TrackedLocalXposObservation(
-                tracked_body_ids=self.tracked_body_ids,
-                mj_base_id=self.mj_base_id,
-            ),
+            # NOTE: bring it back
+            # ReferenceLocalXposObservation(
+            #     reference_motion_data=self.reference_motion_data,
+            #     tracked_body_ids=self.tracked_body_ids,
+            # ),
+            # TrackedLocalXposObservation(
+            #     tracked_body_ids=self.tracked_body_ids,
+            #     mj_base_id=self.mj_base_id,
+            # ),
         ]
 
         return super_observations + observations
+
+    def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
+        return [ksim.InitialMotionStateReset(reference_motion=self.reference_motion_data, freejoint=True)]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards: list[ksim.Reward] = [
@@ -564,11 +559,11 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
                 scale=30.0,
             ),
             # kbot_rewards.SensorOrientationPenalty(scale=self.config.orientation_penalty),
-            CartesianReferenceMotionReward(
-                reference_motion_data=self.reference_motion_data,
-                mj_base_id=self.mj_base_id,
-                scale=1.0,
-            ),
+            # CartesianReferenceMotionReward(
+            #     reference_motion_data=self.reference_motion_data,
+            #     mj_base_id=self.mj_base_id,
+            #     scale=1.0,
+            # ),
             QposReferenceMotionReward.create(
                 physics_model=physics_model,
                 # joint_names=("right_arm", "left_arm", "right_leg", "left_leg"),
@@ -628,9 +623,9 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
 
         # Getting the local cartesian positions for all tracked bodies.
         tracked_positions: dict[int, Array] = {}
-        for body_id in self.tracked_body_ids:
-            body_pos = get_local_xpos(physics_state.data.xpos, body_id, self.mj_base_id)
-            tracked_positions[body_id] = jnp.array(body_pos)
+        # for body_id in self.tracked_body_ids:
+        #     body_pos = get_local_xpos(physics_state.data.xpos, body_id, self.mj_base_id)
+        #     tracked_positions[body_id] = jnp.array(body_pos)
 
         return ksim.Action(
             action=action_j,
@@ -641,53 +636,58 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
         )
 
     def run(self) -> None:
-        mj_model: PhysicsModel = self.get_mujoco_model()
-        root: BvhioJoint = bvhio.readAsHierarchy(self.config.bvh_path)
-        reference_base_id = get_reference_joint_id(root, self.config.reference_base_name)
-        self.mj_base_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, self.config.mj_base_name)
-        self.qpos_reference_speed = self.config.qpos_reference_speed
+        # mj_model: PhysicsModel = self.get_mujoco_model()
+        # root: BvhioJoint = bvhio.readAsHierarchy(self.config.bvh_path)
+        # reference_base_id = get_reference_joint_id(root, self.config.reference_base_name)
+        # self.mj_base_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, self.config.mj_base_name)
+        # self.qpos_reference_speed = self.config.qpos_reference_speed
 
-        def rotation_callback(root: BvhioJoint) -> None:
-            euler_rotation = np.array(self.config.rotate_bvh_euler)
-            quat = R.from_euler("xyz", euler_rotation).as_quat(scalar_first=True)
-            root.applyRotation(glm.quat(*quat), bake=True)
+        # def rotation_callback(root: BvhioJoint) -> None:
+        #     euler_rotation = np.array(self.config.rotate_bvh_euler)
+        #     quat = R.from_euler("xyz", euler_rotation).as_quat(scalar_first=True)
+        #     root.applyRotation(glm.quat(*quat), bake=True)
 
-        self.reference_motion_data = generate_reference_motion(
-            model=mj_model,
-            mj_base_id=self.mj_base_id,
-            bvh_root=root,
-            bvh_to_mujoco_names=HUMANOID_REFERENCE_MAPPINGS,
-            bvh_base_id=reference_base_id,
-            ctrl_dt=self.config.ctrl_dt,
-            bvh_offset=np.array(self.config.bvh_offset),
-            bvh_root_callback=rotation_callback,
-            bvh_scaling_factor=self.config.bvh_scaling_factor,
-            neutral_qpos=None,
-            neutral_similarity_weight=0.1,
-            temporal_consistency_weight=0.1,
-            n_restarts=3,
-            error_acceptance_threshold=1e-4,
-            ftol=1e-8,
-            xtol=1e-8,
-            max_nfev=2000,
-            verbose=False,
+        # self.reference_motion_data = generate_reference_motion(
+        #     model=mj_model,
+        #     mj_base_id=self.mj_base_id,
+        #     bvh_root=root,
+        #     bvh_to_mujoco_names=HUMANOID_REFERENCE_MAPPINGS,
+        #     bvh_base_id=reference_base_id,
+        #     ctrl_dt=self.config.ctrl_dt,
+        #     bvh_offset=np.array(self.config.bvh_offset),
+        #     bvh_root_callback=rotation_callback,
+        #     bvh_scaling_factor=self.config.bvh_scaling_factor,
+        #     neutral_qpos=None,
+        #     neutral_similarity_weight=0.1,
+        #     temporal_consistency_weight=0.1,
+        #     n_restarts=3,
+        #     error_acceptance_threshold=1e-4,
+        #     ftol=1e-8,
+        #     xtol=1e-8,
+        #     max_nfev=2000,
+        #     verbose=False,
+        # )
+        # self.tracked_body_ids = tuple(self.reference_motion_data.cartesian_poses.keys())
+
+        # if self.config.visualize_reference_motion:
+        #     np_reference_qpos = np.asarray(self.reference_motion_data.qpos.array)
+        #     np_cartesian_motion = jax.tree_map(
+        #         lambda x: np.asarray(x.array),
+        #         self.reference_motion_data.cartesian_poses,
+        #     )
+        #     visualize_reference_motion(
+        #         mj_model,
+        #         reference_qpos=np_reference_qpos,
+        #         cartesian_motion=np_cartesian_motion,
+        #         mj_base_id=self.mj_base_id,
+        #     )
+        # else:
+        #     super().run()
+
+        self.reference_motion_data = ReferenceMotionData.load(
+            path="/Users/pfb30/ksim-kbot/walking_slow08_poses.npz.npz"
         )
-        self.tracked_body_ids = tuple(self.reference_motion_data.cartesian_poses.keys())
-
-        if self.config.visualize_reference_motion:
-            np_reference_qpos = np.asarray(self.reference_motion_data.qpos.array)
-            np_cartesian_motion = jax.tree_map(
-                lambda x: np.asarray(x.array),
-                self.reference_motion_data.cartesian_poses,
-            )
-            visualize_reference_motion(
-                mj_model,
-                reference_qpos=np_reference_qpos,
-                cartesian_motion=np_cartesian_motion,
-                mj_base_id=self.mj_base_id,
-            )
-        else:
-            super().run()
+        super().run()
 
     def get_model(self, key: PRNGKeyArray) -> KbotModel:
         return KbotModel(
@@ -711,7 +711,7 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
 
         # motion reference observations
         ref_qpos_j = observations["reference_qpos_observation"]
-        ref_local_xpos_n = observations["reference_local_xpos_observation"]
+        # ref_local_xpos_n = observations["reference_local_xpos_observation"]
 
         return model.forward(
             timestep_phase_4=timestep_phase_4,
@@ -725,7 +725,7 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
             last_action_n=last_action_n,
             # motion reference observations
             ref_qpos_j=ref_qpos_j,
-            ref_local_xpos_n=ref_local_xpos_n,
+            # ref_local_xpos_n=ref_local_xpos_n,
         )
 
     def run_critic(
@@ -753,8 +753,8 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
 
         # motion reference observations
         ref_qpos_j = observations["reference_qpos_observation"]
-        ref_local_xpos_n = observations["reference_local_xpos_observation"]
-        tracked_local_xpos_n = observations["tracked_local_xpos_observation"]
+        # ref_local_xpos_n = observations["reference_local_xpos_observation"]
+        # tracked_local_xpos_n = observations["tracked_local_xpos_observation"]
 
         return model.forward(
             timestep_phase_4=timestep_phase_4,
@@ -778,8 +778,8 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
             true_height_1=true_height_1,
             # motion reference observations
             ref_qpos_j=ref_qpos_j,
-            ref_local_xpos_n=ref_local_xpos_n,
-            tracked_local_xpos_n=tracked_local_xpos_n,
+            # ref_local_xpos_n=ref_local_xpos_n,
+            # tracked_local_xpos_n=tracked_local_xpos_n,
         )
 
 
@@ -787,7 +787,7 @@ if __name__ == "__main__":
     # To run training, use the following command:
     #   python -m ksim_kbot.walking.walking_reference_motion num_envs=2 batch_size=2
     # To visualize the environment, use the following command:
-    #   python -m ksim_kbot.walking.walking_reference_motion run_environment=True load_from_ckpt_path=/Users/pfb30/ksim-kbot/ksim_kbot/walking/ckpt.bin
+    #   python -m ksim_kbot.walking.walking_reference_motion run_environment=True
     # To visualize the reference gait, use the following command:
     #   python -m ksim_kbot.walking.walking_reference_motion visualize_reference_motion=True
     # On MacOS or other devices with less memory, you can change the number
@@ -804,10 +804,11 @@ if __name__ == "__main__":
             rollout_length_seconds=1.25,
             render_length_seconds=5.0,
             # Simulation parameters.
+            iterations=8,
+            ls_iterations=8,
             dt=0.002,
             ctrl_dt=0.02,
             max_action_latency=0.0,
-            min_action_latency=0.0,
             valid_every_n_steps=25,
             # PPO parameters.
             gamma=0.97,

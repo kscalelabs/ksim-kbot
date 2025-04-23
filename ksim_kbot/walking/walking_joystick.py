@@ -19,7 +19,7 @@ from xax.nn.export import export
 from ksim_kbot import common, rewards as kbot_rewards
 from ksim_kbot.standing.standing import MAX_TORQUE, KbotStandingTask, KbotStandingTaskConfig
 
-OBS_SIZE = 20 * 2 + 4 + 3 + 3 + 40  # = position + velocity + phase + imu_acc + imu_gyro + last_action
+OBS_SIZE = 20 * 2 + 4 + 3 + 40 + 3  # = position + velocity + phase + projected_gravity + last_action + imu_gyro
 CMD_SIZE = 2 + 1 + 1
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_CRITIC_INPUTS = NUM_INPUTS + 2 + 6 + 3 + 3 + 4 + 3 + 3 + 20 + 1
@@ -29,13 +29,13 @@ JOINT_TARGETS = (
     0.0,
     0.0,
     0.0,
-    0.0,
+    1.4,
     0.0,
     # left arm
     0.0,
     0.0,
     0.0,
-    0.0,
+    -1.4,
     0.0,
     # right leg
     -0.23,
@@ -226,12 +226,10 @@ class KbotWalkingTaskConfig(KbotStandingTaskConfig):
 
     gait_freq_lower: float = xax.field(value=1.25)
     gait_freq_upper: float = xax.field(value=1.5)
-    # to be removed
-    log_full_trajectory_every_n_steps: int = xax.field(value=5)
-    log_full_trajectory_on_first_step: bool = xax.field(value=False)
-    log_full_trajectory_every_n_seconds: float = xax.field(value=1.0)
 
-    stand_still: bool = xax.field(value=True)
+    stand_still_threshold: float = xax.field(value=0.0)  # no stand still reward
+
+    evaluate_gait: bool = xax.field(value=False)
 
 
 Config = TypeVar("Config", bound=KbotWalkingTaskConfig)
@@ -250,8 +248,8 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             physics_model,
             metadata,
             default_targets=JOINT_TARGETS,
-            pos_action_noise=0.1,
-            vel_action_noise=0.1,
+            pos_action_noise=0.05,
+            vel_action_noise=0.05,
             pos_action_noise_type="gaussian",
             vel_action_noise_type="gaussian",
             ctrl_clip=[
@@ -287,20 +285,20 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         if self.config.domain_randomize:
             return [
                 ksim.FloorFrictionRandomizer.from_geom_name(physics_model, "floor", scale_lower=0.1, scale_upper=2.0),
-                ksim.StaticFrictionRandomizer(scale_lower=0.5, scale_upper=1.5),
+                ksim.StaticFrictionRandomizer(scale_lower=0.5, scale_upper=2.0),
                 ksim.ArmatureRandomizer(),
-                # ksim.AllBodiesMassMultiplicationRandomizer(),
-                ksim.MassAdditionRandomizer.from_body_name(
-                    physics_model, "Torso_Side_Right", scale_lower=-1.0, scale_upper=1.0
-                ),
+                ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.85, scale_upper=1.15),
+                # ksim.MassAdditionRandomizer.from_body_name(
+                #     physics_model, "Torso_Side_Right", scale_lower=-1.0, scale_upper=1.0
+                # ),
                 ksim.JointDampingRandomizer(),
-                ksim.JointZeroPositionRandomizer(scale_lower=-0.03, scale_upper=0.03),
+                ksim.JointZeroPositionRandomizer(scale_lower=-0.05, scale_upper=0.05),
             ]
         else:
             return []
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
-        scale = 0.0 if self.config.domain_randomize else 0.01
+        scale = 0.3 if self.config.domain_randomize else 0.0
         return [
             ksim.RandomBaseVelocityXYReset(scale=scale),
             ksim.RandomJointPositionReset(scale=scale),
@@ -346,11 +344,10 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         if self.config.domain_randomize:
-            vel_obs_noise = 2.5
-            imu_acc_noise = 0.5
-            imu_gyro_noise = 0.5
-            local_gvec_noise = 0.08
-            gvec_noise = 0.0
+            vel_obs_noise = 1.8
+            imu_acc_noise = 0.4
+            imu_gyro_noise = 0.4
+            local_gvec_noise = 0.05
             base_position_noise = 0.0
             base_orientation_noise = 0.0
             base_linear_velocity_noise = 0.0
@@ -360,7 +357,6 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             vel_obs_noise = 0.0
             imu_acc_noise = 0.0
             imu_gyro_noise = 0.0
-            gvec_noise = 0.0
             local_gvec_noise = 0.0
             base_position_noise = 0.0
             base_orientation_noise = 0.0
@@ -371,7 +367,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             common.TimestepPhaseObservation(),
             common.JointPositionObservation(
                 default_targets=JOINT_TARGETS,
-                noise=0.01,
+                noise=0.05,
             ),
             ksim.JointVelocityObservation(noise=vel_obs_noise),
             ksim.ActuatorForceObservation(),
@@ -385,7 +381,11 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 sensor_name="imu_gyro",
                 noise=imu_gyro_noise,
             ),
-            common.ProjectedGravityObservation(noise=gvec_noise),
+            ksim.ProjectedGravityObservation.create(
+                physics_model=physics_model,
+                framequat_name="base_link_quat",
+                lag_range=(0.0, 0.1),
+            ),
             common.LocalProjectedGravityObservation.create(
                 physics_model=physics_model, sensor_name="base_link_quat", noise=local_gvec_noise
             ),
@@ -437,25 +437,41 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
-        # NOTE: increase to 360
-        return [
-            common.LinearVelocityCommand(
-                x_range=(-0.3, 0.7),
-                y_range=(-0.2, 0.2),
-                x_zero_prob=0.1,
-                y_zero_prob=0.2,
-                switch_prob=self.config.ctrl_dt / 3,
-            ),
-            common.AngularVelocityCommand(
-                scale=0.1,
-                zero_prob=0.9,
-                switch_prob=self.config.ctrl_dt / 3,
-            ),
-            common.GaitFrequencyCommand(
-                gait_freq_lower=self.config.gait_freq_lower,
-                gait_freq_upper=self.config.gait_freq_upper,
-            ),
-        ]
+        if self.config.evaluate_gait:
+            return [
+                common.LinearVelocityCommand(
+                    x_range=(0.0, 0.0), y_range=(0.0, 0.0), x_zero_prob=0.0, y_zero_prob=1.0, switch_prob=0.0
+                ),
+                common.AngularVelocityCommand(
+                    scale=0.1,
+                    zero_prob=1.0,
+                    switch_prob=0.0,
+                ),
+                common.GaitFrequencyCommand(
+                    gait_freq_lower=self.config.gait_freq_lower,
+                    gait_freq_upper=self.config.gait_freq_upper,
+                ),
+            ]
+        else:
+            # NOTE: increase to 360
+            return [
+                common.LinearVelocityCommand(
+                    x_range=(-0.3, 0.7),
+                    y_range=(-0.2, 0.2),
+                    x_zero_prob=0.1,
+                    y_zero_prob=0.2,
+                    switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
+                ),
+                common.AngularVelocityCommand(
+                    scale=0.1,
+                    zero_prob=0.9,
+                    switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
+                ),
+                common.GaitFrequencyCommand(
+                    gait_freq_lower=self.config.gait_freq_lower,
+                    gait_freq_upper=self.config.gait_freq_upper,
+                ),
+            ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards: list[ksim.Reward] = [
@@ -509,17 +525,33 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             kbot_rewards.TerminationPenalty(scale=-1.0),
             kbot_rewards.SensorOrientationPenalty(scale=-2.0),
             # kbot_rewards.OrientationPenalty(scale=-2.0),
-            kbot_rewards.LinearVelocityTrackingReward(scale=1.0),
-            kbot_rewards.AngularVelocityTrackingReward(scale=0.5),
-            kbot_rewards.AngularVelocityXYPenalty(scale=-0.15),
+            kbot_rewards.LinearVelocityTrackingReward(
+                scale=1.0,
+                stand_still_threshold=self.config.stand_still_threshold,
+            ),
+            kbot_rewards.AngularVelocityTrackingReward(
+                scale=0.5,
+                stand_still_threshold=self.config.stand_still_threshold,
+            ),
+            kbot_rewards.AngularVelocityXYPenalty(
+                scale=-0.15,
+                stand_still_threshold=self.config.stand_still_threshold,
+            ),
             # Stateful rewards
             kbot_rewards.FeetPhaseReward(
                 foot_default_height=0.04,
                 max_foot_height=0.12,
                 scale=2.1,
-                stand_still=self.config.stand_still,
+                stand_still_threshold=self.config.stand_still_threshold,
             ),
             kbot_rewards.FeetSlipPenalty(scale=-0.25),
+            kbot_rewards.StandStillReward(
+                scale=50.0,
+                linear_velocity_cmd_name="linear_velocity_command",
+                angular_velocity_cmd_name="angular_velocity_command",
+                joint_targets=JOINT_TARGETS,
+                stand_still_threshold=self.config.stand_still_threshold,
+            ),
             # force penalties
             kbot_rewards.JointPositionLimitPenalty.create(
                 physics_model=physics_model,
@@ -530,11 +562,9 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 scale=-0.01,
                 sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
             ),
-            # NOTE: Investigate the effect of these penalties
             ksim.ActuatorForcePenalty(scale=-0.005),
             ksim.ActionSmoothnessPenalty(scale=-0.005),
             ksim.JointVelocityPenalty(scale=-0.005),
-            # ksim.AvoidLimitsReward(-0.01)
         ]
 
         return rewards
@@ -564,6 +594,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         ang_vel_cmd = commands["angular_velocity_command"]
         gait_freq_cmd = commands["gait_frequency_command"]
         last_action_n = observations["last_action_observation"]
+
         return model.forward(
             timestep_phase_4=timestep_phase_4,
             joint_pos_n=joint_pos_n,
@@ -598,7 +629,6 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         base_angular_velocity_3 = observations["base_angular_velocity_observation"]
         actuator_force_n = observations["actuator_force_observation"]
         true_height_1 = observations["true_height_observation"]
-
         return model.forward(
             timestep_phase_4=timestep_phase_4,
             joint_pos_n=joint_pos_n,
@@ -702,11 +732,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         if not self.config.export_for_inference:
             return state
 
-        model: KbotModel = self.load_ckpt_with_template(
-            ckpt_path,
-            part="model",
-            model_template=self.get_model(key=jax.random.PRNGKey(0)),
-        )
+        model: KbotModel = self.load_ckpt(ckpt_path, part="model")
 
         model_fn = self.make_export_model(model, stochastic=False, batched=True)
 
@@ -727,9 +753,9 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
 if __name__ == "__main__":
     # python -m ksim_kbot.walking.walking_joystick num_envs=2 batch_size=2
     # To run training, use the following command:
-    # python -m ksim_kbot.walking.walking_joystick.py disable_multiprocessing=True
+    # python -m ksim_kbot.walking.walking_joystick disable_multiprocessing=True
     # To visualize the environment, use the following command:
-    # python -m ksim_kbot.walking.walking_joystick.py run_environment=True \
+    # python -m ksim_kbot.walking.walking_joystick run_environment=True \
     #  run_environment_num_seconds=1 \
     #  run_environment_save_path=videos/test.mp4
     KbotWalkingTask.launch(
@@ -739,11 +765,12 @@ if __name__ == "__main__":
             num_passes=10,
             epochs_per_log_step=1,
             # Simulation parameters.
+            iterations=8,
+            ls_iterations=8,
             dt=0.002,
             ctrl_dt=0.02,
             max_action_latency=0.005,
-            min_action_latency=0.0,
-            rollout_length_seconds=5.0,
+            rollout_length_seconds=1.25,
             render_length_seconds=5.0,
             # PPO parameters
             action_scale=1.0,
