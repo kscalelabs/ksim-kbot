@@ -789,7 +789,6 @@ if __name__ == "__main__":
             dt=0.002,
             ctrl_dt=0.02,
             max_action_latency=0.0,
-            min_action_latency=0.0,
             rollout_length_seconds=1.25,
             # PPO parameters
             action_scale=0.5,

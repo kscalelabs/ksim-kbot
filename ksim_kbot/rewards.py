@@ -22,7 +22,7 @@ class JointDeviationPenalty(ksim.Reward):
     joint_targets: tuple[float, ...] = attrs.field()
     joint_weights: tuple[float, ...] = attrs.field(default=None)
 
-    def get_reward(self, trajectory: ksim.Trajectory) -> tuple[Array, None]:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         diff = trajectory.qpos[..., 7:] - jnp.array(self.joint_targets)
         cost = jnp.square(diff) * jnp.array(self.joint_weights)
         reward_value = jnp.sum(cost, axis=-1)
@@ -55,7 +55,7 @@ class FeetSlipPenalty(ksim.Reward):
     com_vel_obs_name: str = attrs.field(default="center_of_mass_velocity_observation")
     feet_contact_obs_name: str = attrs.field(default="feet_contact_observation")
 
-    def get_reward(self, trajectory: ksim.Trajectory) -> tuple[Array, None]:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         if self.feet_contact_obs_name not in trajectory.obs:
             raise ValueError(
                 f"Observation {self.feet_contact_obs_name} not found; add it as an observation in your task."
@@ -74,7 +74,7 @@ class SensorOrientationPenalty(ksim.Reward):
     norm: xax.NormType = attrs.field(default="l2")
     obs_name: str = attrs.field(default="sensor_observation_upvector_origin")
 
-    def get_reward(self, trajectory: ksim.Trajectory) -> tuple[Array, None]:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         reward_value = xax.get_norm(trajectory.obs[self.obs_name][..., :2], self.norm).sum(axis=-1)
         return reward_value
 

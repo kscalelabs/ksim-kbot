@@ -19,7 +19,7 @@ from xax.nn.export import export
 from ksim_kbot import common, rewards as kbot_rewards
 from ksim_kbot.standing.standing import MAX_TORQUE, KbotStandingTask, KbotStandingTaskConfig
 
-OBS_SIZE = 20 * 2 + 4 + 3 + 40 + 3 # = position + velocity + phase + projected_gravity + last_action + imu_gyro
+OBS_SIZE = 20 * 2 + 4 + 3 + 40 + 3  # = position + velocity + phase + projected_gravity + last_action + imu_gyro
 CMD_SIZE = 2 + 1 + 1
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_CRITIC_INPUTS = NUM_INPUTS + 2 + 6 + 3 + 3 + 4 + 3 + 3 + 20 + 1
@@ -668,7 +668,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
-        argmax: bool = False,
+        argmax: bool,
     ) -> ksim.Action:
         action_dist_j = self.run_actor(
             model.actor,
@@ -713,7 +713,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         if not self.config.export_for_inference:
             return state
 
-        model: KbotModel = self.load_ckpt(ckpt_path, part="model")
+        model: KbotModel = self.load_ckpt(ckpt_path, part="model")[0]
 
         model_fn = self.make_export_model(model, stochastic=False, batched=True)
 
@@ -761,7 +761,7 @@ if __name__ == "__main__":
             learning_rate=1e-4,
             clip_param=0.3,
             max_grad_norm=0.5,
-            valid_every_n_steps=25,
+            valid_every_n_seconds=600,
             save_every_n_steps=25,
             export_for_inference=True,
             only_save_most_recent=False,
