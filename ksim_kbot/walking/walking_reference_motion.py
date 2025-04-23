@@ -3,7 +3,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Generic, Self, TypeVar
+from typing import Callable, Generic, Optional, Self, TypeVar
 
 import attrs
 import bvhio
@@ -116,12 +116,6 @@ class NaiveForwardReward(ksim.Reward):
         return clipped_vel
 
 
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class MotionAuxOutputs:
-    tracked_pos: xax.FrozenDict[int, Array]
-
-
 def create_tracked_marker_update_fn(
     body_id: int, mj_base_id: int, tracked_pos_fn: Callable[[ksim.Trajectory], xax.FrozenDict[int, Array]]
 ) -> Callable[[ksim.Marker, ksim.Trajectory], None]:
@@ -165,7 +159,9 @@ class CartesianReferenceMotionReward(ksim.Reward):
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         target_pos = self.get_target_pos(trajectory)
         tracked_pos = self.get_tracked_pos(trajectory)
-        target_pos_filtered = xax.FrozenDict({k: v for k, v in target_pos.items() if k in tracked_pos})
+        target_pos_filtered: xax.FrozenDict[int, Array] = xax.FrozenDict(
+            {k: v for k, v in target_pos.items() if k in tracked_pos}
+        )
         error = jax.tree.map(
             lambda target, tracked: xax.get_norm(target - tracked, self.norm), target_pos_filtered, tracked_pos
         )
@@ -234,19 +230,23 @@ class QposReferenceMotionReward(ksim.Reward):
         physics_model: ksim.PhysicsModel,
         reference_motion_data: MotionReferenceMotionData,
         scale: float,
-        joint_names: tuple[str, ...] = None,
-        joint_weights: tuple[float, ...] = None,
+        joint_names: Optional[tuple[str, ...]] = None,
+        joint_weights: Optional[tuple[float, ...]] = None,
         speed: float = 1.0,
     ) -> Self:
-        """Create a sensor observation from a physics model."""
+        """Create a sensor observation from a physics model.
+
+        NOTE - fix this logic.
+        """
         if joint_names is not None:
             joint_names = tuple(physics_model.joints.keys())
             mappings = ksim.get_qpos_data_idxs_by_name(physics_model)
             joint_indices = tuple([int(mappings[name][0]) for name in joint_names])
+            actual_weights = joint_weights if joint_weights is not None else tuple([1.0] * len(joint_indices))
             return cls(
                 reference_motion_data=reference_motion_data,
                 joint_indices=joint_indices,
-                joint_weights=joint_weights,
+                joint_weights=actual_weights,
                 speed=speed,
                 scale=scale,
             )
@@ -307,7 +307,8 @@ NUM_ACTOR_INPUTS_REF = NUM_INPUTS + NUM_JOINTS  # + (len(HUMANOID_REFERENCE_MAPP
 
 # Critic inputs are the base class inputs plus the new reference observations
 NUM_CRITIC_INPUTS_REF = (
-    NUM_CRITIC_INPUTS + NUM_JOINTS  # reference_qpos
+    NUM_CRITIC_INPUTS
+    + NUM_JOINTS  # reference_qpos
     # + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # reference_local_xpos
     # + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # tracked_local_xpos
 )
