@@ -254,13 +254,13 @@ def main() -> None:
         raise e
 
 
-'''
+"""
 python -m ksim_kbot.deploy.deploy_joystick_rnn \
 --model_path joystick_rnn_proj_example/tf_model_2144 \
 --mode sim \
 --scale_action 1.0 \
 --debug
-'''
+"""
 
 if __name__ == "__main__":
     main()

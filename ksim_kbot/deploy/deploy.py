@@ -159,11 +159,11 @@ class Deploy(ABC):
             timestamp = time.strftime("%Y%m%d-%H%M%S")
             date = time.strftime("%Y%m%d")
             date_dir = f"{file_dir}/deployment_logs/{date}"
-            
+
             # Check if date directory exists, create if it doesn't
             if not os.path.exists(date_dir):
                 os.makedirs(date_dir)
-                
+
             with open(f"{date_dir}/{self.mode}_{timestamp}.pkl", "wb") as f:
                 pickle.dump(self.rollout_dict, f)
 
