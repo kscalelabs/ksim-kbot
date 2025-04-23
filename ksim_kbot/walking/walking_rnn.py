@@ -388,7 +388,7 @@ if __name__ == "__main__":
     # To run training, use the following command:
     #   python -m ksim_kbot.walking.walking_rnn
     # To visualize the environment, use the following command:
-    #   python -m ksim_kbot.walking.walking_rnn run_environment=True
+    #   python -m ksim_kbot.walking.walking_rnn run_model_viewer=True
     WalkingRnnTask.launch(
         WalkingRnnTaskConfig(
             # Training parameters.
@@ -401,6 +401,5 @@ if __name__ == "__main__":
             dt=0.005,
             ctrl_dt=0.02,
             max_action_latency=0.0,
-            min_action_latency=0.0,
         ),
     )

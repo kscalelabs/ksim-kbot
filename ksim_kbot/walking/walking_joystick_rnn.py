@@ -504,7 +504,7 @@ class KbotWalkingJoystickRNNTask(KbotWalkingTask[Config], Generic[Config]):
         if not self.config.export_for_inference:
             return state
 
-        model: KbotRNNModel = self.load_ckpt(ckpt_path, part="model")
+        model: KbotRNNModel = self.load_ckpt(ckpt_path, part="model")[0]
 
         model_fn = self.make_export_model(model, stochastic=False, batched=True)
         input_shapes = [
@@ -534,7 +534,7 @@ if __name__ == "__main__":
     # To run training, use the following command:
     #   python -m ksim_kbot.walking.walking_joystick_rnn
     # To visualize the environment, use the following command:
-    #   python -m ksim_kbot.walking.walking_joystick_rnn run_environment=True
+    #   python -m ksim_kbot.walking.walking_joystick_rnn run_model_viewer=True
     KbotWalkingJoystickRNNTask.launch(
         KbotWalkingJoystickRNNTaskConfig(
             num_envs=4096,

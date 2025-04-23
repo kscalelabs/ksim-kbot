@@ -687,7 +687,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
-        argmax: bool = False,
+        argmax: bool,
     ) -> ksim.Action:
         action_dist_j = self.run_actor(
             model.actor,
@@ -733,6 +733,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             return state
 
         model: KbotModel = self.load_ckpt(ckpt_path, part="model")[0]
+
         model_fn = self.make_export_model(model, stochastic=False, batched=True)
 
         input_shapes = [(NUM_INPUTS,)]
@@ -756,7 +757,7 @@ if __name__ == "__main__":
     # To run training, use the following command:
     # python -m ksim_kbot.walking.walking_joystick disable_multiprocessing=True
     # To visualize the environment, use the following command:
-    # python -m ksim_kbot.walking.walking_joystick run_environment=True \
+    # python -m ksim_kbot.walking.walking_joystick run_model_viewer=True \
     #  run_environment_num_seconds=1 \
     #  run_environment_save_path=videos/test.mp4
     KbotWalkingTask.launch(
@@ -781,7 +782,7 @@ if __name__ == "__main__":
             learning_rate=1e-4,
             clip_param=0.3,
             max_grad_norm=0.5,
-            valid_every_n_steps=25,
+            valid_every_n_seconds=600,
             save_every_n_steps=25,
             export_for_inference=True,
             only_save_most_recent=False,

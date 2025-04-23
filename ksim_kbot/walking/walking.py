@@ -530,7 +530,7 @@ if __name__ == "__main__":
     # To run training, use the following command:
     #   python -m ksim_kbot.walking.walking
     # To visualize the environment, use the following command:
-    #   python -m ksim_kbot.walking.walking run_environment=True
+    #   python -m ksim_kbot.walking.walking run_model_viewer=True
     # On MacOS or other devices with less memory, you can change the number
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
@@ -549,6 +549,5 @@ if __name__ == "__main__":
             dt=0.005,
             ctrl_dt=0.02,
             max_action_latency=0.0,
-            min_action_latency=0.0,
         ),
     )

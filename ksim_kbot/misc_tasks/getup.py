@@ -94,7 +94,7 @@ class ResetDefaultJointPosition(ksim.Reset):
 class HeightOrientationObservation(ksim.Observation):
     noise: float = attrs.field(default=0.0)
 
-    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         qpos = state.physics_state.data.qpos[2:7]  # (N, 5)
         return qpos
 
@@ -109,7 +109,7 @@ class JointPositionObservation(ksim.Observation):
         default=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     )
 
-    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         qpos = state.physics_state.data.qpos[7:]  # (N,)
         diff = qpos - jnp.array(self.default_targets)
         return diff
@@ -122,7 +122,7 @@ class JointPositionObservation(ksim.Observation):
 class LastActionObservation(ksim.Observation):
     noise: float = attrs.field(default=0.0)
 
-    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         return state.physics_state.most_recent_action
 
     def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
@@ -138,7 +138,7 @@ class JointDeviationPenalty(ksim.Reward):
     )
     height_threshold: float = attrs.field(default=0.5)
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         height = trajectory.qpos[..., 2]
         diff = trajectory.qpos[..., 7:] - jnp.array(self.joint_targets)
         diff = jnp.sum(jnp.square(diff), axis=-1)
@@ -153,7 +153,7 @@ class StandStillPenalty(ksim.Reward):
 
     height_threshold: float = attrs.field(default=0.5)
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         height = trajectory.qpos[..., 2]
         cost = jnp.sum(jnp.square(trajectory.qvel[..., :2]), axis=-1)
         # Gate the reward subject to the height.
@@ -168,7 +168,7 @@ class UpwardPositionReward(ksim.Reward):
     target_pos: float = attrs.field(default=0.71)
     sensitivity: float = attrs.field(default=10)
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         pos_after = trajectory.qpos[..., 2]
         diff = jnp.abs(pos_after - self.target_pos)
         return jnp.exp(-self.sensitivity * diff)
@@ -180,7 +180,7 @@ class UpwardVelocityReward(ksim.Reward):
 
     velocity_clip: float = attrs.field(default=10.0)
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         z_delta = jnp.clip(trajectory.qvel[..., 2], 0, self.velocity_clip)
 
         return z_delta
@@ -682,7 +682,6 @@ if __name__ == "__main__":
             dt=0.002,
             ctrl_dt=0.02,
             max_action_latency=0.0,
-            min_action_latency=0.0,
             rollout_length_seconds=1.25,
             # PPO parameters
             action_scale=0.5,

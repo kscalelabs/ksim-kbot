@@ -378,7 +378,7 @@ class KbotPseudoIKRNNTask(KbotPseudoIKTask[Config], Generic[Config]):
         if not self.config.export_for_inference:
             return state
 
-        model: KbotRNNModel = self.load_ckpt_with_template(ckpt_path, part="model", model_template=KbotRNNModel)
+        model: KbotRNNModel = self.load_ckpt(ckpt_path, part="model")[0]
 
         model_fn = self.make_export_model(model, stochastic=False, batched=True)
 
@@ -421,7 +421,6 @@ if __name__ == "__main__":
             dt=0.005,
             ctrl_dt=0.02,
             max_action_latency=0.0,
-            min_action_latency=0.0,
             entropy_coef=0.05,
             learning_rate=3e-4,
             rollout_length_seconds=10.0,
