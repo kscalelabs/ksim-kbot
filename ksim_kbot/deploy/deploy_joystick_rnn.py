@@ -88,6 +88,8 @@ class JoystickRNNDeploy(FixedArmDeploy):
             "controller_cmd": [],
             "prev_action": [],
             "phase": [],
+            "imu_accel": [],
+            "euler_angles": [],
         }
 
     def get_command(self) -> np.ndarray:
@@ -112,7 +114,6 @@ class JoystickRNNDeploy(FixedArmDeploy):
         )
 
         imu_gyro = np.array([imu.gyro_x, imu.gyro_y, imu.gyro_z])
-        euler_angles = np.deg2rad(np.array([euler_angles.roll, euler_angles.pitch, euler_angles.yaw]))
 
         # r = Rotation.from_euler("xyz", euler_angles)
         r = Rotation.from_quat(np.array([quat.w, quat.x, quat.y, quat.z]), scalar_first=True)
@@ -139,6 +140,9 @@ class JoystickRNNDeploy(FixedArmDeploy):
 
         cmd = self.get_command()
 
+        imu_accel = np.array([imu.accel_x, imu.accel_y, imu.accel_z])
+        euler_angles = np.array([euler_angles.roll, euler_angles.pitch, euler_angles.yaw])
+
         self.rollout_dict["timestamp"].append(time.time())
         self.rollout_dict["pos_diff"].append(pos_diff)
         self.rollout_dict["vel_obs"].append(vel_obs)
@@ -148,6 +152,8 @@ class JoystickRNNDeploy(FixedArmDeploy):
         self.rollout_dict["controller_cmd"].append(cmd)
         self.rollout_dict["prev_action"].append(self.prev_action)
         self.rollout_dict["phase"].append(phase_vec)
+        self.rollout_dict["imu_accel"].append(imu_accel)
+        self.rollout_dict["euler_angles"].append(euler_angles)
 
         observation = np.concatenate(
             [phase_vec, pos_diff, vel_obs, projected_gravity, imu_gyro, cmd, self.gait]
@@ -227,7 +233,7 @@ def main() -> None:
     )
     parser.add_argument("--enable_joystick", action="store_true", help="Enable joystick")
     parser.add_argument("--scale_action", type=float, default=0.1, help="Action Scale, default 0.1")
-    parser.add_argument("--ip", type=str, default="100.101.101.48", help="IP address of KOS")
+    parser.add_argument("--ip", type=str, default="localhost", help="IP address of KOS")
     parser.add_argument("--episode_length", type=int, default=30, help="Length of episode in seconds")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
@@ -257,8 +263,8 @@ def main() -> None:
 '''
 python -m ksim_kbot.deploy.deploy_joystick_rnn \
 --model_path joystick_rnn_proj_example/tf_model_2144 \
---mode sim \
---scale_action 1.0 \
+--mode real-check \
+--scale_action 0.01 \
 --debug
 '''
 

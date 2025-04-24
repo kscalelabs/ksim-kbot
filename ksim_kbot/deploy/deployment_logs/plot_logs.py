@@ -23,6 +23,7 @@ STATS = {
     "avg_loop_overrun_time": -1.0,
     "max_loop_overrun_time": -1.0,
     "max_commanded_velocity": -1.0,
+    "avg_imu_freq": -1.0,
 }
 
 
@@ -327,7 +328,7 @@ def plot_vector_data(data: dict, key: str, output_dir: str) -> None:
             fig.savefig(osp.join(output_dir, f"{key}_group{i + 1}.pdf"))
             plt.close(fig)
 
-    elif key in ["imu_accel", "imu_gyro"]:
+    elif key in ["imu_accel", "imu_gyro", "euler_angles"]:
         # Plot IMU acceleration or gyroscope data
         fig, ax = plt.subplots(figsize=(10, 6))
 
@@ -341,7 +342,7 @@ def plot_vector_data(data: dict, key: str, output_dir: str) -> None:
         ax.plot(steps[: len(y_data)], y_data[: len(steps)], label="Y")
         ax.plot(steps[: len(z_data)], z_data[: len(steps)], label="Z")
 
-        component_type = "Acceleration" if key == "imu_accel" else "Gyroscope"
+        component_type = "Acceleration" if key == "imu_accel" else "Gyroscope" if key == "imu_gyro" else "Euler Angles"
         ax.set_ylabel(f"IMU {component_type}")
         ax.set_xlabel("Steps")
         ax.legend()
@@ -502,6 +503,7 @@ def plot_vector_data(data: dict, key: str, output_dir: str) -> None:
         fig.tight_layout()
         fig.savefig(osp.join(output_dir, f"{key}.pdf"))
         plt.close(fig)
+   
     elif key == "quat":
         # quat has shape (4,) with w, x, y, z components
         fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(10, 15), sharex=True)
@@ -532,9 +534,86 @@ def plot_vector_data(data: dict, key: str, output_dir: str) -> None:
         fig.tight_layout()
         fig.savefig(osp.join(output_dir, f"{key}.pdf"))
         plt.close(fig)
+   
+
     else:
         raise ValueError(f"Unknown key, add this plot {key}")
 
+
+def calculate_imu_update_rate(data: dict, output_dir: str) -> None:
+    """Calculate running average frequency of unique IMU data points.
+    
+    Args:
+        data: Deployment data dictionary containing timestamps and IMU data
+        output_dir: Directory to save the plot
+    """
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    # Get timestamps and sensor data
+    timestamps = data["timestamp"]
+    
+    # Check which IMU data are available
+    imu_keys = []
+    for key in ["quat", "imu_accel", "imu_gyro"]:
+        if key in data and len(data[key]) > 0:
+            imu_keys.append(key)
+    
+    if not imu_keys:
+        logger.warning("No IMU data found for update rate calculation")
+        return
+    
+    # Initialize tracking variables
+    prev_values = {key: None for key in imu_keys}
+    change_timestamps = []
+    
+    # Find timestamps where any of the IMU data changes
+    for i in range(len(timestamps)):
+        change_detected = False
+        
+        for key in imu_keys:
+            if i < len(data[key]):
+                current_value = tuple(float(x) for x in data[key][i])
+                
+                if prev_values[key] is None or current_value != prev_values[key]:
+                    prev_values[key] = current_value
+                    change_detected = True
+        
+        if change_detected:
+            change_timestamps.append(timestamps[i])
+    
+    # Calculate time differences between changes
+    if len(change_timestamps) <= 1:
+        logger.warning("Not enough unique IMU data points to calculate update rate")
+        return
+    
+    time_diffs = np.diff(change_timestamps)
+    
+    # Calculate frequencies (1/time_diff) in Hz
+    frequencies = 1.0 / time_diffs
+    
+    # Calculate running average of frequencies
+    running_avg_freq = np.cumsum(frequencies) / np.arange(1, len(frequencies) + 1)
+    
+    # Calculate overall average frequency
+    avg_frequency = np.mean(frequencies)
+    
+    # Plot running average frequency
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(np.arange(1, len(running_avg_freq) + 1), running_avg_freq)
+    ax.set_ylabel("Running Average Frequency (Hz)")
+    ax.set_xlabel("Number of Changes")
+    ax.set_title(f"Running Average of IMU Update Frequency (Average: {avg_frequency:.2f} Hz)")
+    ax.grid(True)
+    
+    fig.tight_layout()
+    fig.savefig(osp.join(output_dir, "imu_update_frequency.pdf"))
+    plt.close(fig)
+    
+    # logger.info(f"IMU update rate analysis: {len(change_timestamps)} unique data points")
+    # logger.info(f"Average IMU update frequency: {avg_frequency:.2f} Hz")
+
+    STATS["avg_imu_freq"] = avg_frequency
 
 def plot_deployment_data(data: dict, output_dir: str) -> None:
     """Plot all deployment data."""
@@ -547,6 +626,9 @@ def plot_deployment_data(data: dict, output_dir: str) -> None:
     logger.warning(f"Plotting {data.keys()}")
 
     STATS["deployment_length"] = max(data["timestamp"]) - min(data["timestamp"])
+    
+    # Calculate IMU update rate
+    calculate_imu_update_rate(data, output_dir)
 
     for key in data.keys():
         if key in ["command", "timestamp", "model_name"]:
@@ -562,6 +644,8 @@ def plot_deployment_data(data: dict, output_dir: str) -> None:
     logger.info(f"Average per loop overrun time: {STATS['avg_loop_overrun_time']:.2f} s")
     logger.info(f"Maximum per loop overrun time: {STATS['max_loop_overrun_time']:.2f} s")
     logger.info(f"Maximum commanded velocity: {STATS['max_commanded_velocity']:.2f} deg/s")
+    if STATS["avg_imu_freq"] > 0:
+        logger.info(f"Average IMU update frequency: {STATS['avg_imu_freq']:.2f} Hz")
     logger.info("-" * 50)
 
     logger.info(f"All plots saved to {output_dir}/")
