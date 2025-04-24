@@ -3,7 +3,7 @@
 If some logic will become more general, we can move it to ksim or xax.
 """
 
-from typing import Self
+from typing import Literal, Self
 
 import attrs
 import jax.numpy as jnp
@@ -440,10 +440,10 @@ class FeetPhaseReward(ksim.Reward):
 class TargetLinearVelocityReward(ksim.Reward):
     """Reward for forward motion."""
 
-    index: str = attrs.field(default="x")
+    index: Literal["x", "y", "z"] = attrs.field(default="x")
     target_vel: float = attrs.field(default=0.0)
     norm: xax.NormType = attrs.field(default="l1")
-    monotonic_fn: str = attrs.field(default="inv")
+    monotonic_fn: Literal["exp", "inv"] = attrs.field(default="inv")
     temp: float = attrs.field(default=1.0)
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
@@ -462,7 +462,7 @@ class TargetHeightReward(ksim.Reward):
     target_height: float = attrs.field(default=1.0)
     norm: xax.NormType = attrs.field(default="l1")
     temp: float = attrs.field(default=1.0)
-    monotonic_fn: str = attrs.field(default="inv")
+    monotonic_fn: Literal["exp", "inv"] = attrs.field(default="inv")
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         qpos = trajectory.qpos
