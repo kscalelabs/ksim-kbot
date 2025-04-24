@@ -21,8 +21,8 @@ from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from ksim.types import PhysicsModel
 from ksim.utils.priors import (
+    MotionReferenceData,
     MotionReferenceMapping,
-    MotionReferenceMotionData,
     generate_reference_motion,
     get_local_xpos,
     get_reference_joint_id,
@@ -177,7 +177,7 @@ def create_target_marker_update_fn(
 
 @attrs.define(frozen=True, kw_only=True)
 class CartesianReferenceMotionReward(ksim.Reward):
-    reference_motion_data: MotionReferenceMotionData
+    reference_motion_data: MotionReferenceData
     mj_base_id: int
     norm: xax.NormType = attrs.field(default="l1")
     sensitivity: float = attrs.field(default=5.0)
@@ -231,7 +231,7 @@ class CartesianReferenceMotionReward(ksim.Reward):
 
 @attrs.define(frozen=True, kw_only=True)
 class QposReferenceMotionReward(ksim.Reward):
-    reference_motion_data: MotionReferenceMotionData
+    reference_motion_data: MotionReferenceData
     joint_weights: tuple[float, ...] = attrs.field(default=tuple([1.0] * NUM_JOINTS))
     joint_indices: tuple[int, ...] = attrs.field(default=None)
     speed: float = attrs.field(default=1.0)
@@ -261,7 +261,7 @@ class QposReferenceMotionReward(ksim.Reward):
     def create(
         cls,
         physics_model: ksim.PhysicsModel,
-        reference_motion_data: MotionReferenceMotionData,
+        reference_motion_data: MotionReferenceData,
         scale: float,
         joint_names: Optional[tuple[str, ...]] = None,
         joint_weights: Optional[tuple[float, ...]] = None,
@@ -473,7 +473,7 @@ class KbotModel(eqx.Module):
 
 class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
     config: Config
-    reference_motion_data: MotionReferenceMotionData
+    reference_motion_data: MotionReferenceData
     tracked_body_ids: tuple[int, ...]
     mj_base_id: int
     qpos_reference_speed: float
@@ -796,7 +796,7 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   CUDA_VISIBLE_DEVICES=1 python -m ksim_kbot.walking.walking_reference_motion disable_multiprocessing=True qpos_reference_speed=1.8
+    #   python -m ksim_kbot.walking.walking_reference_motion disable_multiprocessing=True
     # To visualize the environment, use the following command:
     #   python -m ksim_kbot.walking.walking_reference_motion run_model_viewer=True
     # To visualize the reference gait, use the following command:

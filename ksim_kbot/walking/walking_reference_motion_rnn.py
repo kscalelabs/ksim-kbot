@@ -1,5 +1,5 @@
 # mypy: disable-error-code="override"
-"""Walking default humanoid task with reference gait tracking."""
+"""Walking default humanoid task with reference motion tracking."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -7,7 +7,7 @@ from typing import Callable, Generic, TypeVar
 
 import attrs
 import bvhio
-import distrax  # Import distrax
+import distrax
 import glm
 import jax
 import jax.numpy as jnp
@@ -19,9 +19,10 @@ from bvhio.lib.hierarchy import Joint as BvhioJoint
 from jaxtyping import Array, PRNGKeyArray
 from ksim.types import PhysicsModel
 from ksim.utils.priors import (
+    MotionReferenceData,
     MotionReferenceMapping,
-    MotionReferenceMotionData,
     generate_reference_motion,
+    get_local_xpos,
     get_reference_joint_id,
     local_to_absolute,
     visualize_reference_motion,
@@ -30,8 +31,7 @@ from scipy.spatial.transform import Rotation as R
 
 import ksim_kbot.rewards as kbot_rewards
 from ksim_kbot import common
-from ksim_kbot.walking.walking_joystick import NUM_CRITIC_INPUTS
-from ksim_kbot.walking.walking_reference_motion import NUM_INPUTS, NUM_JOINTS, CartesianReferenceMotionReward
+from ksim_kbot.walking.walking_reference_motion import NUM_JOINTS, CartesianReferenceMotionReward
 from ksim_kbot.walking.walking_rnn import (
     RnnActor,
     RnnCritic,
@@ -39,8 +39,6 @@ from ksim_kbot.walking.walking_rnn import (
     WalkingRnnTask,
     WalkingRnnTaskConfig,
 )
-
-NUM_JOINTS = 20
 
 HUMANOID_REFERENCE_MAPPINGS = (
     MotionReferenceMapping("CC_Base_L_ThighTwist01", "RS03_5"),  # hip
@@ -55,6 +53,25 @@ HUMANOID_REFERENCE_MAPPINGS = (
     MotionReferenceMapping("CC_Base_R_ForearmTwist01", "KC_C_401R_R_UpForearmDrive"),  # elbow
     MotionReferenceMapping("CC_Base_L_Hand", "KB_C_501X_Left_Bayonet_Adapter_Hard_Stop"),  # hand
     MotionReferenceMapping("CC_Base_R_Hand", "KB_C_501X_Right_Bayonet_Adapter_Hard_Stop"),  # hand
+)
+
+
+NUM_OBS = NUM_JOINTS * 2 + 3 + 3 + 2  # joint pos, joint vel, imu acc, imu gyro, time (sin, cos)
+NUM_COMMANDS = 6
+NUM_OUTPUTS = NUM_JOINTS * 2
+NUM_INPUTS = NUM_OBS + NUM_COMMANDS
+NUM_CRITIC_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 230 + 138 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 6
+
+# Actor inputs are the same as the base class for now
+NUM_ACTOR_INPUTS_REF = NUM_INPUTS  # - (NUM_JOINTS * 2)
+
+# Critic inputs are the base class inputs plus the new reference observations
+NUM_CRITIC_INPUTS_REF = (
+    NUM_CRITIC_INPUTS
+    + NUM_JOINTS  # reference_qpos
+    + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # reference_local_xpos
+    + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # tracked_local_xpos
+    - NUM_JOINTS * 2  # last action
 )
 
 
@@ -107,13 +124,13 @@ Config = TypeVar("Config", bound=WalkingRnnRefMotionTaskConfig)
 
 @attrs.define(frozen=True, kw_only=True)
 class QposReferenceMotionReward(ksim.Reward):
-    reference_motion_data: MotionReferenceMotionData
+    reference_motion_data: MotionReferenceData
     norm: xax.NormType = attrs.field(default="l1")
     sensitivity: float = attrs.field(default=5.0)
     joint_weights: tuple[float, ...] = attrs.field(default=tuple([1.0] * NUM_JOINTS))
     speed: float = attrs.field(default=1.0)
 
-    def __call__(self, trajectory: ksim.Trajectory, _: None) -> tuple[Array, None]:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         qpos = trajectory.qpos
         effective_time = trajectory.timestep * self.speed
         reference_qpos = self.reference_motion_data.get_qpos_at_time(effective_time)
@@ -121,7 +138,7 @@ class QposReferenceMotionReward(ksim.Reward):
         error = error * jnp.array(self.joint_weights)
         mean_error = error.mean(axis=-1)
         reward = jnp.exp(-mean_error * self.sensitivity)
-        return reward, None
+        return reward
 
 
 def create_tracked_marker_update_fn(
@@ -150,22 +167,9 @@ def create_target_marker_update_fn(
     return _target_update_fn
 
 
-# Actor inputs are the same as the base class for now
-NUM_ACTOR_INPUTS_REF = NUM_INPUTS - (NUM_JOINTS * 2)
-
-# Critic inputs are the base class inputs plus the new reference observations
-NUM_CRITIC_INPUTS_REF = (
-    NUM_CRITIC_INPUTS
-    + NUM_JOINTS  # reference_qpos
-    + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # reference_local_xpos
-    + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # tracked_local_xpos
-    - NUM_JOINTS * 2  # last action
-)
-
-
 class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
     config: Config
-    reference_motion_data: MotionReferenceMotionData
+    reference_motion_data: MotionReferenceData
     tracked_body_ids: tuple[int, ...]
     mj_base_id: int
     qpos_reference_speed: float
@@ -200,13 +204,15 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
 
         return RnnModel(
             key,
-            num_inputs=NUM_ACTOR_INPUTS_REF,  # Use actor size derived from base
-            num_critic_inputs=num_critic_inputs_actual,  # Use dynamically calculated critic size
+            num_inputs=NUM_ACTOR_INPUTS_REF,
+            num_joints=NUM_JOINTS,
+            num_critic_inputs=num_critic_inputs_actual,
             min_std=0.01,
             max_std=1.0,
-            mean_scale=self.config.action_scale,
+            # mean_scale=self.config.action_scale,
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
+            num_mixtures=self.config.num_mixtures,
         )
 
     def run_actor(
@@ -225,7 +231,6 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
         joystick_cmd_1 = commands["joystick_command"]
         joystick_cmd_ohe_6 = jax.nn.one_hot(joystick_cmd_1, num_classes=6).squeeze(-2)
 
-        # Concatenate observations for the actor (same as base class for now)
         obs_n = jnp.concatenate(
             [
                 jnp.cos(timestep_1),  # 1
@@ -266,12 +271,11 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
         joystick_cmd_1 = commands["joystick_command"]
         joystick_cmd_ohe_6 = jax.nn.one_hot(joystick_cmd_1, num_classes=6).squeeze(-2)
-        # New reference observations
+        # reference observations
         ref_qpos_j = observations["reference_qpos_observation"]
         ref_local_xpos_n = observations["reference_local_xpos_observation"]
         tracked_local_xpos_n = observations["tracked_local_xpos_observation"]
 
-        # Concatenate observations for the critic, including new ones
         obs_n = jnp.concatenate(
             [
                 jnp.cos(timestep_1),  # 1
@@ -288,7 +292,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
                 joystick_cmd_ohe_6,  # 6
-                # Add reference observations
+                # reference observations
                 ref_qpos_j,  # NUM_JOINTS
                 ref_local_xpos_n,  # num_tracked_bodies * 3
                 tracked_local_xpos_n,  # num_tracked_bodies * 3
@@ -304,7 +308,6 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
         )
 
         msg = f"Critic input shape ({obs_n.shape[-1]}) != expected ({expected_num_critic_inputs_ref})"
-
         assert obs_n.shape[-1] == expected_num_critic_inputs_ref, msg
 
         return model.forward(obs_n, carry)
@@ -353,9 +356,10 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 ),
             ),
             kbot_rewards.FeetSlipPenalty(scale=-2.0),
-            kbot_rewards.FeetAirTimeReward(
-                scale=8.0,
-            ),
+            # kbot_rewards.FeetAirTimeReward(
+            #     scale=8.0,
+            # ),
+            # kbot_rewards.TargetHeightReward(target_height=1.0, scale=1.0),
             kbot_rewards.TargetLinearVelocityReward(
                 index="x",
                 target_vel=0.5,
@@ -367,7 +371,6 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 scale=1.5,
             ),
             ksim.LinearVelocityPenalty(index="z", scale=-2.0),
-            kbot_rewards.TargetHeightReward(target_height=1.0, scale=1.0),
         ]
 
         return rewards
@@ -478,10 +481,10 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
             carry=actor_carry_in,
         )
 
-        if argmax:
-            action_j = action_dist_j.mode()
-        else:
-            action_j = action_dist_j.sample(seed=rng)
+        # if argmax:
+        #     action_j = action_dist_j.mode()
+        # else:
+        action_j = action_dist_j.sample(seed=rng)
 
         # Getting the local cartesian positions for all tracked bodies.
         tracked_positions: dict[int, Array] = {}

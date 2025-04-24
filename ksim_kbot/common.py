@@ -20,7 +20,7 @@ from ksim.utils.mujoco import (
     update_data_field,
 )
 from ksim.utils.priors import (
-    MotionReferenceMotionData,
+    MotionReferenceData,
     get_local_xpos,
 )
 from mujoco import mjx
@@ -501,7 +501,7 @@ class TorquePushEvent(ksim.Event):
 class ReferenceQposObservation(ksim.Observation):
     """Observation for the reference joint positions."""
 
-    reference_motion_data: MotionReferenceMotionData
+    reference_motion_data: MotionReferenceData
     speed: float = attrs.field(default=1.0)
 
     def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
@@ -515,7 +515,7 @@ class ReferenceQposObservation(ksim.Observation):
 class ReferenceLocalXposObservation(ksim.Observation):
     """Observation for the reference local cartesian positions of tracked bodies."""
 
-    reference_motion_data: MotionReferenceMotionData
+    reference_motion_data: MotionReferenceData
     tracked_body_ids: tuple[int, ...]
 
     def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:

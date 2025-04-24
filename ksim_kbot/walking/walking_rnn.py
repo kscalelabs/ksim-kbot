@@ -173,6 +173,7 @@ class RnnModel(eqx.Module):
         min_std: float,
         max_std: float,
         num_inputs: int,
+        num_critic_inputs: int,
         num_joints: int,
         hidden_size: int,
         depth: int,
@@ -191,7 +192,7 @@ class RnnModel(eqx.Module):
         )
         self.critic = RnnCritic(
             key,
-            num_inputs=num_inputs,
+            num_inputs=num_critic_inputs,
             hidden_size=hidden_size,
             depth=depth,
         )
@@ -211,6 +212,7 @@ class WalkingRnnTask(WalkingTask[Config], Generic[Config]):
             key,
             num_inputs=NUM_INPUTS,
             num_joints=NUM_JOINTS,
+            num_critic_inputs=NUM_INPUTS,
             min_std=0.01,
             max_std=1.0,
             hidden_size=self.config.hidden_size,
