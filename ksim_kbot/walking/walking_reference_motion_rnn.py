@@ -356,10 +356,7 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 ),
             ),
             kbot_rewards.FeetSlipPenalty(scale=-2.0),
-            # kbot_rewards.FeetAirTimeReward(
-            #     scale=8.0,
-            # ),
-            # kbot_rewards.TargetHeightReward(target_height=1.0, scale=1.0),
+            kbot_rewards.TargetHeightReward(target_height=1.0, scale=1.0),
             kbot_rewards.TargetLinearVelocityReward(
                 index="x",
                 target_vel=0.5,
@@ -481,10 +478,10 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
             carry=actor_carry_in,
         )
 
-        # if argmax:
-        #     action_j = action_dist_j.mode()
-        # else:
-        action_j = action_dist_j.sample(seed=rng)
+        if argmax:
+            action_j = action_dist_j.mode()
+        else:
+            action_j = action_dist_j.sample(seed=rng)
 
         # Getting the local cartesian positions for all tracked bodies.
         tracked_positions: dict[int, Array] = {}
@@ -548,19 +545,19 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m ksim_kbot.walking.walking_reference_motion num_envs=2 batch_size=2
+    #   python -m ksim_kbot.walking.walking_reference_motion_rnn disable_multiprocessing=True num_envs=2 batch_size=2
     # To visualize the environment, use the following command:
     #   python -m ksim_kbot.walking.walking_reference_motion_rnn run_model_viewer=True
     # To visualize the reference gait, use the following command:
-    #   mjpython -m ksim_kbot.walking.walking_reference_motion visualize_reference_motion=True
+    #   mjpython -m ksim_kbot.walking.walking_reference_motion_rnn visualize_reference_motion=True
     # On MacOS or other devices with less memory, you can change the number
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
-    #   python -m ksim_kbot.walking.walking_reference_motion num_envs=1 batch_size=1
+    #   python -m ksim_kbot.walking.walking_reference_motion_rnn num_envs=1 batch_size=1
     WalkingRnnRefMotionTask.launch(
         WalkingRnnRefMotionTaskConfig(
             # Training parameters.
-            num_envs=2048,
+            num_envs=1024,
             batch_size=256,
             num_passes=10,
             epochs_per_log_step=1,
@@ -569,6 +566,7 @@ if __name__ == "__main__":
             increase_threshold=5.0,
             decrease_threshold=3.0,
             # Simulation parameters.
+            valid_every_n_seconds=700,
             iterations=8,
             ls_iterations=8,
             dt=0.005,

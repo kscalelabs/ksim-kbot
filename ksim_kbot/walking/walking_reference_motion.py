@@ -141,7 +141,7 @@ class WalkingRefMotionTaskConfig(KbotWalkingTaskConfig):
         help="The scale to apply to the naive reward.",
     )
     qpos_reference_speed: float = xax.field(
-        value=1.0,
+        value=1.8,
         help="The speed to apply to the reference motion.",
     )
 
@@ -815,6 +815,7 @@ if __name__ == "__main__":
             rollout_length_seconds=1.25,
             render_length_seconds=5.0,
             # Simulation parameters.
+            valid_every_n_seconds=700,
             iterations=8,
             ls_iterations=8,
             dt=0.002,

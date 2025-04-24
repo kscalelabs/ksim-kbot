@@ -453,3 +453,21 @@ class TargetLinearVelocityReward(ksim.Reward):
 
     def get_name(self) -> str:
         return f"{self.index}_{super().get_name()}"
+
+
+@attrs.define(frozen=True, kw_only=True)
+class TargetHeightReward(ksim.Reward):
+    """Reward for reaching a target height."""
+
+    target_height: float = attrs.field(default=1.0)
+    norm: xax.NormType = attrs.field(default="l1")
+    temp: float = attrs.field(default=1.0)
+    monotonic_fn: str = attrs.field(default="inv")
+
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        qpos = trajectory.qpos
+        error = qpos[..., 2] - self.target_height
+        reward_value = ksim.norm_to_reward(
+            xax.get_norm(error, self.norm), temp=self.temp, monotonic_fn=self.monotonic_fn
+        )
+        return reward_value
