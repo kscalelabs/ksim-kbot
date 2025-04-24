@@ -49,7 +49,7 @@ class JoystickDeploy(FixedArmDeploy):
         self.phase = np.array([0, np.pi])
 
         self.rollout_dict = {
-            "model_name":  "/".join(model_path.split("/")[-2:]),
+            "model_name": "/".join(model_path.split("/")[-2:]),
             "timestamp": [],
             "loop_overrun_time": [],
             "command": [],
@@ -154,13 +154,13 @@ def main() -> None:
         raise e
 
 
-'''
+"""
 python -m ksim_kbot.deploy.deploy_joystick \
 --model_path noisy_joystick_example/tf_model_1576 \
 --mode sim \
 --scale_action 1.0 \
 --debug
-'''
+"""
 
 if __name__ == "__main__":
     main()
