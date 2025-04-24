@@ -291,50 +291,6 @@ class QposReferenceMotionReward(ksim.Reward):
             )
 
 
-@attrs.define(frozen=True, kw_only=True)
-class ReferenceQposObservation(ksim.Observation):
-    """Observation for the reference joint positions."""
-
-    reference_motion_data: MotionReferenceMotionData
-    speed: float = attrs.field(default=1.0)
-
-    def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        physics_state = state.physics_state
-        effective_time = physics_state.data.time * self.speed
-        reference_qpos_at_time = self.reference_motion_data.get_qpos_at_time(effective_time)
-        return reference_qpos_at_time[..., 7:]
-
-
-@attrs.define(frozen=True, kw_only=True)
-class ReferenceLocalXposObservation(ksim.Observation):
-    """Observation for the reference local cartesian positions of tracked bodies."""
-
-    reference_motion_data: MotionReferenceMotionData
-    tracked_body_ids: tuple[int, ...]
-
-    def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        physics_state = state.physics_state
-        target_pos_dict = self.reference_motion_data.get_cartesian_pose_at_time(physics_state.data.time)
-        target_pos_list = [target_pos_dict[body_id] for body_id in self.tracked_body_ids]
-        return jnp.concatenate(target_pos_list, axis=-1)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class TrackedLocalXposObservation(ksim.Observation):
-    """Observation for the current local cartesian positions of tracked bodies."""
-
-    tracked_body_ids: tuple[int, ...]
-    mj_base_id: int
-
-    def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        physics_state = state.physics_state
-        tracked_positions_list: list[Array] = []
-        for body_id in self.tracked_body_ids:
-            body_pos = get_local_xpos(physics_state.data.xpos, body_id, self.mj_base_id)
-            tracked_positions_list.append(jnp.array(body_pos))
-        return jnp.concatenate(tracked_positions_list, axis=-1)
-
-
 class KbotActor(eqx.Module):
     """Actor for the standing task."""
 
@@ -534,15 +490,15 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         super_observations = super().get_observations(physics_model)
         observations: list[ksim.Observation] = [
-            ReferenceQposObservation(
+            common.ReferenceQposObservation(
                 reference_motion_data=self.reference_motion_data,
                 speed=self.config.qpos_reference_speed,
             ),
-            ReferenceLocalXposObservation(
+            common.ReferenceLocalXposObservation(
                 reference_motion_data=self.reference_motion_data,
                 tracked_body_ids=self.tracked_body_ids,
             ),
-            TrackedLocalXposObservation(
+            common.TrackedLocalXposObservation(
                 tracked_body_ids=self.tracked_body_ids,
                 mj_base_id=self.mj_base_id,
             ),
@@ -660,7 +616,7 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
                 target_vel=0.0,
                 scale=1.5,
             ),
-            ksim.LinearVelocityPenalty(index="z", scale=-2.0),
+            # ksim.LinearVelocityPenalty(index="z", scale=-2.0),
             # kbot_rewards.TargetHeightReward(target_height=1.0, scale=1.0),
         ]
 
@@ -840,7 +796,7 @@ class WalkingRefMotionTask(KbotWalkingTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m ksim_kbot.walking.walking_reference_motion num_envs=2 batch_size=2
+    #   CUDA_VISIBLE_DEVICES=1 python -m ksim_kbot.walking.walking_reference_motion disable_multiprocessing=True qpos_reference_speed=1.8
     # To visualize the environment, use the following command:
     #   python -m ksim_kbot.walking.walking_reference_motion run_model_viewer=True
     # To visualize the reference gait, use the following command:
