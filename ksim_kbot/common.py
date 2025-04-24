@@ -19,6 +19,10 @@ from ksim.utils.mujoco import (
     slice_update,
     update_data_field,
 )
+from ksim.utils.priors import (
+    MotionReferenceData,
+    get_local_xpos,
+)
 from mujoco import mjx
 
 
@@ -491,3 +495,47 @@ class TorquePushEvent(ksim.Event):
     def get_initial_event_state(self, rng: PRNGKeyArray) -> Array:
         minval, maxval = self.interval_range
         return jax.random.uniform(rng, (), minval=minval, maxval=maxval)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class ReferenceQposObservation(ksim.Observation):
+    """Observation for the reference joint positions."""
+
+    reference_motion_data: MotionReferenceData
+    speed: float = attrs.field(default=1.0)
+
+    def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
+        physics_state = state.physics_state
+        effective_time = physics_state.data.time * self.speed
+        reference_qpos_at_time = self.reference_motion_data.get_qpos_at_time(effective_time)
+        return reference_qpos_at_time[..., 7:]
+
+
+@attrs.define(frozen=True, kw_only=True)
+class ReferenceLocalXposObservation(ksim.Observation):
+    """Observation for the reference local cartesian positions of tracked bodies."""
+
+    reference_motion_data: MotionReferenceData
+    tracked_body_ids: tuple[int, ...]
+
+    def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
+        physics_state = state.physics_state
+        target_pos_dict = self.reference_motion_data.get_cartesian_pose_at_time(physics_state.data.time)
+        target_pos_list = [target_pos_dict[body_id] for body_id in self.tracked_body_ids]
+        return jnp.concatenate(target_pos_list, axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class TrackedLocalXposObservation(ksim.Observation):
+    """Observation for the current local cartesian positions of tracked bodies."""
+
+    tracked_body_ids: tuple[int, ...]
+    mj_base_id: int
+
+    def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
+        physics_state = state.physics_state
+        tracked_positions_list: list[Array] = []
+        for body_id in self.tracked_body_ids:
+            body_pos = get_local_xpos(physics_state.data.xpos, body_id, self.mj_base_id)
+            tracked_positions_list.append(jnp.array(body_pos))
+        return jnp.concatenate(tracked_positions_list, axis=-1)

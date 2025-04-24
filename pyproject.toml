@@ -14,7 +14,6 @@ markers = [
 ]
 
 [tool.mypy]
-
 pretty = true
 show_column_numbers = true
 show_error_context = true
@@ -33,7 +32,10 @@ namespace_packages = false
 # Uncomment to exclude modules from Mypy.
 [[tool.mypy.overrides]]
 
+ignore_missing_imports = true
+
 module = [
+    "pykos.*",
     "brax.*",
     "distrax.*",
     "equinox.*",
@@ -44,8 +46,6 @@ module = [
     "glm.*",
     "_pytest.*"
 ]
-
-ignore_missing_imports = true
 
 [tool.isort]
 

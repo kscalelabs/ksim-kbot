@@ -3,7 +3,7 @@
 If some logic will become more general, we can move it to ksim or xax.
 """
 
-from typing import Self
+from typing import Literal, Self
 
 import attrs
 import jax.numpy as jnp
@@ -434,3 +434,40 @@ class FeetPhaseReward(ksim.Reward):
         stance = xax.cubic_bezier_interpolation(jnp.array(0), swing_height, 2 * x)
         swing = xax.cubic_bezier_interpolation(swing_height, jnp.array(0), 2 * x - 1)
         return jnp.where(x <= 0.5, stance, swing)
+
+
+@attrs.define(frozen=True)
+class TargetLinearVelocityReward(ksim.Reward):
+    """Reward for forward motion."""
+
+    index: Literal["x", "y", "z"] = attrs.field(default="x")
+    target_vel: float = attrs.field(default=0.0)
+    norm: xax.NormType = attrs.field(default="l1")
+    monotonic_fn: Literal["exp", "inv"] = attrs.field(default="inv")
+    temp: float = attrs.field(default=1.0)
+
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        vel = trajectory.qvel[..., ksim.cartesian_index_to_dim(self.index)]
+        error = xax.get_norm(vel - self.target_vel, self.norm)
+        return ksim.norm_to_reward(error, temp=self.temp, monotonic_fn=self.monotonic_fn)
+
+    def get_name(self) -> str:
+        return f"{self.index}_{super().get_name()}"
+
+
+@attrs.define(frozen=True, kw_only=True)
+class TargetHeightReward(ksim.Reward):
+    """Reward for reaching a target height."""
+
+    target_height: float = attrs.field(default=1.0)
+    norm: xax.NormType = attrs.field(default="l1")
+    temp: float = attrs.field(default=1.0)
+    monotonic_fn: Literal["exp", "inv"] = attrs.field(default="inv")
+
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        qpos = trajectory.qpos
+        error = qpos[..., 2] - self.target_height
+        reward_value = ksim.norm_to_reward(
+            xax.get_norm(error, self.norm), temp=self.temp, monotonic_fn=self.monotonic_fn
+        )
+        return reward_value

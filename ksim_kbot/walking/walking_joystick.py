@@ -65,13 +65,14 @@ class KbotActor(eqx.Module):
         self,
         key: PRNGKeyArray,
         *,
+        num_inputs: int,
         min_std: float,
         max_std: float,
         var_scale: float,
         mean_scale: float,
     ) -> None:
         self.mlp = eqx.nn.MLP(
-            in_size=NUM_INPUTS,
+            in_size=num_inputs,
             out_size=NUM_OUTPUTS * 2,
             width_size=256,
             depth=5,
@@ -133,9 +134,9 @@ class KbotCritic(eqx.Module):
 
     mlp: eqx.nn.MLP
 
-    def __init__(self, key: PRNGKeyArray) -> None:
+    def __init__(self, key: PRNGKeyArray, *, num_inputs: int) -> None:
         self.mlp = eqx.nn.MLP(
-            in_size=NUM_CRITIC_INPUTS,
+            in_size=num_inputs,
             out_size=1,  # Always output a single critic value.
             width_size=256,
             depth=5,
@@ -193,16 +194,30 @@ class KbotCritic(eqx.Module):
 class KbotModel(eqx.Module):
     actor: KbotActor
     critic: KbotCritic
+    num_inputs: int = eqx.static_field()
+    num_critic_inputs: int = eqx.static_field()
 
-    def __init__(self, key: PRNGKeyArray) -> None:
+    def __init__(
+        self,
+        key: PRNGKeyArray,
+        *,
+        num_inputs: int,
+        num_critic_inputs: int,
+    ) -> None:
+        self.num_inputs = num_inputs
+        self.num_critic_inputs = num_critic_inputs
         self.actor = KbotActor(
             key,
+            num_inputs=num_inputs,
             min_std=0.01,
             max_std=1.0,
             var_scale=1.0,
             mean_scale=1.0,
         )
-        self.critic = KbotCritic(key)
+        self.critic = KbotCritic(
+            key,
+            num_inputs=num_critic_inputs,
+        )
 
 
 @dataclass
@@ -559,7 +574,11 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         return [common.GVecTermination.create(physics_model, sensor_name="upvector_origin")]
 
     def get_model(self, key: PRNGKeyArray) -> KbotModel:
-        return KbotModel(key)
+        return KbotModel(
+            key,
+            num_inputs=NUM_INPUTS,
+            num_critic_inputs=NUM_CRITIC_INPUTS,
+        )
 
     def get_initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
         return None, None
@@ -724,11 +743,13 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             if self.config.only_save_most_recent
             else ckpt_path.parent / f"tf_model_{state.num_steps}"
         )
+
         export(
             model_fn,
             input_shapes,  # type: ignore [arg-type]
             tf_path,
         )
+
         return state
 
 
@@ -737,7 +758,7 @@ if __name__ == "__main__":
     # To run training, use the following command:
     # python -m ksim_kbot.walking.walking_joystick disable_multiprocessing=True
     # To visualize the environment, use the following command:
-    # python -m ksim_kbot.walking.walking_joystick run_environment=True \
+    # python -m ksim_kbot.walking.walking_joystick run_model_viewer=True \
     #  run_environment_num_seconds=1 \
     #  run_environment_save_path=videos/test.mp4
     KbotWalkingTask.launch(
@@ -772,6 +793,5 @@ if __name__ == "__main__":
             gait_freq_upper=1.5,
             reward_clip_min=0.0,
             reward_clip_max=1000.0,
-            stand_still_threshold=0.0,  # no stand still reward
         ),
     )

@@ -14,6 +14,7 @@ import ksim
 import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray
+from mujoco import mjx
 from mujoco_scenes.mjcf import load_mjmodel
 from xax.nn.export import export
 
@@ -300,11 +301,11 @@ class KbotWalkingJoystickRNNTask(KbotWalkingTask[Config], Generic[Config]):
         mj_model = load_mjmodel(mjcf_path, scene=self.config.terrain_type)
 
         # NOTE: test the difference
-        # mj_model.opt.timestep = jnp.array(self.config.dt)
-        # mj_model.opt.iterations = 6
-        # mj_model.opt.ls_iterations = 6
-        # mj_model.opt.disableflags = mjx.DisableBit.EULERDAMP
-        # mj_model.opt.solver = mjx.SolverType.CG
+        mj_model.opt.timestep = jnp.array(self.config.dt)
+        mj_model.opt.iterations = 6
+        mj_model.opt.ls_iterations = 6
+        mj_model.opt.disableflags = mjx.DisableBit.EULERDAMP
+        mj_model.opt.solver = mjx.SolverType.CG
 
         return mj_model
 
@@ -534,7 +535,7 @@ if __name__ == "__main__":
     # To run training, use the following command:
     #   python -m ksim_kbot.walking.walking_joystick_rnn
     # To visualize the environment, use the following command:
-    #   python -m ksim_kbot.walking.walking_joystick_rnn run_environment=True
+    #   python -m ksim_kbot.walking.walking_joystick_rnn run_model_viewer=True
     KbotWalkingJoystickRNNTask.launch(
         KbotWalkingJoystickRNNTaskConfig(
             num_envs=4096,
