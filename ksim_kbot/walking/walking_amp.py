@@ -353,8 +353,10 @@ class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
         return reference_motion
 
     def get_real_motions(self, mj_model: mujoco.MjModel) -> Array:
+        reference_motion = self.create_reference_motion(mj_model)
+        cartesian_poses = jax.tree.map(lambda x: np.asarray(x.array), reference_motion.cartesian_poses)
         return jnp.array(
-            self.reference_motion.qpos.array[None, ..., 7:]
+            reference_motion.qpos.array[None, ..., 7:]
         )  # Remove the root joint absolute coordinates + orientation.
 
     def trajectory_to_motion(self, trajectory: ksim.Trajectory) -> Array:
@@ -588,6 +590,7 @@ class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
             common.GVecTermination.create(physics_model, sensor_name="upvector_origin"),
+            ksim.MinimumHeightTermination(min_height=0.2),
         ]
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
