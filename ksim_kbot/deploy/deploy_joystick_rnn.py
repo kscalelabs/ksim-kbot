@@ -40,9 +40,13 @@ class UserInput:
             logger.info(f"Joystick: {self.joystick_command}")
         elif key == "=": # + Key without shift!
             self.action_scale += self.action_scale_step_size
+            if self.action_scale > 1.0:
+                self.action_scale = 1.0
             logger.info(f"Action Scale Increased: {self.action_scale}")
         elif key == "-":
             self.action_scale += -self.action_scale_step_size
+            if self.action_scale < 0.0:
+                self.action_scale = 0.0
             logger.info(f"Action Scale Decreased: {self.action_scale}")
         elif key == "0":
             self.action_scale = self.initial_action_scale
@@ -53,12 +57,23 @@ class JoystickRNNDeploy(Deploy):
     def __init__(
         self, enable_joystick: bool, model_path: str, mode: str, ip: str, carry_shape: tuple[int, int], action_scale: float, action_scale_step_size: float
     ) -> None:
+        
         super().__init__(model_path, mode, ip)
         self.enable_joystick = enable_joystick
 
         self.joystick_step_size = 0.01
         if not self.enable_joystick:
             self.joystick_step_size = 0.0
+
+        # Action Scale Limits
+        if action_scale > 1.0:
+            action_scale = 1.0
+            logger.warning("Action Scale Exceeded 1.0, Clipping to 1.0")
+        if action_scale < 0.0:
+            action_scale = 0.0
+            logger.warning("Action Scale Less than 0.0, Clipping to 0.0")
+
+        logger.info(f"Action Scale: {action_scale}")
 
         self.user_input = UserInput(joystick_step_size=self.joystick_step_size, action_scale=action_scale, action_scale_step_size=action_scale_step_size)
         self.controller = KeyboardController(key_handler=self.user_input.update, timeout=0.001)
@@ -111,9 +126,6 @@ class JoystickRNNDeploy(Deploy):
             "imu_accel": [],
             "euler_angles": [],
         }
-
-        logger.info("KBOT Deploy Initialization")
-
 
     def get_command(self) -> np.ndarray:
         """Get command from the joystick."""
