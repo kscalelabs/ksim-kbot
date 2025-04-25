@@ -1,17 +1,19 @@
-"""Common rewards for K-Bot 2.
+"""Common rewards for K-Bot.
 
 If some logic will become more general, we can move it to ksim or xax.
 """
 
-from typing import Literal, Self
+from typing import Callable, Literal, Self
 
 import attrs
+import jax
 import jax.numpy as jnp
 import ksim
 import xax
 from jax.scipy.spatial.transform import Rotation
 from jaxtyping import Array
 from ksim.utils.mujoco import get_qpos_data_idxs_by_name
+from ksim.utils.priors import MotionReferenceData, local_to_absolute
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -471,3 +473,102 @@ class TargetHeightReward(ksim.Reward):
             xax.get_norm(error, self.norm), temp=self.temp, monotonic_fn=self.monotonic_fn
         )
         return reward_value
+
+
+@attrs.define(frozen=True, kw_only=True)
+class CartesianReferenceMotionReward(ksim.Reward):
+    reference_motion_data: MotionReferenceData
+    mj_base_id: int
+    norm: xax.NormType = attrs.field(default="l1")
+    sensitivity: float = attrs.field(default=5.0)
+
+    def get_tracked_pos(self, trajectory: ksim.Trajectory) -> xax.FrozenDict[int, Array]:
+        assert trajectory.aux_outputs is not None
+        return trajectory.aux_outputs["tracked_pos"]
+
+    def get_target_pos(self, trajectory: ksim.Trajectory) -> xax.FrozenDict[int, Array]:
+        return self.reference_motion_data.get_cartesian_pose_at_time(trajectory.timestep)
+
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        target_pos = self.get_target_pos(trajectory)
+        tracked_pos = self.get_tracked_pos(trajectory)
+        target_pos_filtered: xax.FrozenDict[int, Array] = xax.FrozenDict(
+            {k: v for k, v in target_pos.items() if k in tracked_pos}
+        )
+        error = jax.tree.map(
+            lambda target, tracked: xax.get_norm(target - tracked, self.norm), target_pos_filtered, tracked_pos
+        )
+        mean_error_over_bodies = jax.tree.reduce(jnp.add, error) / len(error)
+        mean_error = mean_error_over_bodies.mean(axis=-1)
+        reward = jnp.exp(-mean_error * self.sensitivity)
+        return reward
+
+    def get_markers(self) -> list[ksim.Marker]:
+        markers = []
+
+        # Add markers for reference positions (in blue)
+        for body_id in self.reference_motion_data.cartesian_poses.keys():
+            markers.append(
+                ksim.Marker.sphere(
+                    pos=(0.0, 0.0, 0.0),
+                    radius=0.03,
+                    rgba=(0.0, 0.0, 1.0, 0.5),  # blue = actual
+                    update_fn=create_tracked_marker_update_fn(body_id, self.mj_base_id, self.get_tracked_pos),
+                )
+            )
+
+            markers.append(
+                ksim.Marker.sphere(
+                    pos=(0.0, 0.0, 0.0),
+                    radius=0.03,
+                    rgba=(1.0, 0.0, 0.0, 0.5),  # red = target
+                    update_fn=create_target_marker_update_fn(body_id, self.mj_base_id, self.get_target_pos),
+                )
+            )
+
+        return markers
+
+
+def create_tracked_marker_update_fn(
+    body_id: int, mj_base_id: int, tracked_pos_fn: Callable[[ksim.Trajectory], xax.FrozenDict[int, Array]]
+) -> Callable[[ksim.Marker, ksim.Trajectory], None]:
+    """Factory function to create a marker update for the tracked positions."""
+
+    def _actual_update_fn(marker: ksim.Marker, transition: ksim.Trajectory) -> None:
+        tracked_pos = tracked_pos_fn(transition)
+        abs_pos = local_to_absolute(transition.xpos, tracked_pos[body_id], mj_base_id)
+        marker.pos = tuple(abs_pos)
+
+    return _actual_update_fn
+
+
+def create_target_marker_update_fn(
+    body_id: int, mj_base_id: int, target_pos_fn: Callable[[ksim.Trajectory], xax.FrozenDict[int, Array]]
+) -> Callable[[ksim.Marker, ksim.Trajectory], None]:
+    """Factory function to create a marker update for the target positions."""
+
+    def _target_update_fn(marker: ksim.Marker, transition: ksim.Trajectory) -> None:
+        target_pos = target_pos_fn(transition)
+        abs_pos = local_to_absolute(transition.xpos, target_pos[body_id], mj_base_id)
+        marker.pos = tuple(abs_pos)
+
+    return _target_update_fn
+
+
+@attrs.define(frozen=True, kw_only=True)
+class QposReferenceMotionReward(ksim.Reward):
+    reference_motion_data: MotionReferenceData
+    joint_weights: tuple[float, ...] = attrs.field()
+    norm: xax.NormType = attrs.field(default="l1")
+    sensitivity: float = attrs.field(default=5.0)
+    speed: float = attrs.field(default=1.0)
+
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        qpos = trajectory.qpos
+        effective_time = trajectory.timestep * self.speed
+        reference_qpos = self.reference_motion_data.get_qpos_at_time(effective_time)
+        error = xax.get_norm(reference_qpos[..., 7:] - qpos[..., 7:], self.norm)
+        error = error * jnp.array(self.joint_weights)
+        mean_error = error.mean(axis=-1)
+        reward = jnp.exp(-mean_error * self.sensitivity)
+        return reward
