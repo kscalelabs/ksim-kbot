@@ -70,7 +70,7 @@ class RnnActor(eqx.Module):
         # Project to output
         self.output_proj = eqx.nn.Linear(
             in_features=hidden_size,
-            out_features=num_outputs * 3 * num_mixtures,
+            out_features=num_outputs * 2,
             key=key,
         )
 
@@ -89,19 +89,12 @@ class RnnActor(eqx.Module):
             out_carries.append(x_n)
         out_n = self.output_proj(x_n)
 
-        # Splits the predictions into means, standard deviations, and logits.
-        slice_len = NUM_JOINTS * self.num_mixtures
-        mean_nm = out_n[:slice_len].reshape(NUM_JOINTS, self.num_mixtures)
-        std_nm = out_n[slice_len : slice_len * 2].reshape(NUM_JOINTS, self.num_mixtures)
-        logits_nm = out_n[slice_len * 2 :].reshape(NUM_JOINTS, self.num_mixtures)
+        mean_n = out_n[..., : self.num_outputs]
+        std_n = out_n[..., self.num_outputs :]
 
         # Softplus and clip to ensure positive standard deviations.
-        std_nm = jnp.clip((jax.nn.softplus(std_nm) + self.min_std) * self.var_scale, max=self.max_std)
-
-        dist_n = distrax.MixtureSameFamily(
-            mixture_distribution=distrax.Categorical(logits=logits_nm),
-            components_distribution=distrax.Normal(mean_nm, std_nm),
-        )
+        std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
+        dist_n = distrax.Normal(mean_n, std_n)
 
         return dist_n, jnp.stack(out_carries, axis=0)
 
