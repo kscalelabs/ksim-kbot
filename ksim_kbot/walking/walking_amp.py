@@ -359,8 +359,8 @@ class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
         return trajectory.qpos[..., 7:]  # Remove the root joint absolute coordinates + orientation.
 
     def motion_to_qpos(self, motion: Array) -> Array:
-        qpos_root_init = jnp.array([0.0, 0.0, 1.5, 1.0, 0.0, 0.0, 0.0])
-        qpos_root_broadcast = jnp.broadcast_to(qpos_root_init, (*motion.shape[:-1], 7))
+        qpos_root_init = jnp.array([0.0, 0.0, 1.5])
+        qpos_root_broadcast = jnp.broadcast_to(qpos_root_init, (*motion.shape[:-1], 3))
         return jnp.concatenate([qpos_root_broadcast, motion], axis=-1)
 
     def get_ppo_variables(
@@ -677,8 +677,9 @@ if __name__ == "__main__":
             max_grad_norm=0.5,
             # Gait matching parameters.
             rotate_bvh_euler=(0, np.pi / 2, 0),
+            bvh_offset=(0.02, 0.09, -0.29),
             bvh_scaling_factor=1 / 100,
-            mj_base_name="pelvis",
+            mj_base_name="floating_base_link",
             reference_base_name="CC_Base_Pelvis",
             export_for_inference=True,
             only_save_most_recent=False,
