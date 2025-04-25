@@ -23,8 +23,10 @@ class UserInput:
         self.action_scale = action_scale
         self.action_scale_step_size = action_scale_step_size
 
-        logger.info(f"User Input Initialized: Joystick Step Size: {self.joystick_step_size}, Action Scale: {self.action_scale}, Action Scale Step Size: {self.action_scale_step_size}")
-        
+        logger.info(
+            f"User Input Initialized: Joystick Step Size: {self.joystick_step_size}, Action Scale: {self.action_scale}, Action Scale Step Size: {self.action_scale_step_size}"
+        )
+
     async def update(self, key: str) -> None:
         if key == "a":
             self.joystick_command[1] += self.joystick_step_size
@@ -38,26 +40,32 @@ class UserInput:
         elif key == "s":
             self.joystick_command[0] += -1 * self.joystick_step_size
             logger.info(f"Joystick: {self.joystick_command}")
-        elif key == "=": # + Key without shift!
+        elif key == "=":  # + Key without shift!
             self.action_scale += self.action_scale_step_size
-            if self.action_scale > 1.0:
-                self.action_scale = 1.0
+            self.action_scale = min(self.action_scale, 1.0)
             logger.info(f"Action Scale Increased: {self.action_scale}")
         elif key == "-":
             self.action_scale += -self.action_scale_step_size
-            if self.action_scale < 0.0:
-                self.action_scale = 0.0
+            self.action_scale = max(self.action_scale, 0.0)
             logger.info(f"Action Scale Decreased: {self.action_scale}")
         elif key == "0":
             self.action_scale = self.initial_action_scale
             logger.info(f"Action Scale Reset: {self.action_scale}")
+
+
 class JoystickRNNDeploy(Deploy):
     """Deploy class for joystick-controlled policies."""
 
     def __init__(
-        self, enable_joystick: bool, model_path: str, mode: str, ip: str, carry_shape: tuple[int, int], action_scale: float, action_scale_step_size: float
+        self,
+        enable_joystick: bool,
+        model_path: str,
+        mode: str,
+        ip: str,
+        carry_shape: tuple[int, int],
+        action_scale: float,
+        action_scale_step_size: float,
     ) -> None:
-        
         super().__init__(model_path, mode, ip)
         self.enable_joystick = enable_joystick
 
@@ -75,7 +83,11 @@ class JoystickRNNDeploy(Deploy):
 
         logger.info(f"Action Scale: {action_scale}")
 
-        self.user_input = UserInput(joystick_step_size=self.joystick_step_size, action_scale=action_scale, action_scale_step_size=action_scale_step_size)
+        self.user_input = UserInput(
+            joystick_step_size=self.joystick_step_size,
+            action_scale=action_scale,
+            action_scale_step_size=action_scale_step_size,
+        )
         self.controller = KeyboardController(key_handler=self.user_input.update, timeout=0.001)
 
         self.gait = np.asarray([1.25])
@@ -197,7 +209,7 @@ class JoystickRNNDeploy(Deploy):
     async def preflight(self) -> None:
         """Preflight the robot."""
         await super().preflight()
-        
+
         await self.controller.start()
 
     async def postflight(self) -> None:
@@ -260,7 +272,9 @@ def main() -> None:
     )
     parser.add_argument("--enable_joystick", action="store_true", help="Enable joystick")
     parser.add_argument("--scale_action", type=float, default=0.1, help="Action Scale, default 0.1")
-    parser.add_argument("--scale_action_step_size", type=float, default=0.05, help="Action Scale Step Size, default 0.05")
+    parser.add_argument(
+        "--scale_action_step_size", type=float, default=0.05, help="Action Scale Step Size, default 0.05"
+    )
     parser.add_argument("--ip", type=str, default="localhost", help="IP address of KOS")
     parser.add_argument("--episode_length", type=int, default=30, help="Length of episode in seconds")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
@@ -277,7 +291,15 @@ def main() -> None:
     logger.remove()
     logger.add(sys.stderr, level=log_level)  # This will keep the default colorized format
 
-    deploy = JoystickRNNDeploy(args.enable_joystick, model_path, args.mode, args.ip, carry_shape=(5, 256), action_scale=args.scale_action, action_scale_step_size=args.scale_action_step_size)
+    deploy = JoystickRNNDeploy(
+        args.enable_joystick,
+        model_path,
+        args.mode,
+        args.ip,
+        carry_shape=(5, 256),
+        action_scale=args.scale_action,
+        action_scale_step_size=args.scale_action_step_size,
+    )
 
     try:
         asyncio.run(deploy.run(args.episode_length))
