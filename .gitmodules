@@ -1,3 +1,6 @@
 [submodule "ksim_kbot/kscale-assets"]
 	path = ksim_kbot/kscale-assets
 	url = git@github.com:kscalelabs/kscale-assets.git
+[submodule "ksim_kbot/deploy/deployment_logs"]
+	path = ksim_kbot/deploy/deployment_logs
+	url = git@github.com:kscalelabs/deployment_logs.git
