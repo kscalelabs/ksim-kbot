@@ -44,14 +44,14 @@ def find_deployment_file(date_str: str, log_type: str) -> tuple[dict, str, str] 
     elif log_type == "real-deploy":
         pattern = f"real-deploy_{date_str}*.pkl"
     else:
-        print(f"Invalid log type: {log_type}")
+        logger.error(f"Invalid log type: {log_type}")
         return None
 
     # Look for files in the date folder
     pkl_files = glob.glob(os.path.join(date_folder, pattern))
 
     if not pkl_files:
-        print(f"No {log_type} files found in folder {date_str}.")
+        logger.error(f"No {log_type} files found in folder {date_str}.")
         return None
 
     # Extract timestamps and sort files
