@@ -120,8 +120,6 @@ class WalkingAmpTaskConfig(WalkingRnnRefMotionTaskConfig, ksim.AMPConfig):
         help="The depth for the discriminator.",
     )
 
-    amp_scale: float = xax.field(value=1.0)
-
     max_discriminator_grad_norm: float = xax.field(
         value=2.0,
         help="Maximum gradient norm for clipping.",
@@ -130,34 +128,8 @@ class WalkingAmpTaskConfig(WalkingRnnRefMotionTaskConfig, ksim.AMPConfig):
         value=1e-3,
         help="Learning rate for the discriminator.",
     )
-    increase_threshold: float = xax.field(
-        value=3.0,
-        help="Increase the curriculum level when the mean trajectory length is above this threshold.",
-    )
-    decrease_threshold: float = xax.field(
-        value=1.0,
-        help="Decrease the curriculum level when the mean trajectory length is below this threshold.",
-    )
-    bvh_path: str = xax.field(
-        value=str(Path(__file__).parent.parent / "reference_motions" / "walk_normal_kbot.bvh"),
-        help="The path to the BVH file.",
-    )
-    rotate_bvh_euler: tuple[float, float, float] = xax.field(
-        value=(0, 0, 0),
-        help="Optional rotation to ensure the BVH tree matches the Mujoco model.",
-    )
-    hidden_size: int = xax.field(
-        value=512,
-        help="The hidden size for the MLPs.",
-    )
-    depth: int = xax.field(
-        value=2,
-        help="The depth for the MLPs.",
-    )
-    num_mixtures: int = xax.field(
-        value=3,
-        help="The number of mixtures for the actor.",
-    )
+
+    amp_scale: float = xax.field(value=1.0)
 
 
 Config = TypeVar("Config", bound=WalkingAmpTaskConfig)
