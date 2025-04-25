@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import os
 import sys
+import time
 
 import numpy as np
 from loguru import logger  # to be removed
@@ -48,6 +49,9 @@ class JoystickDeploy(FixedArmDeploy):
         self.phase = np.array([0, np.pi])
 
         self.rollout_dict = {
+            "model_name": "/".join(model_path.split("/")[-2:]),
+            "timestamp": [],
+            "loop_overrun_time": [],
             "command": [],
             "pos_diff": [],
             "vel_obs": [],
@@ -98,14 +102,14 @@ class JoystickDeploy(FixedArmDeploy):
 
         cmd = self.get_command()
 
-        if self.mode in ["sim", "real-check", "real-deploy"]:
-            self.rollout_dict["pos_diff"].append(pos_diff)
-            self.rollout_dict["vel_obs"].append(vel_obs)
-            self.rollout_dict["imu_accel"].append(imu_accel)
-            self.rollout_dict["imu_gyro"].append(imu_gyro)
-            self.rollout_dict["controller_cmd"].append(cmd)
-            self.rollout_dict["prev_action"].append(self.prev_action)
-            self.rollout_dict["phase"].append(phase_vec)
+        self.rollout_dict["timestamp"].append(time.time())
+        self.rollout_dict["pos_diff"].append(pos_diff)
+        self.rollout_dict["vel_obs"].append(vel_obs)
+        self.rollout_dict["imu_accel"].append(imu_accel)
+        self.rollout_dict["imu_gyro"].append(imu_gyro)
+        self.rollout_dict["controller_cmd"].append(cmd)
+        self.rollout_dict["prev_action"].append(self.prev_action)
+        self.rollout_dict["phase"].append(phase_vec)
 
         observation = np.concatenate(
             [phase_vec, pos_diff, vel_obs, imu_accel, imu_gyro, cmd, self.gait, self.prev_action]
@@ -124,7 +128,7 @@ def main() -> None:
     parser.add_argument("--enable_joystick", action="store_true", help="Enable joystick")
     parser.add_argument("--scale_action", type=float, default=0.1, help="Action Scale, default 0.1")
     parser.add_argument("--ip", type=str, default="localhost", help="IP address of KOS")
-    parser.add_argument("--episode_length", type=int, default=5, help="Length of episode in seconds")
+    parser.add_argument("--episode_length", type=int, default=30, help="Length of episode in seconds")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
     args = parser.parse_args()
@@ -138,7 +142,6 @@ def main() -> None:
     # Set global log level
     logger.remove()
     logger.add(sys.stderr, level=log_level)  # This will keep the default colorized format
-    logger.add(f"{file_dir}/deployment_checks/last_deployment.log", level=log_level)
 
     deploy = JoystickDeploy(args.enable_joystick, model_path, args.mode, args.ip)
     deploy.ACTION_SCALE = args.scale_action
@@ -150,6 +153,14 @@ def main() -> None:
         asyncio.run(deploy.disable())
         raise e
 
+
+"""
+python -m ksim_kbot.deploy.deploy_joystick \
+--model_path noisy_joystick_example/tf_model_1576 \
+--mode sim \
+--scale_action 1.0 \
+--debug
+"""
 
 if __name__ == "__main__":
     main()
