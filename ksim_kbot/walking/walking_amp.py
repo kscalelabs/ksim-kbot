@@ -319,8 +319,7 @@ class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
     def call_discriminator(self, model: Discriminator, motion: Array) -> Array:
         return model.forward(motion).squeeze()
 
-    # NOTE - use the general motion class
-    def get_real_motions(self, mj_model: mujoco.MjModel) -> Array:
+    def create_reference_motion(self, mj_model: mujoco.MjModel) -> MotionReferenceData:
         root: BvhioJoint = bvhio.readAsHierarchy(self.config.bvh_path)
         reference_base_id = ksim.get_reference_joint_id(root, self.config.reference_base_name)
         mj_base_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, self.config.mj_base_name)
@@ -351,8 +350,11 @@ class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
             verbose=False,
         )
 
+        return reference_motion
+
+    def get_real_motions(self, mj_model: mujoco.MjModel) -> Array:
         return jnp.array(
-            reference_motion.qpos.array[None, ..., 7:]
+            self.reference_motion.qpos.array[None, ..., 7:]
         )  # Remove the root joint absolute coordinates + orientation.
 
     def trajectory_to_motion(self, trajectory: ksim.Trajectory) -> Array:
@@ -662,7 +664,7 @@ if __name__ == "__main__":
             increase_threshold=5.0,
             decrease_threshold=3.0,
             # Simulation parameters.
-            valid_every_n_seconds=700,
+            valid_every_n_seconds=240,
             iterations=8,
             ls_iterations=8,
             dt=0.005,
