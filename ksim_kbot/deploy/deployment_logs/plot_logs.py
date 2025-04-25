@@ -80,7 +80,7 @@ def load_latest_deployment(log_type: str = "real-check") -> tuple[dict, str] | N
     pkl_files = glob.glob(os.path.join(current_dir, f"{log_type}_*.pkl"))
 
     if not pkl_files:
-        print(f"No {log_type} pickle files found.")
+        logger.error("No %s pickle files found.", log_type)
         return None
 
     # Extract timestamps and sort files
@@ -98,11 +98,11 @@ def load_latest_deployment(log_type: str = "real-check") -> tuple[dict, str] | N
                 timestamp = datetime.strptime(timestamp_str, "%Y%m%d")
             file_timestamps.append((file, timestamp))
         except ValueError as e:
-            logger.warning(f"Could not parse timestamp from {filename}: {e}")
+            logger.warning("Could not parse timestamp from %s: %s", filename, e)
             continue
 
     if not file_timestamps:
-        logger.warning(f"No valid {log_type} files found.")
+        logger.warning("No valid %s files found.", log_type)
         return None
 
     # Sort by timestamp (newest first)
@@ -114,7 +114,7 @@ def load_latest_deployment(log_type: str = "real-check") -> tuple[dict, str] | N
     # Get the latest file
     latest_file = file_timestamps[0][0]
     latest_filename = os.path.basename(latest_file)
-    print(f"Loading latest {log_type} file: {latest_filename}")
+    logger.info("Loading latest %s file: %s", log_type, latest_filename)
 
     # Load the pickle file
     with open(latest_file, "rb") as f:
@@ -124,23 +124,15 @@ def load_latest_deployment(log_type: str = "real-check") -> tuple[dict, str] | N
 
 
 def find_deployment_file(date_str: str, log_type: str) -> tuple[dict, str, str] | None:
-    """Find the latest deployment file of a given type and date.
-
-    Checks for a folder with the date name and looks for files inside.
-    Only searches within date-named folders, not directly in the deployment_logs directory.
-    """
-    # Get the directory of this script
     current_dir = os.path.dirname(os.path.abspath(__file__))
 
-    # Check if there's a folder with the date name
     date_folder = os.path.join(current_dir, date_str)
     if not os.path.isdir(date_folder):
-        print(f"Date folder not found: {date_str}")
+        logger.error("Date folder not found: %s", date_str)
         return None
 
-    print(f"Found date folder: {date_str}")
+    logger.info("Found date folder: %s", date_str)
 
-    # Construct pattern based on log type
     if log_type == "sim":
         pattern = f"sim_{date_str}*.pkl"
     elif log_type == "real-check":
@@ -148,14 +140,13 @@ def find_deployment_file(date_str: str, log_type: str) -> tuple[dict, str, str] 
     elif log_type == "real-deploy":
         pattern = f"real-deploy_{date_str}*.pkl"
     else:
-        print(f"Invalid log type: {log_type}")
+        logger.error("Invalid log type: %s", log_type)
         return None
 
-    # Look for files in the date folder
     pkl_files = glob.glob(os.path.join(date_folder, pattern))
 
     if not pkl_files:
-        print(f"No {log_type} files found in folder {date_str}.")
+        logger.error("No %s files found in folder %s.", log_type, date_str)
         return None
 
     # Extract timestamps and sort files
@@ -174,11 +165,11 @@ def find_deployment_file(date_str: str, log_type: str) -> tuple[dict, str, str] 
 
             file_timestamps.append((file, timestamp))
         except (IndexError, ValueError) as e:
-            print(f"Warning: Could not parse timestamp from {filename}: {e}")
+            logger.warning("Could not parse timestamp from %s: %s", filename, e)
             continue
 
     if not file_timestamps:
-        print(f"No valid {log_type} files found in folder {date_str}.")
+        logger.error("No valid %s files found in folder %s.", log_type, date_str)
         return None
 
     # Sort by timestamp (newest first)
@@ -187,7 +178,7 @@ def find_deployment_file(date_str: str, log_type: str) -> tuple[dict, str, str] 
     # Get the latest file
     latest_file = file_timestamps[0][0]
     latest_filename = os.path.basename(latest_file)
-    print(f"Loading deployment file: {latest_filename}")
+    logger.info("Loading deployment file: %s", latest_filename)
 
     # Load the pickle file
     try:
@@ -195,7 +186,7 @@ def find_deployment_file(date_str: str, log_type: str) -> tuple[dict, str, str] 
             data = pickle.load(f)
         return data, latest_filename, date_folder
     except Exception as e:
-        print(f"Error loading {latest_filename}: {e}")
+        logger.error("Error loading %s: %s", latest_filename, e)
         return None
 
 
@@ -662,19 +653,18 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    logger.info("Plotting deployment logs for %s on %s", args.type, args.date)
+
     if args.date and args.type:
-        # User provided date and type via command line
         deployment_data = find_deployment_file(args.date, args.type)
     else:
         raise ValueError("Invalid date or type provided")
 
     if deployment_data:
         data, filename, data_dir = deployment_data
-        # Create output directory in the same location as the data directory
-        # Use the file prefix (without extension) as the folder name
         file_prefix = os.path.splitext(filename)[0]
         output_dir = os.path.join(data_dir, file_prefix)
-
+        
         logger.info("Generating plots for %s...", filename)
         plot_deployment_data(data, output_dir)
     else:
