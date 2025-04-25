@@ -5,7 +5,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generic, TypeVar
+from typing import Callable, Generic, TypeVar
 
 import bvhio
 import distrax
@@ -40,6 +40,7 @@ from ksim_kbot.walking.walking_reference_motion_rnn import (
     WalkingRnnRefMotionTaskConfig,
 )
 from ksim_kbot.walking.walking_rnn import RnnActor, RnnCritic, RnnModel
+import ksim_kbot.rewards as kbot_rewards
 
 NUM_JOINTS = 20
 NUM_ACTOR_INPUTS_REF -= 6
@@ -84,7 +85,7 @@ logger = logging.getLogger(__name__)
 class Discriminator(eqx.Module):
     """AMP discriminator."""
 
-    mlp: eqx.nn.MLP
+    layers: list[Callable[[Array], Array]]
 
     def __init__(
         self,
@@ -92,20 +93,47 @@ class Discriminator(eqx.Module):
         *,
         hidden_size: int,
         depth: int,
+        num_frames: int,
     ) -> None:
-        num_inputs = NUM_JOINTS + 4
+        num_inputs = NUM_JOINTS
         num_outputs = 1
 
-        self.mlp = eqx.nn.MLP(
-            in_size=num_inputs,
-            out_size=num_outputs,
-            width_size=hidden_size,
-            depth=depth,
-            key=key,
-        )
+        layers: list[Callable[[Array], Array]] = []
+        for _ in range(depth):
+            key, subkey = jax.random.split(key)
+            layers += [
+                eqx.nn.Conv1d(
+                    in_channels=num_inputs,
+                    out_channels=hidden_size,
+                    kernel_size=num_frames,
+                    # We left-pad the input so that the discriminator output
+                    # at time T can be reasonably interpretted as the logit
+                    # for the motion from time T - N to T. In other words, we
+                    # this means that all the reward for time T will be based
+                    # on the motion from the previous N frames.
+                    padding=[(num_frames - 1, 0)],
+                    key=subkey,
+                ),
+                jax.nn.relu,
+            ]
+            num_inputs = hidden_size
+
+        layers += [
+            eqx.nn.Conv1d(
+                in_channels=num_inputs,
+                out_channels=num_outputs,
+                kernel_size=1,
+                key=key,
+            )
+        ]
+
+        self.layers = layers
 
     def forward(self, x: Array) -> Array:
-        return self.mlp(x)
+        x_nt = x.transpose(1, 0)
+        for layer in self.layers:
+            x_nt = layer(x_nt)
+        return x_nt.squeeze(0)
 
 
 @dataclass
@@ -118,6 +146,11 @@ class WalkingAmpTaskConfig(WalkingRnnRefMotionTaskConfig, ksim.AMPConfig):
     discriminator_depth: int = xax.field(
         value=2,
         help="The depth for the discriminator.",
+    )
+
+    num_frames: int = xax.field(
+        value=10,
+        help="The number of frames to use for the discriminator.",
     )
 
     max_discriminator_grad_norm: float = xax.field(
@@ -250,7 +283,14 @@ class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         # rewards: list[ksim.Reward] = super().get_rewards(physics_model)
-        rewards = [ksim.AMPReward(scale=self.config.amp_scale)]
+        rewards = [
+            ksim.StayAliveReward(scale=1.0),
+            kbot_rewards.LinearVelocityTrackingReward(
+                scale=1.0,
+                stand_still_threshold=0.0,
+            ),
+        ]
+        rewards.append(ksim.AMPReward(scale=self.config.amp_scale))
 
         return rewards
 
@@ -266,6 +306,7 @@ class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
             key,
             hidden_size=self.config.discriminator_hidden_size,
             depth=self.config.discriminator_depth,
+            num_frames=self.config.num_frames,
         )
 
     def get_discriminator_optimizer(self) -> optax.GradientTransformation:
@@ -276,8 +317,7 @@ class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
         return optimizer
 
     def call_discriminator(self, model: Discriminator, motion: Array) -> Array:
-        # return model.forward(motion)
-        return jax.vmap(model.forward)(motion).squeeze(-1)
+        return model.forward(motion).squeeze()
 
     # NOTE - use the general motion class
     def get_real_motions(self, mj_model: mujoco.MjModel) -> Array:
@@ -311,14 +351,15 @@ class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
             verbose=False,
         )
 
-        return jnp.array(reference_motion.qpos.array[None, ..., 3:])  # Remove the root joint absolute coordinates.
+        return jnp.array(reference_motion.qpos.array[None, ..., 7:])  # Remove the root joint absolute coordinates + orientation.
 
     def trajectory_to_motion(self, trajectory: ksim.Trajectory) -> Array:
-        return trajectory.qpos[..., 3:]  # Remove the root joint absolute coordinates.
+        return trajectory.qpos[..., 7:]  # Remove the root joint absolute coordinates + orientation.
 
     def motion_to_qpos(self, motion: Array) -> Array:
-        qpos_init = jnp.array([0.0, 0.0, 1.5])
-        return jnp.concatenate([jnp.broadcast_to(qpos_init, (*motion.shape[:-1], 3)), motion], axis=-1)
+        qpos_root_init = jnp.array([0.0, 0.0, 1.5, 1.0, 0.0, 0.0, 0.0])
+        qpos_root_broadcast = jnp.broadcast_to(qpos_root_init, (*motion.shape[:-1], 7))
+        return jnp.concatenate([qpos_root_broadcast, motion], axis=-1)
 
     def get_ppo_variables(
         self,
@@ -457,6 +498,14 @@ class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
             ksim.ActuatorAccelerationObservation(),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_acc"),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_gyro"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="local_linvel_origin", noise=0.0),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="global_linvel_origin", noise=0.0),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="global_angvel_origin", noise=0.0),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="upvector_origin", noise=0.0),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="orientation_origin", noise=0.0),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="gyro_origin", noise=0.0),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_force", noise=0.0),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_force", noise=0.0),
             common.FeetContactObservation.create(
                 physics_model=physics_model,
                 foot_left_geom_names="KB_D_501L_L_LEG_FOOT_collision_box",
