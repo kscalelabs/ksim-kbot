@@ -110,10 +110,6 @@ class Discriminator(eqx.Module):
 
 @dataclass
 class WalkingAmpTaskConfig(WalkingRnnRefMotionTaskConfig, ksim.AMPConfig):
-    action_scale: float = xax.field(
-        value=1.0,
-        help="The scale to apply to the actions.",
-    )
     # Disciminator parameters.
     discriminator_hidden_size: int = xax.field(
         value=512,
@@ -126,19 +122,6 @@ class WalkingAmpTaskConfig(WalkingRnnRefMotionTaskConfig, ksim.AMPConfig):
 
     amp_scale: float = xax.field(value=1.0)
 
-    # Optimizer parameters.
-    learning_rate: float = xax.field(
-        value=1e-3,
-        help="Learning rate for PPO.",
-    )
-    max_grad_norm: float = xax.field(
-        value=2.0,
-        help="Maximum gradient norm for clipping.",
-    )
-    adam_weight_decay: float = xax.field(
-        value=0.0,
-        help="Weight decay for the Adam optimizer.",
-    )
     max_discriminator_grad_norm: float = xax.field(
         value=2.0,
         help="Maximum gradient norm for clipping.",
@@ -175,40 +158,11 @@ class WalkingAmpTaskConfig(WalkingRnnRefMotionTaskConfig, ksim.AMPConfig):
         value=3,
         help="The number of mixtures for the actor.",
     )
-    bvh_scaling_factor: float = xax.field(
-        value=1.0,
-        help="Scaling factor to ensure the BVH tree matches the Mujoco model.",
-    )
-    bvh_offset: tuple[float, float, float] = xax.field(
-        value=(0.0, 0.0, 0.0),
-        help="Offset to ensure the BVH tree matches the Mujoco model.",
-    )
-    mj_base_name: str = xax.field(
-        value="pelvis",
-        help="The Mujoco body name of the base of the humanoid",
-    )
-    reference_base_name: str = xax.field(
-        value="CC_Base_Pelvis",
-        help="The BVH joint name of the base of the humanoid",
-    )
-    visualize_reference_points: bool = xax.field(
-        value=False,
-        help="Whether to visualize the reference points.",
-    )
-    visualize_reference_motion: bool = xax.field(
-        value=False,
-        help="Whether to visualize the reference motion after running IK.",
-    )
-    robot_urdf_path: str = xax.field(
-        value="ksim_kbot/kscale-assets/kbot-v2-feet/",
-        help="The path to the assets directory for the robot.",
-    )
 
 
 Config = TypeVar("Config", bound=WalkingAmpTaskConfig)
 
 
-# WalkingRnnRefMotionTask[Config],
 class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
     config: Config
     reference_motion_data: MotionReferenceData
@@ -703,8 +657,8 @@ if __name__ == "__main__":
             bvh_scaling_factor=1 / 100,
             mj_base_name="pelvis",
             reference_base_name="CC_Base_Pelvis",
-            # export_for_inference=True,
-            # only_save_most_recent=False,
-            # visualize_reference_motion=False,
+            export_for_inference=True,
+            only_save_most_recent=False,
+            visualize_reference_motion=False,
         ),
     )
