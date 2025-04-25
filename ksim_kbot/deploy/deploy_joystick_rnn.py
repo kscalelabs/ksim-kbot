@@ -7,11 +7,11 @@ import sys
 import time
 
 import numpy as np
+import xax
 from askin import KeyboardController
 from loguru import logger  # to be removed
-from scipy.spatial.transform import Rotation
 
-from ksim_kbot.deploy.deploy import FixedArmDeploy
+from ksim_kbot.deploy.deploy import Deploy
 
 
 class JoystickCommand:
@@ -30,7 +30,7 @@ class JoystickCommand:
             self.command[0] += -1 * self.step_size
 
 
-class JoystickRNNDeploy(FixedArmDeploy):
+class JoystickRNNDeploy(Deploy):
     """Deploy class for joystick-controlled policies."""
 
     def __init__(
@@ -114,12 +114,7 @@ class JoystickRNNDeploy(FixedArmDeploy):
         )
 
         imu_gyro = np.array([imu.gyro_x, imu.gyro_y, imu.gyro_z])
-
-        # r = Rotation.from_euler("xyz", euler_angles)
-        r = Rotation.from_quat(np.array([quat.w, quat.x, quat.y, quat.z]), scalar_first=True)
-        proj_grav_world = r.apply(np.array([0.0, 0.0, 1.0]), inverse=True)
-        projected_gravity = proj_grav_world
-        # print(projected_gravity)
+        projected_gravity = xax.get_projected_gravity_vector_from_quat(np.array([quat.w, quat.x, quat.y, quat.z]))
 
         # * Pos Diff. Difference of current position from default position
         state_dict_pos = {state.actuator_id: state.position for state in actuator_states.states}
@@ -155,9 +150,7 @@ class JoystickRNNDeploy(FixedArmDeploy):
         self.rollout_dict["imu_accel"].append(imu_accel)
         self.rollout_dict["euler_angles"].append(euler_angles)
 
-        observation = np.concatenate(
-            [phase_vec, pos_diff, vel_obs, projected_gravity, imu_gyro, cmd, self.gait]
-        ).reshape(1, -1)
+        observation = np.concatenate([phase_vec, pos_diff, vel_obs, projected_gravity, cmd, self.gait]).reshape(1, -1)
 
         return observation
 
@@ -262,9 +255,9 @@ def main() -> None:
 
 """
 python -m ksim_kbot.deploy.deploy_joystick_rnn \
---model_path joystick_rnn_proj_example/tf_model_2144 \
---mode real-check \
---scale_action 0.01 \
+--model_path noisy_joystick_example/tf_model_1407 \
+--mode sim \
+--scale_action 1.0 \
 --debug
 """
 
