@@ -31,6 +31,7 @@ from ksim.utils.priors import (
 from mujoco_scenes.mjcf import load_mjmodel
 from scipy.spatial.transform import Rotation as R
 
+import ksim_kbot.rewards as kbot_rewards
 from ksim_kbot import common
 from ksim_kbot.standing.standing import MAX_TORQUE
 from ksim_kbot.walking.walking_reference_motion_rnn import (
@@ -40,7 +41,6 @@ from ksim_kbot.walking.walking_reference_motion_rnn import (
     WalkingRnnRefMotionTaskConfig,
 )
 from ksim_kbot.walking.walking_rnn import RnnActor, RnnCritic, RnnModel
-import ksim_kbot.rewards as kbot_rewards
 
 NUM_JOINTS = 20
 NUM_ACTOR_INPUTS_REF -= 6
@@ -351,7 +351,9 @@ class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
             verbose=False,
         )
 
-        return jnp.array(reference_motion.qpos.array[None, ..., 7:])  # Remove the root joint absolute coordinates + orientation.
+        return jnp.array(
+            reference_motion.qpos.array[None, ..., 7:]
+        )  # Remove the root joint absolute coordinates + orientation.
 
     def trajectory_to_motion(self, trajectory: ksim.Trajectory) -> Array:
         return trajectory.qpos[..., 7:]  # Remove the root joint absolute coordinates + orientation.
