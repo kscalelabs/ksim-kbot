@@ -98,11 +98,11 @@ def load_latest_deployment(log_type: str = "real-check") -> tuple[dict, str] | N
                 timestamp = datetime.strptime(timestamp_str, "%Y%m%d")
             file_timestamps.append((file, timestamp))
         except ValueError as e:
-            print(f"Warning: Could not parse timestamp from {filename}: {e}")
+            logger.warning(f"Could not parse timestamp from {filename}: {e}")
             continue
 
     if not file_timestamps:
-        print(f"No valid {log_type} files found.")
+        logger.warning(f"No valid {log_type} files found.")
         return None
 
     # Sort by timestamp (newest first)
