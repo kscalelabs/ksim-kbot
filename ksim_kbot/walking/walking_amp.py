@@ -30,6 +30,7 @@ from ksim.utils.priors import (
 )
 from mujoco_scenes.mjcf import load_mjmodel
 from scipy.spatial.transform import Rotation as R
+from xax.xax.nn import export
 
 import ksim_kbot.rewards as kbot_rewards
 from ksim_kbot import common
@@ -144,7 +145,7 @@ class WalkingAmpTaskConfig(WalkingRnnRefMotionTaskConfig, ksim.AMPConfig):
         help="The hidden size for the discriminator.",
     )
     discriminator_depth: int = xax.field(
-        value=2,
+        value=3,
         help="The depth for the discriminator.",
     )
 
@@ -284,11 +285,13 @@ class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         # rewards: list[ksim.Reward] = super().get_rewards(physics_model)
         rewards = [
-            ksim.StayAliveReward(scale=1.0),
+            ksim.StayAliveReward(scale=5.0),
             kbot_rewards.LinearVelocityTrackingReward(
                 scale=1.0,
                 stand_still_threshold=0.0,
             ),
+            ksim.AngularVelocityPenalty(index="x", scale=-0.01),
+            ksim.AngularVelocityPenalty(index="y", scale=-0.01),
         ]
         rewards.append(ksim.AMPReward(scale=self.config.amp_scale))
 
@@ -354,7 +357,7 @@ class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
 
     def get_real_motions(self, mj_model: mujoco.MjModel) -> Array:
         reference_motion = self.create_reference_motion(mj_model)
-        cartesian_poses = jax.tree.map(lambda x: np.asarray(x.array), reference_motion.cartesian_poses)
+        # cartesian_poses = jax.tree.map(lambda x: np.asarray(x.array), reference_motion.cartesian_poses)
         return jnp.array(
             reference_motion.qpos.array[None, ..., 7:]
         )  # Remove the root joint absolute coordinates + orientation.
@@ -642,6 +645,64 @@ class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
             )
         else:
             super().run()
+
+    def make_export_model(self, model: RnnActor, stochastic: bool = False, batched: bool = False) -> Callable:
+        """Makes a callable inference function that directly takes a flattened input vector and returns an action.
+
+        Returns:
+            A tuple containing the inference function and the size of the input vector.
+        """
+
+        def deterministic_model_fn(obs: Array, carry: Array) -> tuple[Array, Array]:
+            dist, carry = model.actor.call_flat_obs(obs, carry)
+            return dist.mode(), carry
+
+        def stochastic_model_fn(obs: Array, carry: Array) -> tuple[Array, Array]:
+            dist, carry = model.actor.call_flat_obs(obs, carry)
+            return dist.sample(seed=jax.random.PRNGKey(0)), carry
+
+        if stochastic:
+            model_fn = stochastic_model_fn
+        else:
+            model_fn = deterministic_model_fn
+
+        if batched:
+
+            def batched_model_fn(obs: Array, carry: Array) -> tuple[Array, Array]:
+                return jax.vmap(model_fn)(obs, carry)
+
+            return batched_model_fn
+
+        return model_fn
+
+    def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
+        if not self.config.export_for_inference:
+            return state
+
+        model: RnnModel = self.load_ckpt(ckpt_path, part="model")[0]
+
+        model_fn = self.make_export_model(model, stochastic=False, batched=True)
+        input_shapes = [
+            (NUM_ACTOR_INPUTS_REF,),
+            (
+                self.config.depth,
+                self.config.hidden_size,
+            ),
+        ]
+
+        tf_path = (
+            ckpt_path.parent / "tf_model"
+            if self.config.only_save_most_recent
+            else ckpt_path.parent / f"tf_model_{state.num_steps}"
+        )
+
+        export(
+            model_fn,
+            input_shapes,
+            tf_path,
+        )
+
+        return state
 
 
 if __name__ == "__main__":
