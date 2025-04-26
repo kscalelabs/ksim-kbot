@@ -25,6 +25,7 @@ out*/
 # Training artifacts
 run_*/
 experimental/
+*.npz
 
 # Deployment Assets
 # */deploy/assets/*/*
