@@ -3,9 +3,8 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Generic, TypeVar
+from typing import Generic, TypeVar
 
-import attrs
 import bvhio
 import distrax
 import glm
@@ -24,14 +23,12 @@ from ksim.utils.priors import (
     generate_reference_motion,
     get_local_xpos,
     get_reference_joint_id,
-    local_to_absolute,
     visualize_reference_motion,
 )
 from scipy.spatial.transform import Rotation as R
 
 import ksim_kbot.rewards as kbot_rewards
 from ksim_kbot import common
-from ksim_kbot.walking.walking_reference_motion import NUM_JOINTS, CartesianReferenceMotionReward
 from ksim_kbot.walking.walking_rnn import (
     RnnActor,
     RnnCritic,
@@ -39,6 +36,8 @@ from ksim_kbot.walking.walking_rnn import (
     WalkingRnnTask,
     WalkingRnnTaskConfig,
 )
+
+NUM_JOINTS = 20
 
 HUMANOID_REFERENCE_MAPPINGS = (
     MotionReferenceMapping("CC_Base_L_ThighTwist01", "RS03_5"),  # hip
@@ -120,51 +119,6 @@ class WalkingRnnRefMotionTaskConfig(WalkingRnnTaskConfig):
 
 
 Config = TypeVar("Config", bound=WalkingRnnRefMotionTaskConfig)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class QposReferenceMotionReward(ksim.Reward):
-    reference_motion_data: MotionReferenceData
-    norm: xax.NormType = attrs.field(default="l1")
-    sensitivity: float = attrs.field(default=5.0)
-    joint_weights: tuple[float, ...] = attrs.field(default=tuple([1.0] * NUM_JOINTS))
-    speed: float = attrs.field(default=1.0)
-
-    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        qpos = trajectory.qpos
-        effective_time = trajectory.timestep * self.speed
-        reference_qpos = self.reference_motion_data.get_qpos_at_time(effective_time)
-        error = xax.get_norm(reference_qpos[..., 7:] - qpos[..., 7:], self.norm)
-        error = error * jnp.array(self.joint_weights)
-        mean_error = error.mean(axis=-1)
-        reward = jnp.exp(-mean_error * self.sensitivity)
-        return reward
-
-
-def create_tracked_marker_update_fn(
-    body_id: int, mj_base_id: int, tracked_pos_fn: Callable[[ksim.Trajectory], xax.FrozenDict[int, Array]]
-) -> Callable[[ksim.Marker, ksim.Trajectory], None]:
-    """Factory function to create a marker update for the tracked positions."""
-
-    def _actual_update_fn(marker: ksim.Marker, transition: ksim.Trajectory) -> None:
-        tracked_pos = tracked_pos_fn(transition)
-        abs_pos = local_to_absolute(transition.xpos, tracked_pos[body_id], mj_base_id)
-        marker.pos = tuple(abs_pos)
-
-    return _actual_update_fn
-
-
-def create_target_marker_update_fn(
-    body_id: int, mj_base_id: int, target_pos_fn: Callable[[ksim.Trajectory], xax.FrozenDict[int, Array]]
-) -> Callable[[ksim.Marker, ksim.Trajectory], None]:
-    """Factory function to create a marker update for the target positions."""
-
-    def _target_update_fn(marker: ksim.Marker, transition: ksim.Trajectory) -> None:
-        target_pos = target_pos_fn(transition)
-        abs_pos = local_to_absolute(transition.xpos, target_pos[body_id], mj_base_id)
-        marker.pos = tuple(abs_pos)
-
-    return _target_update_fn
 
 
 class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
@@ -319,12 +273,12 @@ class WalkingRnnRefMotionTask(WalkingRnnTask[Config], Generic[Config]):
                 scale=8.0,
             ),
             # kbot_rewards.SensorOrientationPenalty(scale=self.config.orientation_penalty),
-            CartesianReferenceMotionReward(
+            kbot_rewards.CartesianReferenceMotionReward(
                 reference_motion_data=self.reference_motion_data,
                 mj_base_id=self.mj_base_id,
                 scale=1.0,
             ),
-            QposReferenceMotionReward(
+            kbot_rewards.QposReferenceMotionReward(
                 reference_motion_data=self.reference_motion_data,
                 scale=15.0,
                 speed=self.qpos_reference_speed,

@@ -1,0 +1,38 @@
+model_path: "ksim_kbot/kscale-assets/kbot-v2-feet/scene.mjcf"
+bvh_path: "ksim_kbot/reference_motions/walk_normal_kbot.bvh"
+output_path: "ksim_kbot/reference_motions/walk_normal_kbot.npz"
+
+mj_base_name: "floating_base_link"
+bvh_base_name: "CC_Base_Pelvis"
+  
+ctrl_dt: 0.02
+
+mappings:
+  - "CC_Base_L_ThighTwist01:RS03_5"
+  - "CC_Base_R_ThighTwist01:RS03_4"
+  - "CC_Base_L_CalfTwist01:KC_D_401L_L_Shin_Drive"
+  - "CC_Base_R_CalfTwist01:KC_D_401R_R_Shin_Drive"
+  - "CC_Base_L_Foot:KB_D_501L_L_LEG_FOOT"
+  - "CC_Base_R_Foot:KB_D_501R_R_LEG_FOOT"
+  - "CC_Base_L_UpperarmTwist01:RS03_6"
+  - "CC_Base_R_UpperarmTwist01:RS03_3"
+  - "CC_Base_L_ForearmTwist01:KC_C_401L_L_UpForearmDrive"
+  - "CC_Base_R_ForearmTwist01:KC_C_401R_R_UpForearmDrive"
+  - "CC_Base_L_Hand:KB_C_501X_Left_Bayonet_Adapter_Hard_Stop"
+  - "CC_Base_R_Hand:KB_C_501X_Right_Bayonet_Adapter_Hard_Stop"
+
+bvh_offset: [0.02, 0.09, -0.29]
+rotate_bvh_euler: [0.0, 1.5707, 0.0]
+bvh_scaling_factor: 0.01
+constrained_joint_ids: [0, 1, 2, 3, 4, 5, 6]
+
+ik_params:
+  neutral_similarity_weight: 0.1
+  temporal_consistency_weight: 0.1
+  n_restarts: 3
+  error_acceptance_threshold: 1.0e-4
+  ftol: 1.0e-8
+  xtol: 1.0e-8
+  max_nfev: 2000
+
+verbose: false

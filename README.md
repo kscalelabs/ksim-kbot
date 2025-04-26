@@ -21,3 +21,21 @@ See the [ksim documentation](https://docs.kscale.dev/docs/ksim) for help with tr
 ## Deployment
 
 https://gist.github.com/WT-MM/64f5d94d2fee6878cc188ff5691f8b52
+
+## AMP
+
+To generate the reference motion for the AMP task, run (from the root directory):
+
+```bash
+ksim-generate-reference -f ksim_kbot/reference_motions/walk_normal.yaml
+```
+
+This will generate a `walk_normal_kbot.npz` file in the `ksim_kbot/reference_motions` directory.
+
+
+To visualize the reference motion, run:
+
+```bash
+ksim-visualize-reference ksim_kbot/reference_motions/walk_normal_kbot.npz --model ksim_kbot/kscale-assets/kbot-v2-feet/scene.mjcf --base_name floating_base_link
+```
+
