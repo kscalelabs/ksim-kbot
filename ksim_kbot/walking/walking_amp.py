@@ -30,7 +30,7 @@ from ksim.utils.priors import (
 )
 from mujoco_scenes.mjcf import load_mjmodel
 from scipy.spatial.transform import Rotation as R
-from xax.xax.nn import export
+from xax.nn.export import export
 
 import ksim_kbot.rewards as kbot_rewards
 from ksim_kbot import common
@@ -161,6 +161,11 @@ class WalkingAmpTaskConfig(WalkingRnnRefMotionTaskConfig, ksim.AMPConfig):
     discriminator_learning_rate: float = xax.field(
         value=1e-3,
         help="Learning rate for the discriminator.",
+    )
+
+    reference_motion_path: Path = xax.field(
+        value=Path(__file__).parent.parent / "reference_motions" / "walk_normal_kbot.npz",
+        help="The path to the reference motion.",
     )
 
     amp_scale: float = xax.field(value=1.0)
@@ -322,41 +327,42 @@ class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
     def call_discriminator(self, model: Discriminator, motion: Array) -> Array:
         return model.forward(motion).squeeze()
 
-    def create_reference_motion(self, mj_model: mujoco.MjModel) -> MotionReferenceData:
-        root: BvhioJoint = bvhio.readAsHierarchy(self.config.bvh_path)
-        reference_base_id = ksim.get_reference_joint_id(root, self.config.reference_base_name)
-        mj_base_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, self.config.mj_base_name)
+    # def create_reference_motion(self, mj_model: mujoco.MjModel) -> MotionReferenceData:
+    #     root: BvhioJoint = bvhio.readAsHierarchy(self.config.bvh_path)
+    #     reference_base_id = ksim.get_reference_joint_id(root, self.config.reference_base_name)
+    #     mj_base_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, self.config.mj_base_name)
 
-        def rotation_callback(root: BvhioJoint) -> None:
-            euler_rotation = np.array(self.config.rotate_bvh_euler)
-            quat = R.from_euler("xyz", euler_rotation).as_quat(scalar_first=True)
-            root.applyRotation(glm.quat(*quat), bake=True)
+    #     def rotation_callback(root: BvhioJoint) -> None:
+    #         euler_rotation = np.array(self.config.rotate_bvh_euler)
+    #         quat = R.from_euler("xyz", euler_rotation).as_quat(scalar_first=True)
+    #         root.applyRotation(glm.quat(*quat), bake=True)
 
-        reference_motion = ksim.generate_reference_motion(
-            model=mj_model,
-            mj_base_id=mj_base_id,
-            bvh_root=root,
-            bvh_to_mujoco_names=HUMANOID_REFERENCE_MAPPINGS,
-            bvh_base_id=reference_base_id,
-            bvh_offset=np.array(self.config.bvh_offset),
-            bvh_root_callback=rotation_callback,
-            bvh_scaling_factor=self.config.bvh_scaling_factor,
-            ctrl_dt=self.config.ctrl_dt,
-            neutral_qpos=None,
-            neutral_similarity_weight=0.1,
-            temporal_consistency_weight=0.1,
-            n_restarts=3,
-            error_acceptance_threshold=1e-4,
-            ftol=1e-8,
-            xtol=1e-8,
-            max_nfev=2000,
-            verbose=False,
-        )
+    #     reference_motion = ksim.generate_reference_motion(
+    #         model=mj_model,
+    #         mj_base_id=mj_base_id,
+    #         bvh_root=root,
+    #         bvh_to_mujoco_names=HUMANOID_REFERENCE_MAPPINGS,
+    #         bvh_base_id=reference_base_id,
+    #         bvh_offset=np.array(self.config.bvh_offset),
+    #         bvh_root_callback=rotation_callback,
+    #         bvh_scaling_factor=self.config.bvh_scaling_factor,
+    #         ctrl_dt=self.config.ctrl_dt,
+    #         neutral_qpos=None,
+    #         neutral_similarity_weight=0.1,
+    #         temporal_consistency_weight=0.1,
+    #         n_restarts=3,
+    #         error_acceptance_threshold=1e-4,
+    #         ftol=1e-8,
+    #         xtol=1e-8,
+    #         max_nfev=2000,
+    #         verbose=False,
+    #     )
 
-        return reference_motion
+    #     return reference_motion
 
     def get_real_motions(self, mj_model: mujoco.MjModel) -> Array:
-        reference_motion = self.create_reference_motion(mj_model)
+        # reference_motion = self.create_reference_motion(mj_model)
+        reference_motion = MotionReferenceData.load(self.config.reference_motion_path)
         # cartesian_poses = jax.tree.map(lambda x: np.asarray(x.array), reference_motion.cartesian_poses)
         return jnp.array(
             reference_motion.qpos.array[None, ..., 7:]
@@ -597,7 +603,7 @@ class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
         ]
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
-        return ksim.ConstantCurriculum(level=1.0)
+        return ksim.ConstantCurriculum(level=0.1)
 
     def run(self) -> None:
         mj_model: ksim.PhysicsModel = self.get_mujoco_model()
@@ -654,11 +660,11 @@ class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
         """
 
         def deterministic_model_fn(obs: Array, carry: Array) -> tuple[Array, Array]:
-            dist, carry = model.actor.call_flat_obs(obs, carry)
+            dist, carry = model.actor.forward(obs, carry)
             return dist.mode(), carry
 
         def stochastic_model_fn(obs: Array, carry: Array) -> tuple[Array, Array]:
-            dist, carry = model.actor.call_flat_obs(obs, carry)
+            dist, carry = model.actor.forward(obs, carry)
             return dist.sample(seed=jax.random.PRNGKey(0)), carry
 
         if stochastic:
@@ -727,6 +733,7 @@ if __name__ == "__main__":
             render_length_seconds=10.0,
             increase_threshold=5.0,
             decrease_threshold=3.0,
+            amp_scale=2.0,
             # Simulation parameters.
             valid_every_n_seconds=240,
             iterations=8,
