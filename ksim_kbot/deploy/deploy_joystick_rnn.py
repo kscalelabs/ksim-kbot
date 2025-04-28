@@ -180,39 +180,43 @@ class JoystickRNNDeploy(Deploy):
         await self.preflight()
 
         observation = await self.get_observation()
-        target_time = time.time() + self.DT
         end_time = time.time() + episode_length
 
         try:
             while time.time() < end_time:
+                loop_start = time.time()
+
                 action, next_carry = self.model.infer(observation, self.carry)
                 action = np.array(action).reshape(-1)
                 self.carry = np.array(next_carry)
 
-                #! Only scale action on observation but not onto default positions
                 position = action[: len(self.actuator_list)] * self.ACTION_SCALE + self.default_positions_rad
                 velocity = action[len(self.actuator_list) :] * self.ACTION_SCALE
 
-                observation, _ = await asyncio.gather(
-                    self.get_observation(),
+                _, observation = await asyncio.gather(
                     self.send_actions(position, velocity),
+                    self.get_observation(),
                 )
                 self.prev_action = action.copy()
 
-                if time.time() < target_time:
-                    logger.debug(f"Sleeping for {max(0, target_time - time.time())} seconds")
-                    await asyncio.sleep(max(0, target_time - time.time()))
+                sleep_time = (loop_start + self.DT) - time.time()
+                if sleep_time > 0:
+                    logger.debug(f"Sleeping for {sleep_time:.6f} seconds")
+                    await asyncio.sleep(sleep_time)
                     self.rollout_dict["loop_overrun_time"].append(0.0)
                 else:
-                    logger.info(f"Loop overran by {time.time() - target_time} seconds")
-                    self.rollout_dict["loop_overrun_time"].append(time.time() - target_time)
-
-                target_time += self.DT
+                    overrun = -sleep_time
+                    logger.info(f"Loop overran by {overrun:.6f} seconds")
+                    self.rollout_dict["loop_overrun_time"].append(overrun)
 
         except asyncio.CancelledError:
             logger.info("Exiting...")
             await self.postflight()
             raise KeyboardInterrupt
+        except Exception as e:
+            logger.error("Error during run: %s", e)
+            await self.postflight()
+            raise e
 
         await self.postflight()
 
