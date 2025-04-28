@@ -11,6 +11,18 @@ import xax
 from askin import KeyboardController
 from loguru import logger  # to be removed
 
+# Add TensorFlow memory configuration
+import tensorflow as tf
+# Limit memory growth to avoid excessive allocation
+physical_devices = tf.config.list_physical_devices('GPU')
+if physical_devices:
+    for device in physical_devices:
+        try:
+            tf.config.experimental.set_memory_growth(device, True)
+            logger.info(f"Memory growth enabled for {device}")
+        except Exception as e:
+            logger.warning(f"Error setting memory growth: {e}")
+
 from ksim_kbot.deploy.deploy import Deploy
 
 
@@ -49,26 +61,26 @@ class JoystickRNNDeploy(Deploy):
 
         self.default_positions_rad: np.ndarray = np.array(
             [
-                0,
-                0,
-                0,
-                1.4,
-                0,  # right arm
-                0,
-                0,
-                0,
-                -1.4,
-                0,  # left arm
-                -0.23,
-                0,
-                0,
-                -0.441,
-                0.195,  # right leg
-                0.23,
-                0,
-                0,
-                0.441,
-                -0.195,  # left leg
+                0.0,  # dof_right_shoulder_pitch_03
+                0.0,  # dof_right_shoulder_roll_03
+                0.0,  # dof_right_shoulder_yaw_02
+                0.0,  # dof_right_elbow_02
+                0.0,  # dof_right_wrist_00
+                0.0,  # dof_left_shoulder_pitch_03
+                0.0,  # dof_left_shoulder_roll_03
+                0.0,  # dof_left_shoulder_yaw_02
+                0.0,  # dof_left_elbow_02
+                0.0,  # dof_left_wrist_00
+                0.0,  # dof_right_hip_pitch_04
+                0.0,  # dof_right_hip_roll_03
+                0.0,  # dof_right_hip_yaw_03
+                0.0,  # dof_right_knee_04
+                0.0,  # dof_right_ankle_02
+                0.0,  # dof_left_hip_pitch_04
+                0.0,  # dof_left_hip_roll_03
+                0.0,  # dof_left_hip_yaw_03
+                0.0,  # dof_left_knee_04
+                0.0,  # dof_left_ankle_02
             ]
         )
 
@@ -114,7 +126,8 @@ class JoystickRNNDeploy(Deploy):
         )
 
         imu_gyro = np.array([imu.gyro_x, imu.gyro_y, imu.gyro_z])
-        projected_gravity = xax.get_projected_gravity_vector_from_quat(np.array([quat.w, quat.x, quat.y, quat.z]))
+        projected_gravity = xax.rotate_vector_by_quat(np.array([0.0, 0.0, -9.81]), np.array([quat.w, quat.x, quat.y, quat.z]), inverse=True)
+        # projected_gravity = xax.get_projected_gravity_vector_from_quat(np.array([quat.w, quat.x, quat.y, quat.z]))
 
         # * Pos Diff. Difference of current position from default position
         state_dict_pos = {state.actuator_id: state.position for state in actuator_states.states}
@@ -150,8 +163,9 @@ class JoystickRNNDeploy(Deploy):
         self.rollout_dict["imu_accel"].append(imu_accel)
         self.rollout_dict["euler_angles"].append(euler_angles)
 
-        observation = np.concatenate([phase_vec, pos_diff, vel_obs, projected_gravity, cmd, self.gait]).reshape(1, -1)
-
+        # observation = np.concatenate([phase_vec, pos_diff, vel_obs, projected_gravity, cmd, self.gait]).reshape(1, -1)
+        observation = np.concatenate([pos_obs, vel_obs, projected_gravity]).reshape(1, -1)
+        
         return observation
 
     async def warmup(self) -> None:
@@ -185,19 +199,42 @@ class JoystickRNNDeploy(Deploy):
 
         try:
             while time.time() < end_time:
+                # Get action from model
                 action, next_carry = self.model.infer(observation, self.carry)
                 action = np.array(action).reshape(-1)
                 self.carry = np.array(next_carry)
-
-                #! Only scale action on observation but not onto default positions
-                position = action[: len(self.actuator_list)] * self.ACTION_SCALE + self.default_positions_rad
-                velocity = action[len(self.actuator_list) :] * self.ACTION_SCALE
+                
+                logger.debug(f"Action shape: {action.shape}, expected positions: {len(self.actuator_list)}, with action scale: {self.ACTION_SCALE}")
+                
+                # Handle position-only output from model (no velocities)
+                num_actuators = len(self.actuator_list)
+                
+                # Ensure action has at least the right number of positions
+                if action.size == 0:
+                    logger.error("Model returned empty action array")
+                    position = self.default_positions_rad.copy()
+                elif action.size < num_actuators:
+                    logger.warning(f"Action size {action.size} is smaller than needed {num_actuators}")
+                    position = self.default_positions_rad.copy()
+                    position[:action.size] = action[:action.size] * self.ACTION_SCALE + self.default_positions_rad[:action.size]
+                else:
+                    # Use only the positions from the model (truncate if needed)
+                    position = action[:num_actuators] * self.ACTION_SCALE + self.default_positions_rad
+                
+                # Always use zero velocities since model doesn't output them
+                velocity = np.zeros(num_actuators)
+                
+                # Log what we're doing
+                if action.size != num_actuators:
+                    logger.info(f"Using {action.size} position values from model, zero velocities for all joints")
+                else:
+                    logger.debug("Using all position values from model, zero velocities for all joints")
 
                 observation, _ = await asyncio.gather(
                     self.get_observation(),
                     self.send_actions(position, velocity),
                 )
-                self.prev_action = action.copy()
+                self.prev_action = np.concatenate([action[:num_actuators], velocity]) if action.size > 0 else np.zeros(num_actuators * 2)
 
                 if time.time() < target_time:
                     logger.debug(f"Sleeping for {max(0, target_time - time.time())} seconds")
@@ -220,20 +257,35 @@ class JoystickRNNDeploy(Deploy):
 def main() -> None:
     """Parse arguments and run the deploy script."""
     parser = argparse.ArgumentParser(description="Deploy a SavedModel on K-Bot")
-    parser.add_argument("--model_path", type=str, required=True, help="File in assets folder eg. mlp_example")
+    parser.add_argument("--model_path", type=str, required=True, help="Path to model, either in assets folder or absolute path")
     parser.add_argument(
         "--mode", type=str, required=True, choices=["sim", "real-deploy", "real-check"], help="Mode of deployment"
     )
     parser.add_argument("--enable_joystick", action="store_true", help="Enable joystick")
-    parser.add_argument("--scale_action", type=float, default=0.1, help="Action Scale, default 0.1")
+    parser.add_argument("--scale_action", type=float, default=1.0, help="Action Scale, default 0.1")
     parser.add_argument("--ip", type=str, default="localhost", help="IP address of KOS")
     parser.add_argument("--episode_length", type=int, default=30, help="Length of episode in seconds")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+    parser.add_argument("--cpu_only", action="store_true", help="Force CPU inference only")
 
     args = parser.parse_args()
 
+    # Force CPU if requested
+    if args.cpu_only:
+        logger.info("Forcing CPU inference only")
+        os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+
+    # Configure TensorFlow to use less memory
+    tf.config.optimizer.set_jit(False)  # Disable XLA compilation
+    
+    # Configure path
     file_dir = os.path.dirname(os.path.abspath(__file__))
-    model_path = os.path.join(file_dir, "assets", args.model_path)
+    if os.path.isabs(args.model_path):
+        model_path = args.model_path
+        logger.info(f"Using absolute model path: {model_path}")
+    else:
+        model_path = os.path.join(file_dir, "assets", args.model_path)
+        logger.info(f"Using relative model path: {model_path}")
 
     # Configure logging
     log_level = "DEBUG" if args.debug else "INFO"
@@ -242,7 +294,7 @@ def main() -> None:
     logger.remove()
     logger.add(sys.stderr, level=log_level)  # This will keep the default colorized format
 
-    deploy = JoystickRNNDeploy(args.enable_joystick, model_path, args.mode, args.ip, carry_shape=(5, 256))
+    deploy = JoystickRNNDeploy(args.enable_joystick, model_path, args.mode, args.ip, carry_shape=(5, 128))
     deploy.ACTION_SCALE = args.scale_action
 
     try:

@@ -86,14 +86,16 @@ class Deploy(ABC):
         """
         position = np.rad2deg(position)
         velocity = np.rad2deg(velocity)
-        actuator_commands: list[pykos.services.actuator.ActuatorCommand] = [
-            {
+
+        actuator_commands = []
+        for ac in self.actuator_list:
+            # logger.debug(f"Sending action to {ac.joint_name}: position: {position[ac.nn_id]}, velocity: {velocity[ac.nn_id]}")
+            actuator_commands.append({
                 "actuator_id": ac.actuator_id,
                 "position": (position[ac.nn_id]),
                 "velocity": velocity[ac.nn_id],
-            }
-            for ac in self.actuator_list
-        ]
+            })
+        # logger.debug(f"Sending commands: {actuator_commands}")
 
         if self.mode == "real-deploy":
             await self.kos.actuator.command_actuators(actuator_commands)
@@ -265,9 +267,10 @@ class Deploy(ABC):
         try:
             while time.time() < end_time:
                 action = np.array(self.model.infer(observation)).reshape(-1)
+                breakpoint()
 
                 #! Only scale action on observation but not onto default positions
-                position = action[: len(self.actuator_list)] * self.ACTION_SCALE + self.default_positions_rad
+                position = action[: len(self.actuator_list)] * self.ACTION_SCALE #  + self.default_positions_rad
                 velocity = action[len(self.actuator_list) :] * self.ACTION_SCALE
 
                 observation, _ = await asyncio.gather(
