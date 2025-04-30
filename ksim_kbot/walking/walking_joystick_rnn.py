@@ -103,7 +103,7 @@ class KbotRNNActor(eqx.Module):
         joint_vel_n: Array,
         projected_gravity_3: Array,
         # imu_acc_3: Array,
-        imu_gyro_3: Array,
+        # imu_gyro_3: Array,
         lin_vel_cmd_2: Array,
         ang_vel_cmd: Array,
         gait_freq_cmd: Array,
@@ -117,7 +117,7 @@ class KbotRNNActor(eqx.Module):
                 joint_vel_n,  # NUM_JOINTS
                 projected_gravity_3,  # 3
                 # imu_acc_3,  # 3
-                imu_gyro_3,  # 3
+                # imu_gyro_3,  # 3
                 lin_vel_cmd_2,  # 2
                 ang_vel_cmd,  # 1
                 gait_freq_cmd,  # 1
@@ -295,17 +295,10 @@ class KbotWalkingJoystickRNNTask(KbotWalkingTask[Config], Generic[Config]):
         )
 
     def get_mujoco_model(self) -> mujoco.MjModel:
-        mjcf_path = (Path(self.config.robot_urdf_path) / "robot_arms.mjcf").resolve().as_posix()
+        mjcf_path = (Path(self.config.robot_urdf_path) / "robot.mjcf").resolve().as_posix()
         logger.info("Loading MJCF model from %s", mjcf_path)
 
         mj_model = load_mjmodel(mjcf_path, scene=self.config.terrain_type)
-
-        # NOTE: test the difference
-        mj_model.opt.timestep = jnp.array(self.config.dt)
-        mj_model.opt.iterations = 6
-        mj_model.opt.ls_iterations = 6
-        mj_model.opt.disableflags = mjx.DisableBit.EULERDAMP
-        mj_model.opt.solver = mjx.SolverType.CG
 
         return mj_model
 
@@ -320,7 +313,7 @@ class KbotWalkingJoystickRNNTask(KbotWalkingTask[Config], Generic[Config]):
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
         # imu_acc_3 = observations["sensor_observation_imu_acc"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        # imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         projected_gravity_3 = observations["projected_gravity_observation"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         ang_vel_cmd = commands["angular_velocity_command"]
@@ -332,7 +325,7 @@ class KbotWalkingJoystickRNNTask(KbotWalkingTask[Config], Generic[Config]):
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
             # imu_acc_3=imu_acc_3,
-            imu_gyro_3=imu_gyro_3,
+            # imu_gyro_3=imu_gyro_3,
             projected_gravity_3=projected_gravity_3,
             lin_vel_cmd_2=lin_vel_cmd_2,
             ang_vel_cmd=ang_vel_cmd,
@@ -371,8 +364,6 @@ class KbotWalkingJoystickRNNTask(KbotWalkingTask[Config], Generic[Config]):
             timestep_phase_4=timestep_phase_4,
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
-            # imu_acc_3=imu_acc_3,
-            # imu_gyro_3=imu_gyro_3,
             projected_gravity_3=projected_gravity_3,
             lin_vel_cmd_2=lin_vel_cmd_2,
             ang_vel_cmd=ang_vel_cmd,
@@ -533,7 +524,7 @@ class KbotWalkingJoystickRNNTask(KbotWalkingTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m ksim_kbot.walking.walking_joystick_rnn
+    #   python -m ksim_kbot.walking.walking_joystick_rnn disable_multiprocessing=True num_envs=2 batch_size=2
     # To visualize the environment, use the following command:
     #   python -m ksim_kbot.walking.walking_joystick_rnn run_model_viewer=True
     KbotWalkingJoystickRNNTask.launch(
@@ -558,7 +549,7 @@ if __name__ == "__main__":
             learning_rate=1e-4,
             clip_param=0.3,
             max_grad_norm=0.5,
-            valid_every_n_steps=25,
+            valid_every_n_seconds=40,
             save_every_n_steps=25,
             export_for_inference=True,
             only_save_most_recent=False,

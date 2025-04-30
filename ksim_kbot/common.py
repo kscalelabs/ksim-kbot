@@ -117,7 +117,7 @@ class JointPositionObservation(ksim.Observation):
 
     def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         qpos = state.physics_state.data.qpos[7:]  # (N,)
-        diff = qpos - jnp.array(self.default_targets)
+        diff = qpos - self.default_targets.array
         return diff
 
 
@@ -263,9 +263,9 @@ class ResetDefaultJointPosition(ksim.Reset):
         qpos = data.qpos
         match type(data):
             case mujoco.MjData:
-                qpos[:] = self.default_targets
+                qpos[:] = self.default_targets.array
             case mjx.Data:
-                qpos = qpos.at[:].set(self.default_targets)
+                qpos = qpos.at[:].set(self.default_targets.array)
         return ksim.utils.mujoco.update_data_field(data, "qpos", qpos)
 
 

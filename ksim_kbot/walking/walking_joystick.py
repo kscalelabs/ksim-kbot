@@ -19,36 +19,36 @@ from xax.nn.export import export
 from ksim_kbot import common, rewards as kbot_rewards
 from ksim_kbot.standing.standing import MAX_TORQUE, KbotStandingTask, KbotStandingTaskConfig
 
-OBS_SIZE = 20 * 2 + 4 + 3 + 40 + 3  # = position + velocity + phase + projected_gravity + last_action + imu_gyro
+OBS_SIZE = 20 * 2 + 4 + 3 + 40  # = position + velocity + phase + projected_gravity + last_action + imu_gyro
 CMD_SIZE = 2 + 1 + 1
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
-NUM_CRITIC_INPUTS = NUM_INPUTS + 2 + 6 + 3 + 3 + 4 + 3 + 3 + 20 + 1
+NUM_CRITIC_INPUTS = NUM_INPUTS + 2 + 6 + 3 + 3 + 3 + 4 + 3 + 3 + 20 + 1
 NUM_OUTPUTS = 20 * 2  # position + velocity
 JOINT_TARGETS = (
     # right arm
     0.0,
     0.0,
     0.0,
-    1.4,
+    jnp.deg2rad(90.0),
     0.0,
     # left arm
     0.0,
     0.0,
     0.0,
-    -1.4,
+    -jnp.deg2rad(90.0),
     0.0,
     # right leg
-    -0.23,
+    -jnp.deg2rad(13.6),
     0.0,
     0.0,
-    -0.441,
-    0.195,
+    -jnp.deg2rad(29.25),
+    jnp.deg2rad(13.5),
     # left leg
-    0.23,
+    -jnp.deg2rad(13.6),
     0.0,
     0.0,
-    0.441,
-    -0.195,
+    jnp.deg2rad(29.25),
+    -jnp.deg2rad(13.5),
 )
 
 
@@ -89,8 +89,9 @@ class KbotActor(eqx.Module):
         timestep_phase_4: Array,
         joint_pos_n: Array,
         joint_vel_n: Array,
-        imu_acc_3: Array,
-        imu_gyro_3: Array,
+        # imu_acc_3: Array,
+        # imu_gyro_3: Array,
+        projected_gravity_3: Array,
         lin_vel_cmd_2: Array,
         ang_vel_cmd: Array,
         gait_freq_cmd: Array,
@@ -101,8 +102,9 @@ class KbotActor(eqx.Module):
                 timestep_phase_4,
                 joint_pos_n,
                 joint_vel_n,
-                imu_acc_3,
-                imu_gyro_3,
+                # imu_acc_3,
+                # imu_gyro_3,
+                projected_gravity_3,
                 lin_vel_cmd_2,
                 ang_vel_cmd,
                 gait_freq_cmd,
@@ -254,29 +256,29 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             vel_action_noise_type="gaussian",
             ctrl_clip=[
                 # right arm
-                MAX_TORQUE["03"],
-                MAX_TORQUE["03"],
-                MAX_TORQUE["02"],
-                MAX_TORQUE["02"],
-                MAX_TORQUE["00"],
+                48.0,
+                48.0,
+                13.0,
+                13.0,
+                11.0,
                 # left arm
-                MAX_TORQUE["03"],
-                MAX_TORQUE["03"],
-                MAX_TORQUE["02"],
-                MAX_TORQUE["02"],
-                MAX_TORQUE["00"],
+                48.0,
+                48.0,
+                13.0,
+                13.0,
+                11.0,
                 # right leg
-                MAX_TORQUE["04"],
-                MAX_TORQUE["03"],
-                MAX_TORQUE["03"],
-                MAX_TORQUE["04"],
-                MAX_TORQUE["02"],
+                96.0,
+                48.0,
+                48.0,
+                96.0,
+                13.0,
                 # left leg
-                MAX_TORQUE["04"],
-                MAX_TORQUE["03"],
-                MAX_TORQUE["03"],
-                MAX_TORQUE["04"],
-                MAX_TORQUE["02"],
+                96.0,
+                48.0,
+                48.0,
+                96.0,
+                13.0,
             ],
             action_scale=self.config.action_scale,
         )
@@ -304,17 +306,20 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             ksim.RandomJointPositionReset(scale=scale),
             ksim.RandomJointVelocityReset(scale=scale),
             common.ResetDefaultJointPosition(
-                default_targets=(
-                    0.0,
-                    0.0,
-                    1.01,
-                    # quat
-                    1.0,
-                    0.0,
-                    0.0,
-                    0.0,
+                default_targets=xax.HashableArray(
+                    jnp.array(
+                    (
+                        0.0,
+                        0.0,
+                        1.01,
+                        # quat
+                        1.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                    )
+                    + JOINT_TARGETS)
                 )
-                + JOINT_TARGETS
             ),
         ]
 
@@ -366,7 +371,7 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         return [
             common.TimestepPhaseObservation(),
             common.JointPositionObservation(
-                default_targets=JOINT_TARGETS,
+                default_targets=xax.HashableArray(jnp.array(JOINT_TARGETS)),
                 noise=0.05,
             ),
             ksim.JointVelocityObservation(noise=vel_obs_noise),
@@ -478,39 +483,43 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         rewards: list[ksim.Reward] = [
             kbot_rewards.JointDeviationPenalty(
                 scale=-0.1,
-                joint_targets=JOINT_TARGETS,
-                joint_weights=(
-                    # right arm
-                    1.2,
-                    1.0,
-                    1.0,
-                    1.0,
-                    1.0,
-                    # left arm
-                    1.2,
-                    1.0,
-                    1.0,
-                    1.0,
-                    1.0,
-                    # right leg
-                    0.01,  # pitch
-                    1.0,
-                    1.0,
-                    0.01,  # knee
-                    1.0,
-                    # left leg
-                    0.01,  # pitch
-                    1.0,
-                    1.0,
-                    0.01,  # knee
-                    1.0,
+                joint_targets=xax.HashableArray(jnp.array(JOINT_TARGETS)),
+                joint_weights=xax.HashableArray(
+                    jnp.array(
+                        (
+                            # right arm
+                            2.2,
+                            2.0,
+                            2.0,
+                            2.0,
+                            2.0,
+                            # left arm
+                            2.2,
+                            2.0,
+                            2.0,
+                            2.0,
+                            2.0,
+                            # right leg
+                            0.01,  # pitch
+                            1.0,
+                            1.0,
+                            0.01,  # knee
+                            1.0,
+                            # left leg
+                            0.01,  # pitch
+                            1.0,
+                            1.0,
+                            0.01,  # knee
+                            1.0,
+                        ),
+                    ),
                 ),
             ),
             kbot_rewards.KneeDeviationPenalty.create(
                 physics_model=physics_model,
                 knee_names=("dof_left_knee_04", "dof_right_knee_04"),
-                joint_targets=JOINT_TARGETS,
-                scale=-0.1,
+                joint_targets=xax.HashableArray(jnp.array(JOINT_TARGETS)),
+                scale=-0.15,
             ),
             kbot_rewards.HipDeviationPenalty.create(
                 physics_model=physics_model,
@@ -520,8 +529,8 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                     "dof_left_hip_roll_03",
                     "dof_left_hip_yaw_03",
                 ),
-                joint_targets=JOINT_TARGETS,
-                scale=-0.25,
+                joint_targets=xax.HashableArray(jnp.array(JOINT_TARGETS)),
+                scale=-0.3,
             ),
             kbot_rewards.TerminationPenalty(scale=-1.0),
             kbot_rewards.SensorOrientationPenalty(scale=-2.0),
@@ -546,13 +555,6 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
                 stand_still_threshold=self.config.stand_still_threshold,
             ),
             kbot_rewards.FeetSlipPenalty(scale=-0.25),
-            kbot_rewards.StandStillReward(
-                scale=50.0,
-                linear_velocity_cmd_name="linear_velocity_command",
-                angular_velocity_cmd_name="angular_velocity_command",
-                joint_targets=JOINT_TARGETS,
-                stand_still_threshold=self.config.stand_still_threshold,
-            ),
             # force penalties
             kbot_rewards.JointPositionLimitPenalty.create(
                 physics_model=physics_model,
@@ -589,8 +591,9 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
         timestep_phase_4 = observations["timestep_phase_observation"]
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
-        imu_acc_3 = observations["sensor_observation_imu_acc"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        # imu_acc_3 = observations["sensor_observation_imu_acc"]
+        # imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        projected_gravity_3 = observations["projected_gravity_observation"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         ang_vel_cmd = commands["angular_velocity_command"]
         gait_freq_cmd = commands["gait_frequency_command"]
@@ -600,8 +603,9 @@ class KbotWalkingTask(KbotStandingTask[Config], Generic[Config]):
             timestep_phase_4=timestep_phase_4,
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
-            imu_acc_3=imu_acc_3,
-            imu_gyro_3=imu_gyro_3,
+            # imu_acc_3=imu_acc_3,
+            # imu_gyro_3=imu_gyro_3,
+            projected_gravity_3=projected_gravity_3,
             lin_vel_cmd_2=lin_vel_cmd_2,
             ang_vel_cmd=ang_vel_cmd,
             gait_freq_cmd=gait_freq_cmd,
