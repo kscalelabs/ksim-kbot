@@ -22,9 +22,7 @@ from bvhio.lib.hierarchy import Joint as BvhioJoint
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from ksim.utils.priors import (
-    MotionReferenceData,
     generate_reference_motion,
-    get_local_xpos,
     get_reference_joint_id,
     visualize_reference_motion,
 )
@@ -44,12 +42,11 @@ from ksim_kbot.walking.walking_reference_motion_rnn import (
 from ksim_kbot.walking.walking_rnn import RnnActor, RnnCritic, RnnModel
 
 NUM_JOINTS = 20
-NUM_ACTOR_INPUTS_REF -= 6
+NUM_ACTOR_INPUTS_REF -= 8
 NUM_CRITIC_INPUTS += (
-    -6
-    + NUM_JOINTS  # reference_qpos
-    + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # reference_local_xpos
-    + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # tracked_local_xpos
+    -8 + NUM_JOINTS  # reference_qpos
+    # + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # reference_local_xpos
+    # + (len(HUMANOID_REFERENCE_MAPPINGS) * 3)  # tracked_local_xpos
 )
 
 
@@ -96,7 +93,7 @@ class Discriminator(eqx.Module):
         depth: int,
         num_frames: int,
     ) -> None:
-        num_inputs = NUM_JOINTS
+        num_inputs = NUM_JOINTS + 7
         num_outputs = 1
 
         layers: list[Callable[[Array], Array]] = []
@@ -162,12 +159,14 @@ class WalkingAmpTaskConfig(WalkingRnnRefMotionTaskConfig, ksim.AMPConfig):
         value=1e-3,
         help="Learning rate for the discriminator.",
     )
-
     reference_motion_path: Path = xax.field(
         value=Path(__file__).parent.parent / "reference_motions" / "walk_normal_kbot.npz",
         help="The path to the reference motion.",
     )
-
+    use_freejoint: bool = xax.field(
+        value=True,
+        help="Whether to use a freejoint for the reference motion.",
+    )
     amp_scale: float = xax.field(value=1.0)
 
 
@@ -175,11 +174,10 @@ Config = TypeVar("Config", bound=WalkingAmpTaskConfig)
 
 
 class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
-    config: Config
-    reference_motion_data: MotionReferenceData
-    tracked_body_ids: tuple[int, ...]
-    mj_base_id: int
-    qpos_reference_speed: float
+    def __init__(self, config: Config) -> None:
+        super().__init__(config)
+        self.qpos_reference_speed = 1.8
+        self.reference_motion = ksim.MotionReferenceData.load(self.config.reference_motion_path)
 
     def get_policy_model(self, key: PRNGKeyArray) -> RnnModel:
         return RnnModel(
@@ -214,7 +212,7 @@ class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
         carry: Array,
     ) -> tuple[distrax.Distribution, Array]:
         """Overrides the base method to define actor inputs for this task."""
-        timestep_1 = observations["timestep_observation"]
+        # timestep_1 = observations["timestep_observation"]
         joint_pos_j = observations["joint_position_observation"]
         joint_vel_j = observations["joint_velocity_observation"]
         imu_acc_3 = observations["sensor_observation_imu_acc"]
@@ -222,8 +220,8 @@ class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
 
         obs_n = jnp.concatenate(
             [
-                jnp.cos(timestep_1),  # 1
-                jnp.sin(timestep_1),  # 1
+                # jnp.cos(timestep_1),  # 1
+                # jnp.sin(timestep_1),  # 1
                 joint_pos_j,  # NUM_JOINTS
                 joint_vel_j / 10.0,  # NUM_JOINTS
                 imu_acc_3 / 50.0,  # 3
@@ -245,7 +243,7 @@ class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
         carry: Array,
     ) -> tuple[Array, Array]:
         """Overrides the base method to include reference observations for the critic."""
-        timestep_1 = observations["timestep_observation"]
+        # timestep_1 = observations["timestep_observation"]
         dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
         com_inertia_n = observations["center_of_mass_inertia_observation"]
@@ -259,13 +257,13 @@ class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
         # reference observations
         ref_qpos_j = observations["reference_qpos_observation"]
-        ref_local_xpos_n = observations["reference_local_xpos_observation"]
-        tracked_local_xpos_n = observations["tracked_local_xpos_observation"]
+        # ref_local_xpos_n = observations["reference_local_xpos_observation"]
+        # tracked_local_xpos_n = observations["tracked_local_xpos_observation"]
 
         obs_n = jnp.concatenate(
             [
-                jnp.cos(timestep_1),  # 1
-                jnp.sin(timestep_1),  # 1
+                # jnp.cos(timestep_1),  # 1
+                # jnp.sin(timestep_1),  # 1
                 dh_joint_pos_j,  # NUM_JOINTS
                 dh_joint_vel_j / 10.0,  # NUM_JOINTS
                 com_inertia_n,  # 160
@@ -279,8 +277,8 @@ class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
                 ang_vel_obs_3,  # 3
                 # reference observations
                 ref_qpos_j,  # NUM_JOINTS
-                ref_local_xpos_n,  # num_tracked_bodies * 3
-                tracked_local_xpos_n,  # num_tracked_bodies * 3
+                # ref_local_xpos_n,  # num_tracked_bodies * 3
+                # tracked_local_xpos_n,  # num_tracked_bodies * 3
             ],
             axis=-1,
         )
@@ -306,7 +304,9 @@ class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
         return [
             ksim.RandomJointPositionReset(),
             ksim.RandomJointVelocityReset(),
-            # ksim.InitialMotionStateReset(),
+            ksim.InitialMotionStateReset(
+                reference_motion=self.reference_motion_data,
+            ),
         ]
 
     def get_discriminator_model(self, key: PRNGKeyArray) -> Discriminator:
@@ -327,54 +327,27 @@ class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
     def call_discriminator(self, model: Discriminator, motion: Array) -> Array:
         return model.forward(motion).squeeze()
 
-    # def create_reference_motion(self, mj_model: mujoco.MjModel) -> MotionReferenceData:
-    #     root: BvhioJoint = bvhio.readAsHierarchy(self.config.bvh_path)
-    #     reference_base_id = ksim.get_reference_joint_id(root, self.config.reference_base_name)
-    #     mj_base_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, self.config.mj_base_name)
-
-    #     def rotation_callback(root: BvhioJoint) -> None:
-    #         euler_rotation = np.array(self.config.rotate_bvh_euler)
-    #         quat = R.from_euler("xyz", euler_rotation).as_quat(scalar_first=True)
-    #         root.applyRotation(glm.quat(*quat), bake=True)
-
-    #     reference_motion = ksim.generate_reference_motion(
-    #         model=mj_model,
-    #         mj_base_id=mj_base_id,
-    #         bvh_root=root,
-    #         bvh_to_mujoco_names=HUMANOID_REFERENCE_MAPPINGS,
-    #         bvh_base_id=reference_base_id,
-    #         bvh_offset=np.array(self.config.bvh_offset),
-    #         bvh_root_callback=rotation_callback,
-    #         bvh_scaling_factor=self.config.bvh_scaling_factor,
-    #         ctrl_dt=self.config.ctrl_dt,
-    #         neutral_qpos=None,
-    #         neutral_similarity_weight=0.1,
-    #         temporal_consistency_weight=0.1,
-    #         n_restarts=3,
-    #         error_acceptance_threshold=1e-4,
-    #         ftol=1e-8,
-    #         xtol=1e-8,
-    #         max_nfev=2000,
-    #         verbose=False,
-    #     )
-
-    #     return reference_motion
-
     def get_real_motions(self, mj_model: mujoco.MjModel) -> Array:
-        # reference_motion = self.create_reference_motion(mj_model)
-        reference_motion = MotionReferenceData.load(self.config.reference_motion_path)
+        reference_motion = ksim.MotionReferenceData.load(self.config.reference_motion_path)
         # cartesian_poses = jax.tree.map(lambda x: np.asarray(x.array), reference_motion.cartesian_poses)
-        return jnp.array(
-            reference_motion.qpos.array[None, ..., 7:]
-        )  # Remove the root joint absolute coordinates + orientation.
+        if self.config.use_freejoint:
+            return jnp.array(reference_motion.qpos.array[None, ..., :])
+        else:
+            return jnp.array(reference_motion.qpos.array[None, ..., 7:])
 
     def trajectory_to_motion(self, trajectory: ksim.Trajectory) -> Array:
-        return trajectory.qpos[..., 7:]  # Remove the root joint absolute coordinates + orientation.
+        if self.config.use_freejoint:
+            return trajectory.qpos[..., :]
+        else:
+            return trajectory.qpos[..., 7:]
 
     def motion_to_qpos(self, motion: Array) -> Array:
-        qpos_root_init = jnp.array([0.0, 0.0, 1.5])
-        qpos_root_broadcast = jnp.broadcast_to(qpos_root_init, (*motion.shape[:-1], 3))
-        return jnp.concatenate([qpos_root_broadcast, motion], axis=-1)
+        if self.config.use_freejoint:
+            return motion
+        else:
+            qpos_root_init = jnp.array([0.0, 0.0, 1.5])
+            qpos_root_broadcast = jnp.broadcast_to(qpos_root_init, (*motion.shape[:-1], 3))
+            return jnp.concatenate([qpos_root_broadcast, motion], axis=-1)
 
     def get_ppo_variables(
         self,
@@ -444,16 +417,16 @@ class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
         else:
             action_j = action_dist_j.sample(seed=rng)
 
-        # Getting the local cartesian positions for all tracked bodies.
-        tracked_positions: dict[int, Array] = {}
-        for body_id in self.tracked_body_ids:
-            body_pos = get_local_xpos(physics_state.data.xpos, body_id, self.mj_base_id)
-            tracked_positions[body_id] = jnp.array(body_pos)
+        # # Getting the local cartesian positions for all tracked bodies.
+        # tracked_positions: dict[int, Array] = {}
+        # for body_id in self.tracked_body_ids:
+        #     body_pos = get_local_xpos(physics_state.data.xpos, body_id, self.mj_base_id)
+        #     tracked_positions[body_id] = jnp.array(body_pos)
 
         return ksim.Action(
             action=action_j,
             carry=(actor_carry, critic_carry_in),
-            aux_outputs=xax.FrozenDict({"tracked_pos": xax.FrozenDict(tracked_positions)}),
+            # aux_outputs=xax.FrozenDict({"tracked_pos": xax.FrozenDict(tracked_positions)}),
         )
 
     def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
@@ -527,19 +500,19 @@ class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
                 foot_right_geom_names="KB_D_501R_R_LEG_FOOT_collision_box",
                 floor_geom_names="floor",
             ),
-            ksim.TimestepObservation(),
+            # ksim.TimestepObservation(),
             common.ReferenceQposObservation(
                 reference_motion_data=self.reference_motion_data,
                 speed=self.qpos_reference_speed,
             ),
-            common.ReferenceLocalXposObservation(
-                reference_motion_data=self.reference_motion_data,
-                tracked_body_ids=self.tracked_body_ids,
-            ),
-            common.TrackedLocalXposObservation(
-                tracked_body_ids=self.tracked_body_ids,
-                mj_base_id=self.mj_base_id,
-            ),
+            # common.ReferenceLocalXposObservation(
+            #     reference_motion_data=self.reference_motion_data,
+            #     tracked_body_ids=self.tracked_body_ids,
+            # ),
+            # common.TrackedLocalXposObservation(
+            #     tracked_body_ids=self.tracked_body_ids,
+            #     mj_base_id=self.mj_base_id,
+            # ),
         ]
 
     def get_actuators(
@@ -606,38 +579,41 @@ class WalkingAmpTask(ksim.AMPTask[Config], Generic[Config]):
         return ksim.ConstantCurriculum(level=0.1)
 
     def run(self) -> None:
-        mj_model: ksim.PhysicsModel = self.get_mujoco_model()
-        root: BvhioJoint = bvhio.readAsHierarchy(self.config.bvh_path)
-        reference_base_id = get_reference_joint_id(root, self.config.reference_base_name)
-        self.mj_base_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, self.config.mj_base_name)
-        self.qpos_reference_speed = 1.8
+        if not self.config.reference_motion_path:
+            mj_model: ksim.PhysicsModel = self.get_mujoco_model()
+            root: BvhioJoint = bvhio.readAsHierarchy(self.config.bvh_path)
+            reference_base_id = get_reference_joint_id(root, self.config.reference_base_name)
+            self.mj_base_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, self.config.mj_base_name)
+            self.qpos_reference_speed = 1.8
 
-        def rotation_callback(root: BvhioJoint) -> None:
-            euler_rotation = np.array(self.config.rotate_bvh_euler)
-            quat = R.from_euler("xyz", euler_rotation).as_quat(scalar_first=True)
-            root.applyRotation(glm.quat(*quat), bake=True)
+            def rotation_callback(root: BvhioJoint) -> None:
+                euler_rotation = np.array(self.config.rotate_bvh_euler)
+                quat = R.from_euler("xyz", euler_rotation).as_quat(scalar_first=True)
+                root.applyRotation(glm.quat(*quat), bake=True)
 
-        self.reference_motion_data = generate_reference_motion(
-            model=mj_model,
-            mj_base_id=self.mj_base_id,
-            bvh_root=root,
-            bvh_to_mujoco_names=HUMANOID_REFERENCE_MAPPINGS,
-            bvh_base_id=reference_base_id,
-            ctrl_dt=self.config.ctrl_dt,
-            bvh_offset=np.array(self.config.bvh_offset),
-            bvh_root_callback=rotation_callback,
-            bvh_scaling_factor=self.config.bvh_scaling_factor,
-            neutral_qpos=None,
-            neutral_similarity_weight=0.1,
-            temporal_consistency_weight=0.1,
-            n_restarts=3,
-            error_acceptance_threshold=1e-4,
-            ftol=1e-8,
-            xtol=1e-8,
-            max_nfev=2000,
-            verbose=False,
-        )
-        self.tracked_body_ids = tuple(self.reference_motion_data.cartesian_poses.keys())
+            self.reference_motion_data = generate_reference_motion(
+                model=mj_model,
+                mj_base_id=self.mj_base_id,
+                bvh_root=root,
+                bvh_to_mujoco_names=HUMANOID_REFERENCE_MAPPINGS,
+                bvh_base_id=reference_base_id,
+                ctrl_dt=self.config.ctrl_dt,
+                bvh_offset=np.array(self.config.bvh_offset),
+                bvh_root_callback=rotation_callback,
+                bvh_scaling_factor=self.config.bvh_scaling_factor,
+                neutral_qpos=None,
+                neutral_similarity_weight=0.1,
+                temporal_consistency_weight=0.1,
+                n_restarts=3,
+                error_acceptance_threshold=1e-4,
+                ftol=1e-8,
+                xtol=1e-8,
+                max_nfev=2000,
+                verbose=False,
+            )
+            self.tracked_body_ids = tuple(self.reference_motion_data.cartesian_poses.keys())
+        else:
+            self.reference_motion_data = ksim.MotionReferenceData.load(self.config.reference_motion_path)
 
         if self.config.visualize_reference_motion:
             np_reference_qpos = np.asarray(self.reference_motion_data.qpos)
@@ -757,5 +733,6 @@ if __name__ == "__main__":
             export_for_inference=True,
             only_save_most_recent=False,
             visualize_reference_motion=False,
+            reference_motion_path="/Users/pfb30/.loco-mujoco-caches/AMASS/Kbot/KIT/KIT/3/walking_slow08_poses.npz.npz",
         ),
     )
