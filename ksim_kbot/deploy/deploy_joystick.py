@@ -22,26 +22,30 @@ class JoystickDeploy(FixedArmDeploy):
 
         self.default_positions_rad: np.ndarray = np.array(
             [
+                # right arm
                 0,
                 0,
                 0,
+                1.57,
                 0,
-                0,  # right arm
-                0,
-                0,
-                0,
-                0,
-                0,  # left arm
-                -0.23,
+                # left arm
                 0,
                 0,
-                -0.441,
-                0.195,  # right leg
-                0.23,
+                0,
+                -1.57,
+                0,
+                # right leg
+                -0.237,
                 0,
                 0,
-                0.441,
-                -0.195,  # left leg
+                -0.51,
+                0.2356,
+                # left leg
+                0.237,
+                0,
+                0,
+                0.51,
+                -0.2356,
             ]
         )
 

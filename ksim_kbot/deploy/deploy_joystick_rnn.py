@@ -6,12 +6,38 @@ import os
 import sys
 import time
 
+import jax.numpy as jnp
 import numpy as np
-import xax
 from askin import KeyboardController
 from loguru import logger  # to be removed
 
 from ksim_kbot.deploy.deploy import Deploy
+
+
+def get_projected_gravity_vector_from_quat(quat, eps: float = 1e-6):
+    """Calculates the gravity vector projected onto the local frame given a quaternion orientation.
+
+    Args:
+        quat: A quaternion (w,x,y,z) representing the orientation, shape (*, 4).
+        eps: A small epsilon value to avoid division by zero.
+
+    Returns:
+        A 3D vector representing the gravity in the local frame, shape (*, 3).
+    """
+    # Normalize quaternion
+    quat = quat / (jnp.linalg.norm(quat, axis=-1, keepdims=True) + eps)
+    w, x, y, z = jnp.split(quat, 4, axis=-1)
+
+    # Gravity vector in world frame is [0, 0, -1] (pointing down)
+    # Rotate gravity vector using quaternion rotation
+
+    # Calculate quaternion rotation: q * [0,0,-1] * q^-1
+    gx = 2 * (x * z - w * y)
+    gy = 2 * (y * z + w * x)
+    gz = w * w - x * x - y * y + z * z
+
+    # Note: We're rotating [0,0,-1], so we negate gz to match the expected direction
+    return jnp.concatenate([gx, gy, -gz], axis=-1)
 
 
 class JoystickCommand:
@@ -49,26 +75,30 @@ class JoystickRNNDeploy(Deploy):
 
         self.default_positions_rad: np.ndarray = np.array(
             [
+                # right arm
                 0,
                 0,
                 0,
-                1.4,
-                0,  # right arm
+                1.57,
+                0,
+                # left arm
                 0,
                 0,
                 0,
-                -1.4,
-                0,  # left arm
-                -0.23,
+                -1.57,
+                0,
+                # right leg
+                -0.237,
                 0,
                 0,
-                -0.441,
-                0.195,  # right leg
-                0.23,
+                -0.51,
+                0.2356,
+                # left leg
+                0.237,
                 0,
                 0,
-                0.441,
-                -0.195,  # left leg
+                0.51,
+                -0.2356,
             ]
         )
 
@@ -114,7 +144,7 @@ class JoystickRNNDeploy(Deploy):
         )
 
         imu_gyro = np.array([imu.gyro_x, imu.gyro_y, imu.gyro_z])
-        projected_gravity = xax.get_projected_gravity_vector_from_quat(np.array([quat.w, quat.x, quat.y, quat.z]))
+        projected_gravity = get_projected_gravity_vector_from_quat(np.array([quat.w, quat.x, quat.y, quat.z]))
 
         # * Pos Diff. Difference of current position from default position
         state_dict_pos = {state.actuator_id: state.position for state in actuator_states.states}
@@ -255,7 +285,7 @@ def main() -> None:
 
 """
 python -m ksim_kbot.deploy.deploy_joystick_rnn \
---model_path noisy_joystick_example/tf_model_1407 \
+--model_path noisy_joystick_example/tf_model_300 \
 --mode sim \
 --scale_action 1.0 \
 --debug
