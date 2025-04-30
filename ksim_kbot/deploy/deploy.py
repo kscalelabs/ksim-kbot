@@ -229,7 +229,7 @@ class Deploy(ABC):
 
         await self.kos.actuator.command_actuators(reset_commands)
 
-        logger.warning(f"Deploying with Action Scale: {self.ACTION_SCALE}")
+        # logger.warning(f"Deploying with Action Scale: {self.ACTION_SCALE}")
         if self.mode == "real-deploy":
             input("Press Enter to continue...")
 
