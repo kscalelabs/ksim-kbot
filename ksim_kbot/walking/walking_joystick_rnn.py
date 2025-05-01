@@ -14,7 +14,6 @@ import ksim
 import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray
-from mujoco import mjx
 from mujoco_scenes.mjcf import load_mjmodel
 from xax.nn.export import export
 
@@ -91,7 +90,6 @@ class KbotRNNActor(eqx.Module):
             out_features=NUM_OUTPUTS * 2,
             key=key,
         )
-
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
@@ -417,9 +415,10 @@ class KbotWalkingJoystickRNNTask(KbotWalkingTask[Config], Generic[Config]):
                 values=value.squeeze(-1),
             )
 
-            initial_carry = self.get_initial_model_carry(rng)
             next_carry = jax.tree.map(
-                lambda x, y: jnp.where(transition.done, x, y), initial_carry, (next_actor_carry, next_critic_carry)
+                lambda x, y: jnp.where(transition.done, x, y),
+                self.get_initial_model_carry(rng),
+                (next_actor_carry, next_critic_carry),
             )
 
             return next_carry, transition_ppo_variables
